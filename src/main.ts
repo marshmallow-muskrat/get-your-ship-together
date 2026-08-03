@@ -155,10 +155,10 @@ function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition
   const model = fitModel(target, kind === 'ship' ? 5.8 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
 
   if (kind === 'astronaut') {
-    model.position.set(-4.6, 0.45, 5.1);
+    model.position.set(-4.1, 0.75, 5.1);
     model.rotation.y = 0;
   } else if (kind === 'mech') {
-    model.position.set(4.6, 0.8, -1.2);
+    model.position.set(4.1, 0.75, -1.2);
     model.rotation.y = 0;
   } else {
     model.position.set(0.0, 7.7, -6.8);
