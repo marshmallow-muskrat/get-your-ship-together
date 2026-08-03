@@ -28,7 +28,7 @@ const assetUrl = (relativePath: string): string => encodeURI(`${SPACE_KIT_ROOT}/
 const heroes: HeroDefinition[] = [
   {
     id: 'bee',
-    name: 'Barbara',
+    name: 'Boswell',
     species: 'The Bee',
     accent: '#f5ae42',
     astronaut: assetUrl('Characters/GLTF/Astronaut_BarbaraTheBee.gltf'),
@@ -37,7 +37,7 @@ const heroes: HeroDefinition[] = [
   },
   {
     id: 'flamingo',
-    name: 'Fernando',
+    name: 'Fitzwilliam',
     species: 'The Flamingo',
     accent: '#ff7c9a',
     astronaut: assetUrl('Characters/GLTF/Astronaut_FernandoTheFlamingo.gltf'),
@@ -46,7 +46,7 @@ const heroes: HeroDefinition[] = [
   },
   {
     id: 'frog',
-    name: 'Finn',
+    name: 'Fortunato',
     species: 'The Frog',
     accent: '#71f6da',
     astronaut: assetUrl('Characters/GLTF/Astronaut_FinnTheFrog.gltf'),
@@ -55,7 +55,7 @@ const heroes: HeroDefinition[] = [
   },
   {
     id: 'red-panda',
-    name: 'Rae',
+    name: 'Rutherford',
     species: 'The Red Panda',
     accent: '#ff876b',
     astronaut: assetUrl('Characters/GLTF/Astronaut_RaeTheRedPanda.gltf'),
