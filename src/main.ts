@@ -91,7 +91,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMappingExposure = 0.88;
 
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
 const roomEnvironment = new RoomEnvironment();
@@ -101,7 +101,7 @@ pmremGenerator.dispose();
 
 const clock = new THREE.Clock();
 const selectedHeroGroup = new THREE.Group();
-const selectedHeroLight = new THREE.PointLight('#f5ae42', 11, 24, 2);
+const selectedHeroLight = new THREE.PointLight('#f5ae42', 4.2, 24, 2);
 const floaters: Floater[] = [];
 const loadedModels = new Map<string, THREE.Object3D | null>();
 let selectedIndex = 0;
@@ -172,9 +172,11 @@ function enhanceModelMaterials(root: THREE.Object3D): void {
     const enhancedMaterials = sourceMaterials.map((sourceMaterial) => {
       const material = sourceMaterial.clone();
       if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
-        material.metalness = Math.max(material.metalness, 0.22);
-        material.roughness = Math.min(material.roughness, 0.52);
-        material.envMapIntensity = 1.35;
+        // Keep the kit's painted, low-poly look while retaining restrained reflections.
+        material.color.multiplyScalar(0.92);
+        material.metalness = Math.max(material.metalness, 0.1);
+        material.roughness = Math.max(material.roughness, 0.58);
+        material.envMapIntensity = 0.68;
       }
       material.needsUpdate = true;
       return material;
@@ -196,7 +198,7 @@ function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition
     model.rotation.y = 0;
     centerModel(model, 3.4, 4.0, 0);
   } else {
-    model.rotation.y = Math.PI;
+    model.rotation.set(THREE.MathUtils.degToRad(30), Math.PI, 0);
     centerModel(model, 0, 9.9, 0);
     floaters.push({ object: model, baseY: model.position.y, phase: selectedIndex * 0.8 });
   }
@@ -211,7 +213,7 @@ function showSelectedHero(index: number): void {
   selectedHeroGroup.add(selectedHeroLight);
   selectedHeroLight.color.set(hero.accent);
   selectedHeroLight.position.set(0, 6, 2);
-  selectedHeroLight.intensity = 11;
+  selectedHeroLight.intensity = 4.2;
 
   addModelToSelection(loadedModels.get(hero.astronaut) ?? null, hero, 'astronaut');
   addModelToSelection(loadedModels.get(hero.mech) ?? null, hero, 'mech');
@@ -260,26 +262,26 @@ function updateLoading(loaded: number, total: number): void {
 }
 
 function createLighting(): void {
-  scene.add(new THREE.AmbientLight('#a7b8ff', 1.55));
-  scene.add(new THREE.HemisphereLight('#b9c9ff', '#071126', 1.15));
+  scene.add(new THREE.AmbientLight('#a7b8ff', 0.62));
+  scene.add(new THREE.HemisphereLight('#b9c9ff', '#071126', 0.58));
 
-  const key = new THREE.DirectionalLight('#eef2ff', 3.4);
+  const key = new THREE.DirectionalLight('#eef2ff', 1.8);
   key.position.set(-14, 24, 18);
   scene.add(key);
 
-  const rim = new THREE.DirectionalLight('#8f64ff', 3.2);
+  const rim = new THREE.DirectionalLight('#8f64ff', 1.35);
   rim.position.set(18, 16, -18);
   scene.add(rim);
 
-  const frontFill = new THREE.PointLight('#fff2d5', 8, 30, 2);
+  const frontFill = new THREE.PointLight('#fff2d5', 2.4, 30, 2);
   frontFill.position.set(0, 8, 15);
   scene.add(frontFill);
 
-  const cyanFill = new THREE.PointLight('#4edbff', 12, 32, 2);
+  const cyanFill = new THREE.PointLight('#4edbff', 3.2, 32, 2);
   cyanFill.position.set(-12, 6, 8);
   scene.add(cyanFill);
 
-  const magentaRim = new THREE.PointLight('#d76cff', 10, 32, 2);
+  const magentaRim = new THREE.PointLight('#d76cff', 2.5, 32, 2);
   magentaRim.position.set(13, 9, -10);
   scene.add(magentaRim);
 }
@@ -297,7 +299,7 @@ function animate(): void {
 
   selectedHeroLight.position.x = Math.sin(elapsed * 0.55) * 4.2;
   selectedHeroLight.position.z = 5 + Math.cos(elapsed * 0.55) * 1.8;
-  selectedHeroLight.intensity = 10.5 + Math.sin(elapsed * 0.8) * 0.8;
+  selectedHeroLight.intensity = 4.2 + Math.sin(elapsed * 0.8) * 0.25;
 
   renderer.render(scene, camera);
 }
