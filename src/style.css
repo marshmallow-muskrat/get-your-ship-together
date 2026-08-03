@@ -67,7 +67,8 @@ button {
 .selected-identity,
 .lower-hud,
 .bay-selector,
-.select-hero-button {
+.select-hero-button,
+.corner-actions {
   pointer-events: auto;
 }
 
@@ -163,7 +164,7 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 0.6rem;
-  transform: translateY(0.75rem);
+  transform: translateY(1rem);
 }
 
 .bay-selector {
@@ -171,8 +172,8 @@ button {
   align-items: flex-end;
   justify-content: center;
   gap: clamp(0.42rem, 0.8vw, 0.85rem);
-  width: min(100%, 47rem);
-  padding: 0.95rem 0.4rem 0.3rem;
+  width: min(100%, 49rem);
+  padding: 1.15rem 0.4rem 0.3rem;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -183,8 +184,8 @@ button {
 
 .bay-button {
   position: relative;
-  flex: 0 0 clamp(6.25rem, 10vw, 8.4rem);
-  height: clamp(7.6rem, 13.5vh, 9.5rem);
+  flex: 0 0 clamp(6.6rem, 10.7vw, 8.9rem);
+  height: clamp(9.5rem, 17vh, 12.5rem);
   overflow: hidden;
   padding: 0;
   border: 1px solid rgba(231, 238, 255, 0.48);
@@ -291,6 +292,16 @@ button {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   transition: background 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+
+.corner-actions {
+  position: absolute;
+  right: clamp(1.4rem, 3vw, 3.4rem);
+  bottom: clamp(0.9rem, 2.25vw, 2.65rem);
+  left: clamp(1.4rem, 3vw, 3.4rem);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
 }
 
 .select-hero-button:hover,
@@ -412,8 +423,8 @@ button {
   }
 
   .bay-button {
-    flex-basis: 5.4rem;
-    height: 7rem;
+    flex-basis: 5.6rem;
+    height: 8rem;
   }
 
   .hero-card-info {
@@ -433,4 +444,15 @@ button {
     padding: 0.5rem 0.8rem;
     font-size: 0.55rem;
   }
+
+  .lower-hud {
+    transform: translateY(0.5rem);
+  }
+
+  .corner-actions {
+    right: 0.7rem;
+    bottom: 0.65rem;
+    left: 0.7rem;
+  }
+
 }

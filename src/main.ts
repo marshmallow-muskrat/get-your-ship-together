@@ -75,6 +75,7 @@ const selectedHero = document.querySelector<HTMLElement>('#selected-hero')!;
 const selectedSpecies = document.querySelector<HTMLElement>('#selected-species')!;
 const selectedNumber = document.querySelector<HTMLElement>('#selected-number')!;
 const selectHeroButton = document.querySelector<HTMLButtonElement>('#select-hero-button')!;
+const exitButtons = document.querySelectorAll<HTMLButtonElement>('.exit-button');
 
 if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector || !selectedHero || !selectedSpecies || !selectedNumber || !selectHeroButton) {
   throw new Error('The hero selection screen is missing a required element.');
@@ -198,7 +199,9 @@ function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition
     model.rotation.y = 0;
     centerModel(model, 3.4, 4.0, 0);
   } else {
-    model.rotation.set(THREE.MathUtils.degToRad(30), Math.PI, 0);
+    // The kit's forward axis is already aimed toward the camera; pitch the ship
+    // toward the viewer so the upper surfaces are easy to read.
+    model.rotation.set(THREE.MathUtils.degToRad(42), 0, 0);
     centerModel(model, 0, 9.9, 0);
     floaters.push({ object: model, baseY: model.position.y, phase: selectedIndex * 0.8 });
   }
@@ -327,6 +330,12 @@ async function init(): Promise<void> {
   selectHeroButton.addEventListener('click', () => {
     selectHeroButton.classList.add('is-selected');
     window.setTimeout(() => selectHeroButton.classList.remove('is-selected'), 900);
+  });
+  exitButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      button.classList.add('is-selected');
+      window.setTimeout(() => button.classList.remove('is-selected'), 900);
+    });
   });
   loadingBar.style.width = '100%';
   loadingStatus.textContent = 'Crew selection ready';
