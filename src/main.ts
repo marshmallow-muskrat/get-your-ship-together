@@ -101,6 +101,7 @@ let selectedIndex = 0;
 let selectionScale = 1;
 
 scene.add(selectedHeroGroup);
+selectedHeroGroup.position.y = 1.4;
 
 const palette = {
   teal: new THREE.MeshStandardMaterial({ color: '#71f6da', emissive: '#2abda7', emissiveIntensity: 2.3, metalness: 0.2, roughness: 0.24 }),
@@ -180,7 +181,7 @@ function showSelectedHero(index: number): void {
   addModelToSelection(loadedModels.get(hero.astronaut) ?? null, hero, 'astronaut');
   addModelToSelection(loadedModels.get(hero.mech) ?? null, hero, 'mech');
   addModelToSelection(loadedModels.get(hero.ship) ?? null, hero, 'ship');
-  selectionScale = 0.84;
+  selectionScale = 0.78;
   selectedHeroGroup.scale.setScalar(selectionScale);
 }
 
@@ -239,7 +240,7 @@ function createLighting(): void {
 function animate(): void {
   requestAnimationFrame(animate);
   const elapsed = clock.getElapsedTime();
-  selectionScale = THREE.MathUtils.lerp(selectionScale, 1, 0.075);
+  selectionScale = THREE.MathUtils.lerp(selectionScale, 0.9, 0.075);
   selectedHeroGroup.scale.setScalar(selectionScale);
 
   floaters.forEach(({ object, baseY, phase }) => {
