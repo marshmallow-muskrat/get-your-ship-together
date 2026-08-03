@@ -81,7 +81,7 @@ if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector |
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(31, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 7.6, 31);
+camera.position.set(0, 7.6, 35);
 camera.lookAt(0, 4.1, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, canvas, powerPreference: 'high-performance' });
@@ -152,16 +152,16 @@ function loadModel(loader: GLTFLoader, url: string): Promise<THREE.Object3D | nu
 function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition, kind: FormKind): void {
   const fallbackSizes: Record<FormKind, number> = { astronaut: 4.1, mech: 6.0, ship: 6.2 };
   const target = source ? SkeletonUtils.clone(source) : createFallbackModel(hero.accent, fallbackSizes[kind]);
-  const model = fitModel(target, kind === 'ship' ? 6.4 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
+  const model = fitModel(target, kind === 'ship' ? 5.8 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
 
   if (kind === 'astronaut') {
-    model.position.set(-2.85, 0.45, 4.7);
+    model.position.set(-4.6, 0.45, 5.1);
     model.rotation.y = 0;
   } else if (kind === 'mech') {
-    model.position.set(2.85, 0.8, -0.7);
+    model.position.set(4.6, 0.8, -1.2);
     model.rotation.y = 0;
   } else {
-    model.position.set(0.15, 6.6, -6.2);
+    model.position.set(0.0, 7.7, -6.8);
     model.rotation.y = Math.PI;
     floaters.push({ object: model, baseY: model.position.y, phase: selectedIndex * 0.8 });
   }
