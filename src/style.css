@@ -172,7 +172,7 @@ button {
   justify-content: center;
   gap: clamp(0.42rem, 0.8vw, 0.85rem);
   width: min(100%, 47rem);
-  padding: 0.3rem 0.4rem;
+  padding: 0.95rem 0.4rem 0.3rem;
   overflow-x: auto;
   scrollbar-width: none;
 }

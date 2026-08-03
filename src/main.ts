@@ -155,13 +155,13 @@ function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition
   const model = fitModel(target, kind === 'ship' ? 6.4 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
 
   if (kind === 'astronaut') {
-    model.position.set(-2.25, 0.45, 4.5);
+    model.position.set(-2.85, 0.45, 4.7);
     model.rotation.y = 0;
   } else if (kind === 'mech') {
-    model.position.set(2.25, 0.8, -0.4);
+    model.position.set(2.85, 0.8, -0.7);
     model.rotation.y = 0;
   } else {
-    model.position.set(0.15, 6.5, -5.8);
+    model.position.set(0.15, 6.6, -6.2);
     model.rotation.y = Math.PI;
     floaters.push({ object: model, baseY: model.position.y, phase: selectedIndex * 0.8 });
   }
