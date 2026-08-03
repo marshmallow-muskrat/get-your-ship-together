@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#081321" />
+    <title>Get Your Ship Together — Hero Hangar</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="loading-screen" class="loading-screen">
+        <div class="loading-card">
+          <div class="loading-mark">GYST</div>
+          <p class="eyebrow">INITIALIZING HANGAR</p>
+          <h1>Getting your ship together…</h1>
+          <div class="loading-track"><span id="loading-bar"></span></div>
+          <p id="loading-status" class="loading-status">Loading hero assets</p>
+        </div>
+      </div>
+
+      <canvas id="scene" aria-label="Three-dimensional hero hangar preview"></canvas>
+
+      <section class="hud" aria-label="Hero hangar controls">
+        <header class="masthead">
+          <div class="brand-lockup">
+            <span class="brand-kicker">A SPACE SURVIVAL GAME</span>
+            <h1>Get Your Ship Together</h1>
+            <p>Choose your stranded hero. Build up. Break out.</p>
+          </div>
+          <div class="preview-chip"><span class="chip-dot"></span> HANGAR PREVIEW 01</div>
+        </header>
+
+        <div class="hero-detail" aria-live="polite">
+          <span class="detail-kicker">CURRENT BAY</span>
+          <strong id="selected-hero">Barbara the Bee</strong>
+          <span id="selected-role">Astronaut → Mech → Spaceship</span>
+        </div>
+
+        <div class="lower-hud">
+          <div class="progress-legend" aria-label="Upgrade progression">
+            <span><i class="legend-dot astronaut-dot"></i>STRANDED ASTRONAUT</span>
+            <b>→</b>
+            <span><i class="legend-dot mech-dot"></i>POWERED MECH</span>
+            <b>→</b>
+            <span><i class="legend-dot ship-dot"></i>READY TO LAUNCH</span>
+          </div>
+          <nav id="bay-selector" class="bay-selector" aria-label="Choose hero bay"></nav>
+        </div>
+
+        <p class="controls-hint"><span>DRAG</span> orbit · <span>SCROLL</span> zoom · <span>CLICK A BAY</span> focus</p>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
