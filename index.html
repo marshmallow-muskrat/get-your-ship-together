@@ -23,17 +23,25 @@
       <section class="hud" aria-label="Hero hangar controls">
         <header class="masthead">
           <div class="brand-lockup">
-            <span class="brand-kicker">A SPACE SURVIVAL GAME</span>
+            <span class="brand-kicker">CREW SELECTION // ACT 0</span>
             <h1>Get Your Ship Together</h1>
             <p>Choose your stranded hero. Build up. Break out.</p>
           </div>
-          <div class="preview-chip"><span class="chip-dot"></span> HANGAR PREVIEW 01</div>
+          <div class="preview-chip"><span class="chip-dot"></span> OPEN-AIR LAUNCH COURT</div>
         </header>
 
         <div class="hero-detail" aria-live="polite">
-          <span class="detail-kicker">CURRENT BAY</span>
-          <strong id="selected-hero">Barbara the Bee</strong>
-          <span id="selected-role">Astronaut → Mech → Spaceship</span>
+          <div class="detail-heading">
+            <span class="detail-kicker">SELECTED CREW</span>
+            <span id="selected-number" class="detail-number">01 / 04</span>
+          </div>
+          <strong id="selected-hero">Barbara</strong>
+          <span id="selected-species" class="species-label">The Bee</span>
+          <span id="selected-role" class="role-label">Support systems specialist</span>
+          <div class="form-path" aria-label="Hero progression">
+            <span class="form-step active">ASTRONAUT</span><i></i><span class="form-step">MECH</span><i></i><span class="form-step">SHIP</span>
+          </div>
+          <button id="select-hero-button" class="select-hero-button" type="button">SELECT BARBARA</button>
         </div>
 
         <div class="lower-hud">
