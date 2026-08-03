@@ -10,7 +10,6 @@ interface HeroDefinition {
   id: string;
   name: string;
   species: string;
-  role: string;
   accent: string;
   astronaut: string;
   mech: string;
@@ -32,7 +31,6 @@ const heroes: HeroDefinition[] = [
     id: 'bee',
     name: 'Barbara',
     species: 'The Bee',
-    role: 'Support systems specialist',
     accent: '#f5ae42',
     astronaut: assetUrl('Characters/GLTF/Astronaut_BarbaraTheBee.gltf'),
     mech: assetUrl('Characters/GLTF/Mech_BarbaraTheBee.gltf'),
@@ -42,7 +40,6 @@ const heroes: HeroDefinition[] = [
     id: 'flamingo',
     name: 'Fernando',
     species: 'The Flamingo',
-    role: 'Speed and precision specialist',
     accent: '#ff7c9a',
     astronaut: assetUrl('Characters/GLTF/Astronaut_FernandoTheFlamingo.gltf'),
     mech: assetUrl('Characters/GLTF/Mech_FernandoTheFlamingo.gltf'),
@@ -52,7 +49,6 @@ const heroes: HeroDefinition[] = [
     id: 'frog',
     name: 'Finn',
     species: 'The Frog',
-    role: 'Area control specialist',
     accent: '#71f6da',
     astronaut: assetUrl('Characters/GLTF/Astronaut_FinnTheFrog.gltf'),
     mech: assetUrl('Characters/GLTF/Mech_FinnTheFrog.gltf'),
@@ -62,13 +58,14 @@ const heroes: HeroDefinition[] = [
     id: 'red-panda',
     name: 'Rae',
     species: 'The Red Panda',
-    role: 'Salvage and armor specialist',
     accent: '#ff876b',
     astronaut: assetUrl('Characters/GLTF/Astronaut_RaeTheRedPanda.gltf'),
     mech: assetUrl('Characters/GLTF/Mech_RaeTheRedPanda.gltf'),
     ship: assetUrl('Vehicles/GLTF/Spaceship_RaeTheRedPanda.gltf'),
   },
 ];
+
+const HERO_SPACING = 7.2;
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const loadingScreen = document.querySelector<HTMLDivElement>('#loading-screen')!;
@@ -77,11 +74,10 @@ const loadingStatus = document.querySelector<HTMLParagraphElement>('#loading-sta
 const baySelector = document.querySelector<HTMLElement>('#bay-selector')!;
 const selectedHero = document.querySelector<HTMLElement>('#selected-hero')!;
 const selectedSpecies = document.querySelector<HTMLElement>('#selected-species')!;
-const selectedRole = document.querySelector<HTMLElement>('#selected-role')!;
 const selectedNumber = document.querySelector<HTMLElement>('#selected-number')!;
 const selectHeroButton = document.querySelector<HTMLButtonElement>('#select-hero-button')!;
 
-if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector || !selectedHero || !selectedSpecies || !selectedRole || !selectedNumber || !selectHeroButton) {
+if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector || !selectedHero || !selectedSpecies || !selectedNumber || !selectHeroButton) {
   throw new Error('The hangar shell is missing a required element.');
 }
 
@@ -90,7 +86,7 @@ scene.background = new THREE.Color('#030714');
 scene.fog = new THREE.Fog('#030714', 60, 135);
 
 const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 180);
-camera.position.set(0, 8.8, 31);
+camera.position.set(0, 8.8, 48);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, canvas, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -106,7 +102,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.07;
 controls.enablePan = false;
 controls.minDistance = 16;
-controls.maxDistance = 58;
+controls.maxDistance = 70;
 controls.minPolarAngle = 0.48;
 controls.maxPolarAngle = 1.32;
 controls.target.set(0, 3.6, 1.2);
@@ -209,7 +205,7 @@ function loadModel(loader: GLTFLoader, url: string): Promise<THREE.Object3D | nu
 
 function createBay(index: number, hero: HeroDefinition): THREE.Group {
   const group = new THREE.Group();
-  const x = (index - 1.5) * 10.8;
+  const x = (index - 1.5) * HERO_SPACING;
   const baseZ = -Math.abs(index - 1.5) * 1.8;
   group.position.set(x, 0, baseZ);
   group.userData.heroId = hero.id;
@@ -239,18 +235,50 @@ function addModelToBay(
   const model = fitModel(target, kind === 'ship' ? 6.3 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
 
   if (kind === 'astronaut') {
-    model.position.set(0, 0.4, 5.1);
+    model.position.set(-1.7, 0.4, 4.7);
     model.rotation.y = 0;
   } else if (kind === 'mech') {
-    model.position.set(0, 0.75, -0.1);
+    model.position.set(1.6, 0.75, -0.1);
     model.rotation.y = 0;
   } else {
-    model.position.set(0, 5.0, -5.8);
+    model.position.set(0.2, 6.4, -5.8);
     model.rotation.y = Math.PI;
     floaters.push({ object: model, baseY: model.position.y, phase: index * 0.9 });
   }
 
   bay.add(model);
+}
+
+function addPlanet(position: [number, number, number], radius: number, color: string, atmosphere: string): void {
+  const planet = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(radius, 2),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.18,
+      roughness: 0.92,
+      metalness: 0.02,
+    }),
+  );
+  planet.position.set(...position);
+  planet.rotation.set(0.18, -0.32, 0.12);
+  planet.renderOrder = -3;
+  scene.add(planet);
+
+  const atmosphereShell = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 1.08, 24, 16),
+    new THREE.MeshBasicMaterial({
+      color: atmosphere,
+      transparent: true,
+      opacity: 0.2,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  atmosphereShell.position.copy(planet.position);
+  atmosphereShell.renderOrder = -2;
+  scene.add(atmosphereShell);
 }
 
 function createBackdrop(): void {
@@ -271,11 +299,13 @@ function createBackdrop(): void {
         void main() {
           vec2 p = vUv - 0.5;
           float sweep = exp(-pow((p.x * 1.35 + p.y * 0.72 + 0.03) * 3.2, 2.0));
+          float sweepTwo = exp(-pow((p.x * 1.0 + p.y * 0.42 - 0.28) * 4.4, 2.0));
           float wisps = 0.5 + 0.5 * sin(p.x * 22.0 + sin(p.y * 13.0) * 3.4);
           float secondary = exp(-pow((p.x * 1.05 - p.y * 1.2 - 0.08) * 3.8, 2.0));
           vec3 color = deepColor;
           color += violetColor * sweep * (0.42 + wisps * 0.28);
-          color += cyanColor * secondary * 0.38;
+          color += violetColor * sweepTwo * 0.25;
+          color += cyanColor * secondary * 0.5;
           color += vec3(0.08, 0.025, 0.14) * (0.5 + 0.5 * sin(p.y * 8.0));
           gl_FragColor = vec4(color, 1.0);
         }
@@ -287,6 +317,12 @@ function createBackdrop(): void {
   backdrop.position.set(0, 18, -28);
   backdrop.renderOrder = -10;
   scene.add(backdrop);
+
+  // Low-poly planets echo the playful space-panel concept art without adding
+  // another stage, platform, or circular UI backdrop behind the heroes.
+  addPlanet([-23, 16, -53], 5.4, '#3c1c61', '#b16eff');
+  addPlanet([25, 10, -58], 3.5, '#164b72', '#62dfff');
+  addPlanet([28, -2, -46], 2.1, '#6a2b58', '#ff7db7');
 
   const stars = new THREE.BufferGeometry();
   const starPositions: number[] = [];
@@ -331,8 +367,7 @@ function updateSelection(index: number, moveCamera = true): void {
   selectedNumber.textContent = `${String(index + 1).padStart(2, '0')} / 04`;
   selectedHero.textContent = hero.name;
   selectedSpecies.textContent = hero.species;
-  selectedRole.textContent = hero.role;
-  selectHeroButton.textContent = `SELECT ${hero.name.toUpperCase()}`;
+  selectHeroButton.textContent = 'SELECT';
   document.documentElement.style.setProperty('--bay-accent', hero.accent);
   baySelector.querySelectorAll<HTMLButtonElement>('.bay-button').forEach((button, buttonIndex) => {
     button.classList.toggle('active', buttonIndex === index);
@@ -340,8 +375,8 @@ function updateSelection(index: number, moveCamera = true): void {
   });
 
   if (moveCamera) {
-    const x = (index - 1.5) * 10.8;
-    cameraGoal.set(x, 8.8, 31);
+    const x = (index - 1.5) * HERO_SPACING;
+    cameraGoal.set(x, 8.8, 48);
     targetGoal.set(x, 3.6, 1.2);
     cameraTransitioning = true;
   }
@@ -437,8 +472,8 @@ async function init(): Promise<void> {
 
   updateSelection(0, true);
   selectHeroButton.addEventListener('click', () => {
-    selectHeroButton.textContent = `${heroes[selectedIndex].name.toUpperCase()} READY`;
-    window.setTimeout(() => updateSelection(selectedIndex, false), 900);
+    selectHeroButton.classList.add('is-selected');
+    window.setTimeout(() => selectHeroButton.classList.remove('is-selected'), 900);
   });
   loadingBar.style.width = '100%';
   loadingStatus.textContent = 'Hangar ready';
