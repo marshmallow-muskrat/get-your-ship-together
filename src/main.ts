@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import './style.css';
@@ -90,7 +91,13 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.18;
+
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+const roomEnvironment = new RoomEnvironment();
+scene.environment = pmremGenerator.fromScene(roomEnvironment, 0.035).texture;
+roomEnvironment.dispose();
+pmremGenerator.dispose();
 
 const clock = new THREE.Clock();
 const selectedHeroGroup = new THREE.Group();
@@ -149,20 +156,48 @@ function loadModel(loader: GLTFLoader, url: string): Promise<THREE.Object3D | nu
   });
 }
 
+function centerModel(model: THREE.Object3D, x: number, centerY: number, z: number): void {
+  model.position.x = x;
+  model.position.z = z;
+  model.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(model);
+  const currentCenter = bounds.getCenter(new THREE.Vector3());
+  model.position.y += centerY - currentCenter.y;
+}
+
+function enhanceModelMaterials(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material];
+    const enhancedMaterials = sourceMaterials.map((sourceMaterial) => {
+      const material = sourceMaterial.clone();
+      if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
+        material.metalness = Math.max(material.metalness, 0.22);
+        material.roughness = Math.min(material.roughness, 0.52);
+        material.envMapIntensity = 1.35;
+      }
+      material.needsUpdate = true;
+      return material;
+    });
+    child.material = Array.isArray(child.material) ? enhancedMaterials : enhancedMaterials[0];
+  });
+}
+
 function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition, kind: FormKind): void {
   const fallbackSizes: Record<FormKind, number> = { astronaut: 4.1, mech: 6.0, ship: 6.2 };
   const target = source ? SkeletonUtils.clone(source) : createFallbackModel(hero.accent, fallbackSizes[kind]);
   const model = fitModel(target, kind === 'ship' ? 5.8 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
+  enhanceModelMaterials(model);
 
   if (kind === 'astronaut') {
-    model.position.set(-4.1, 0.75, 5.1);
     model.rotation.y = 0;
+    centerModel(model, -3.4, 4.0, 0);
   } else if (kind === 'mech') {
-    model.position.set(4.1, 0.75, -1.2);
     model.rotation.y = 0;
+    centerModel(model, 3.4, 4.0, 0);
   } else {
-    model.position.set(0.0, 7.7, -6.8);
     model.rotation.y = Math.PI;
+    centerModel(model, 0, 9.9, 0);
     floaters.push({ object: model, baseY: model.position.y, phase: selectedIndex * 0.8 });
   }
 
@@ -235,6 +270,18 @@ function createLighting(): void {
   const rim = new THREE.DirectionalLight('#8f64ff', 3.2);
   rim.position.set(18, 16, -18);
   scene.add(rim);
+
+  const frontFill = new THREE.PointLight('#fff2d5', 8, 30, 2);
+  frontFill.position.set(0, 8, 15);
+  scene.add(frontFill);
+
+  const cyanFill = new THREE.PointLight('#4edbff', 12, 32, 2);
+  cyanFill.position.set(-12, 6, 8);
+  scene.add(cyanFill);
+
+  const magentaRim = new THREE.PointLight('#d76cff', 10, 32, 2);
+  magentaRim.position.set(13, 9, -10);
+  scene.add(magentaRim);
 }
 
 function animate(): void {
@@ -247,6 +294,10 @@ function animate(): void {
     object.position.y = baseY + Math.sin(elapsed * 1.35 + phase) * 0.12;
     object.rotation.y += 0.0015;
   });
+
+  selectedHeroLight.position.x = Math.sin(elapsed * 0.55) * 4.2;
+  selectedHeroLight.position.z = 5 + Math.cos(elapsed * 0.55) * 1.8;
+  selectedHeroLight.intensity = 10.5 + Math.sin(elapsed * 0.8) * 0.8;
 
   renderer.render(scene, camera);
 }
