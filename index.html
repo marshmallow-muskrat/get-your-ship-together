@@ -3,47 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#030714" />
-    <title>Get Your Ship Together — Hero Hangar</title>
+    <meta name="theme-color" content="#05091e" />
+    <title>Get Your Ship Together — Select Your Crew</title>
   </head>
   <body>
     <main id="app">
       <div id="loading-screen" class="loading-screen">
         <div class="loading-card">
           <div class="loading-mark">GYST</div>
-          <p class="eyebrow">INITIALIZING HANGAR</p>
-          <h1>Getting your ship together…</h1>
+          <p class="eyebrow">CREW SELECTION</p>
+          <h1>Loading the roster…</h1>
           <div class="loading-track"><span id="loading-bar"></span></div>
-          <p id="loading-status" class="loading-status">Loading hero assets</p>
+          <p id="loading-status" class="loading-status">Loading crew assets</p>
         </div>
       </div>
 
-      <canvas id="scene" aria-label="Three-dimensional hero hangar preview"></canvas>
+      <canvas id="scene" aria-label="Selected hero astronaut, mech, and spaceship"></canvas>
 
-      <section class="hud" aria-label="Hero hangar controls">
-        <header class="masthead">
-          <div class="brand-lockup">
-            <span class="brand-kicker">CREW SELECTION // ACT 0</span>
+      <section class="hud" aria-label="Hero selection screen">
+        <header class="selection-header">
+          <div class="game-lockup">
             <h1 class="game-title" aria-label="Get Your Ship Together">
-              <span class="title-prefix">GET YOUR</span>
-              <em class="title-ship">SHIP</em>
-              <span class="title-suffix">TOGETHER</span>
+              <span>GET YOUR</span>
+              <em>SHIP</em>
+              <span>TOGETHER</span>
             </h1>
+            <strong class="select-heading">SELECT YOUR CREW</strong>
+          </div>
+
+          <div class="selected-identity" aria-live="polite">
+            <span id="selected-number" class="selected-number">01 / 04</span>
+            <strong id="selected-hero">Barbara</strong>
+            <span id="selected-species">The Bee</span>
           </div>
         </header>
 
-        <div class="hero-detail" aria-live="polite">
-          <div class="detail-ident">
-            <span class="detail-kicker">CREW</span>
-            <strong id="selected-hero">Barbara</strong>
-            <span id="selected-species" class="species-label">The Bee</span>
-          </div>
-          <span id="selected-number" class="detail-number">01 / 04</span>
-          <button id="select-hero-button" class="select-hero-button" type="button">SELECT</button>
-        </div>
-
         <div class="lower-hud">
-          <nav id="bay-selector" class="bay-selector" aria-label="Choose hero bay"></nav>
+          <nav id="bay-selector" class="bay-selector" aria-label="Choose a hero"></nav>
+          <button id="select-hero-button" class="select-hero-button" type="button">CONTINUE</button>
         </div>
       </section>
     </main>

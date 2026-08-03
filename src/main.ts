@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import './style.css';
@@ -23,7 +22,6 @@ interface Floater {
 }
 
 const SPACE_KIT_ROOT = '/assets/space-packs/Ultimate Space Kit - March 2023';
-
 const assetUrl = (relativePath: string): string => encodeURI(`${SPACE_KIT_ROOT}/${relativePath}`);
 
 const heroes: HeroDefinition[] = [
@@ -65,7 +63,7 @@ const heroes: HeroDefinition[] = [
   },
 ];
 
-const HERO_SPACING = 7.2;
+const portraitPositions = ['0% 0%', '100% 0%', '0% 100%', '100% 100%'];
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const loadingScreen = document.querySelector<HTMLDivElement>('#loading-screen')!;
@@ -78,100 +76,48 @@ const selectedNumber = document.querySelector<HTMLElement>('#selected-number')!;
 const selectHeroButton = document.querySelector<HTMLButtonElement>('#select-hero-button')!;
 
 if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector || !selectedHero || !selectedSpecies || !selectedNumber || !selectHeroButton) {
-  throw new Error('The hangar shell is missing a required element.');
+  throw new Error('The hero selection screen is missing a required element.');
 }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#030714');
-scene.fog = new THREE.Fog('#030714', 60, 135);
+const camera = new THREE.PerspectiveCamera(31, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 7.6, 31);
+camera.lookAt(0, 4.1, 0);
 
-const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 180);
-camera.position.set(0, 8.8, 48);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, canvas, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, canvas, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
-
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.dampingFactor = 0.07;
-controls.enablePan = false;
-controls.minDistance = 16;
-controls.maxDistance = 70;
-controls.minPolarAngle = 0.48;
-controls.maxPolarAngle = 1.32;
-controls.target.set(0, 3.6, 1.2);
+renderer.toneMappingExposure = 1.1;
 
 const clock = new THREE.Clock();
-const bayGroups: THREE.Group[] = [];
-const bayLights: THREE.PointLight[] = [];
-const bayBaseZ: number[] = [];
+const selectedHeroGroup = new THREE.Group();
+const selectedHeroLight = new THREE.PointLight('#f5ae42', 11, 24, 2);
 const floaters: Floater[] = [];
-const cameraGoal = camera.position.clone();
-const targetGoal = controls.target.clone();
+const loadedModels = new Map<string, THREE.Object3D | null>();
 let selectedIndex = 0;
-let cameraTransitioning = false;
+let selectionScale = 1;
 
-controls.addEventListener('start', () => {
-  // Orbiting and zooming are deliberately free-form. A hero click is the only
-  // interaction that starts a camera transition.
-  cameraTransitioning = false;
-});
+scene.add(selectedHeroGroup);
 
 const palette = {
-  ground: new THREE.MeshStandardMaterial({ color: '#b8683f', metalness: 0.08, roughness: 0.92 }),
-  groundInset: new THREE.MeshStandardMaterial({ color: '#d4844d', metalness: 0.1, roughness: 0.86 }),
-  rock: new THREE.MeshStandardMaterial({ color: '#754b76', metalness: 0.08, roughness: 0.9 }),
-  cream: new THREE.MeshStandardMaterial({ color: '#f0e1c7', metalness: 0.45, roughness: 0.48 }),
-  floor: new THREE.MeshStandardMaterial({ color: '#1b3348', metalness: 0.82, roughness: 0.34 }),
-  floorInset: new THREE.MeshStandardMaterial({ color: '#29485d', metalness: 0.72, roughness: 0.4 }),
-  wall: new THREE.MeshStandardMaterial({ color: '#60788b', metalness: 0.7, roughness: 0.4 }),
-  trim: new THREE.MeshStandardMaterial({ color: '#d79c45', metalness: 0.86, roughness: 0.26 }),
-  darkTrim: new THREE.MeshStandardMaterial({ color: '#304d62', metalness: 0.84, roughness: 0.3 }),
   teal: new THREE.MeshStandardMaterial({ color: '#71f6da', emissive: '#2abda7', emissiveIntensity: 2.3, metalness: 0.2, roughness: 0.24 }),
-  goldGlow: new THREE.MeshStandardMaterial({ color: '#ffd16a', emissive: '#e79227', emissiveIntensity: 2.2, metalness: 0.15, roughness: 0.28 }),
-  violetGlow: new THREE.MeshStandardMaterial({ color: '#b8a5ff', emissive: '#7457ea', emissiveIntensity: 2.5, metalness: 0.12, roughness: 0.25 }),
 };
-
-function box(
-  size: [number, number, number],
-  position: [number, number, number],
-  material: THREE.Material,
-  parent: THREE.Object3D = scene,
-): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
-  mesh.position.set(...position);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  parent.add(mesh);
-  return mesh;
-}
-
-function addGlowStrip(position: [number, number, number], size: [number, number, number], parent: THREE.Object3D = scene): void {
-  box(size, position, palette.teal, parent);
-}
 
 function fitModel(model: THREE.Object3D, target: number, mode: 'height' | 'width'): THREE.Object3D {
   model.updateMatrixWorld(true);
   const initialBounds = new THREE.Box3().setFromObject(model);
   const initialSize = initialBounds.getSize(new THREE.Vector3());
   const dimension = mode === 'height' ? initialSize.y : Math.max(initialSize.x, initialSize.z);
-  if (dimension > 0) {
-    model.scale.multiplyScalar(target / dimension);
-  }
+  if (dimension > 0) model.scale.multiplyScalar(target / dimension);
+
   model.updateMatrixWorld(true);
   const finalBounds = new THREE.Box3().setFromObject(model);
   model.position.y -= finalBounds.min.y;
   model.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
-    }
+    if (child instanceof THREE.Mesh) child.castShadow = true;
   });
   return model;
 }
@@ -181,7 +127,6 @@ function createFallbackModel(accent: string, height: number): THREE.Group {
   const material = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.35, metalness: 0.35 });
   const body = new THREE.Mesh(new THREE.OctahedronGeometry(height * 0.32, 1), material);
   body.position.y = height * 0.48;
-  body.castShadow = true;
   fallback.add(body);
   const glow = new THREE.Mesh(new THREE.SphereGeometry(height * 0.09, 16, 8), palette.teal);
   glow.position.y = height * 0.52;
@@ -203,183 +148,55 @@ function loadModel(loader: GLTFLoader, url: string): Promise<THREE.Object3D | nu
   });
 }
 
-function createBay(index: number, hero: HeroDefinition): THREE.Group {
-  const group = new THREE.Group();
-  const x = (index - 1.5) * HERO_SPACING;
-  const baseZ = -Math.abs(index - 1.5) * 1.8;
-  group.position.set(x, 0, baseZ);
-  group.userData.heroId = hero.id;
-  scene.add(group);
-  bayGroups.push(group);
-  bayBaseZ.push(baseZ);
-
-  const accentLight = new THREE.PointLight(hero.accent, 7.5, 22, 2);
-  accentLight.position.set(0, 5.5, 0);
-  group.add(accentLight);
-  bayLights.push(accentLight);
-
-  return group;
-}
-
-function addModelToBay(
-  source: THREE.Object3D | null,
-  bay: THREE.Group,
-  hero: HeroDefinition,
-  kind: FormKind,
-  index: number,
-): void {
-  const fallbackSizes: Record<FormKind, number> = { astronaut: 3.8, mech: 5.6, ship: 6.1 };
-  // Astronauts and mechs are skinned GLTFs; SkeletonUtils keeps their bones and
-  // skin bindings intact when each hero is duplicated into the hangar.
+function addModelToSelection(source: THREE.Object3D | null, hero: HeroDefinition, kind: FormKind): void {
+  const fallbackSizes: Record<FormKind, number> = { astronaut: 4.1, mech: 6.0, ship: 6.2 };
   const target = source ? SkeletonUtils.clone(source) : createFallbackModel(hero.accent, fallbackSizes[kind]);
-  const model = fitModel(target, kind === 'ship' ? 6.3 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
+  const model = fitModel(target, kind === 'ship' ? 6.4 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
 
   if (kind === 'astronaut') {
-    model.position.set(-1.7, 0.4, 4.7);
+    model.position.set(-2.25, 0.45, 4.5);
     model.rotation.y = 0;
   } else if (kind === 'mech') {
-    model.position.set(1.6, 0.75, -0.1);
+    model.position.set(2.25, 0.8, -0.4);
     model.rotation.y = 0;
   } else {
-    model.position.set(0.2, 6.4, -5.8);
+    model.position.set(0.15, 6.5, -5.8);
     model.rotation.y = Math.PI;
-    floaters.push({ object: model, baseY: model.position.y, phase: index * 0.9 });
+    floaters.push({ object: model, baseY: model.position.y, phase: selectedIndex * 0.8 });
   }
 
-  bay.add(model);
+  selectedHeroGroup.add(model);
 }
 
-function addPlanet(position: [number, number, number], radius: number, color: string, atmosphere: string): void {
-  const planet = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(radius, 2),
-    new THREE.MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.18,
-      roughness: 0.92,
-      metalness: 0.02,
-    }),
-  );
-  planet.position.set(...position);
-  planet.rotation.set(0.18, -0.32, 0.12);
-  planet.renderOrder = -3;
-  scene.add(planet);
+function showSelectedHero(index: number): void {
+  const hero = heroes[index];
+  selectedHeroGroup.clear();
+  floaters.length = 0;
+  selectedHeroGroup.add(selectedHeroLight);
+  selectedHeroLight.color.set(hero.accent);
+  selectedHeroLight.position.set(0, 6, 2);
+  selectedHeroLight.intensity = 11;
 
-  const atmosphereShell = new THREE.Mesh(
-    new THREE.SphereGeometry(radius * 1.08, 24, 16),
-    new THREE.MeshBasicMaterial({
-      color: atmosphere,
-      transparent: true,
-      opacity: 0.2,
-      side: THREE.BackSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-  );
-  atmosphereShell.position.copy(planet.position);
-  atmosphereShell.renderOrder = -2;
-  scene.add(atmosphereShell);
+  addModelToSelection(loadedModels.get(hero.astronaut) ?? null, hero, 'astronaut');
+  addModelToSelection(loadedModels.get(hero.mech) ?? null, hero, 'mech');
+  addModelToSelection(loadedModels.get(hero.ship) ?? null, hero, 'ship');
+  selectionScale = 0.84;
+  selectedHeroGroup.scale.setScalar(selectionScale);
 }
 
-function createBackdrop(): void {
-  const backdrop = new THREE.Mesh(
-    new THREE.PlaneGeometry(150, 95),
-    new THREE.ShaderMaterial({
-      uniforms: {
-        deepColor: { value: new THREE.Color('#030714') },
-        violetColor: { value: new THREE.Color('#261348') },
-        cyanColor: { value: new THREE.Color('#073c54') },
-      },
-      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `
-        uniform vec3 deepColor;
-        uniform vec3 violetColor;
-        uniform vec3 cyanColor;
-        varying vec2 vUv;
-        void main() {
-          vec2 p = vUv - 0.5;
-          float sweep = exp(-pow((p.x * 1.35 + p.y * 0.72 + 0.03) * 3.2, 2.0));
-          float sweepTwo = exp(-pow((p.x * 1.0 + p.y * 0.42 - 0.28) * 4.4, 2.0));
-          float wisps = 0.5 + 0.5 * sin(p.x * 22.0 + sin(p.y * 13.0) * 3.4);
-          float secondary = exp(-pow((p.x * 1.05 - p.y * 1.2 - 0.08) * 3.8, 2.0));
-          vec3 color = deepColor;
-          color += violetColor * sweep * (0.42 + wisps * 0.28);
-          color += violetColor * sweepTwo * 0.25;
-          color += cyanColor * secondary * 0.5;
-          color += vec3(0.08, 0.025, 0.14) * (0.5 + 0.5 * sin(p.y * 8.0));
-          gl_FragColor = vec4(color, 1.0);
-        }
-      `,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
-  );
-  backdrop.position.set(0, 18, -28);
-  backdrop.renderOrder = -10;
-  scene.add(backdrop);
-
-  // Low-poly planets echo the playful space-panel concept art without adding
-  // another stage, platform, or circular UI backdrop behind the heroes.
-  addPlanet([-23, 16, -53], 5.4, '#3c1c61', '#b16eff');
-  addPlanet([25, 10, -58], 3.5, '#164b72', '#62dfff');
-  addPlanet([28, -2, -46], 2.1, '#6a2b58', '#ff7db7');
-
-  const stars = new THREE.BufferGeometry();
-  const starPositions: number[] = [];
-  for (let i = 0; i < 180; i += 1) {
-    starPositions.push((Math.random() - 0.5) * 120, -4 + Math.random() * 48, -20 - Math.random() * 55);
-  }
-  stars.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-  const starField = new THREE.Points(stars, new THREE.PointsMaterial({ color: '#c7d7ff', size: 0.1, transparent: true, opacity: 0.86 }));
-  scene.add(starField);
-
-  const coloredStars = new THREE.BufferGeometry();
-  const coloredPositions: number[] = [];
-  for (let i = 0; i < 55; i += 1) {
-    coloredPositions.push((Math.random() - 0.5) * 110, -2 + Math.random() * 42, -22 - Math.random() * 48);
-  }
-  coloredStars.setAttribute('position', new THREE.Float32BufferAttribute(coloredPositions, 3));
-  scene.add(new THREE.Points(coloredStars, new THREE.PointsMaterial({ color: '#72ddff', size: 0.17, transparent: true, opacity: 0.75 })));
-}
-
-function createLighting(): void {
-  scene.add(new THREE.HemisphereLight('#8aa1ff', '#071126', 1.35));
-
-  const key = new THREE.DirectionalLight('#d9e2ff', 2.8);
-  key.position.set(-18, 26, 18);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -34;
-  key.shadow.camera.right = 34;
-  key.shadow.camera.top = 28;
-  key.shadow.camera.bottom = -20;
-  key.shadow.bias = -0.0003;
-  scene.add(key);
-
-  const rim = new THREE.DirectionalLight('#8e64ff', 2.5);
-  rim.position.set(22, 17, -24);
-  scene.add(rim);
-}
-
-function updateSelection(index: number, moveCamera = true): void {
+function updateSelection(index: number): void {
   selectedIndex = index;
   const hero = heroes[index];
   selectedNumber.textContent = `${String(index + 1).padStart(2, '0')} / 04`;
   selectedHero.textContent = hero.name;
   selectedSpecies.textContent = hero.species;
-  selectHeroButton.textContent = 'SELECT';
   document.documentElement.style.setProperty('--bay-accent', hero.accent);
   baySelector.querySelectorAll<HTMLButtonElement>('.bay-button').forEach((button, buttonIndex) => {
     button.classList.toggle('active', buttonIndex === index);
     button.setAttribute('aria-selected', String(buttonIndex === index));
   });
 
-  if (moveCamera) {
-    const x = (index - 1.5) * HERO_SPACING;
-    cameraGoal.set(x, 8.8, 48);
-    targetGoal.set(x, 3.6, 1.2);
-    cameraTransitioning = true;
-  }
+  if (loadedModels.size > 0) showSelectedHero(index);
 }
 
 function buildBaySelector(): void {
@@ -388,9 +205,13 @@ function buildBaySelector(): void {
     button.className = 'bay-button';
     button.type = 'button';
     button.style.setProperty('--bay-accent', hero.accent);
-    button.setAttribute('aria-label', `Focus ${hero.name} ${hero.species} bay`);
+    button.setAttribute('aria-label', `Select ${hero.name} ${hero.species}`);
     button.setAttribute('aria-selected', String(index === 0));
-    button.innerHTML = `<strong>${hero.name}</strong><span>${hero.species}</span>`;
+    button.innerHTML = `
+      <span class="hero-card-art" aria-hidden="true"></span>
+      <span class="hero-card-info"><strong>${hero.name}</strong><small>${hero.species}</small></span>
+    `;
+    button.querySelector<HTMLElement>('.hero-card-art')?.style.setProperty('background-position', portraitPositions[index]);
     button.addEventListener('click', () => updateSelection(index));
     baySelector.appendChild(button);
   });
@@ -399,41 +220,31 @@ function buildBaySelector(): void {
 function updateLoading(loaded: number, total: number): void {
   const progress = total > 0 ? Math.round((loaded / total) * 100) : 0;
   loadingBar.style.width = `${progress}%`;
-  loadingStatus.textContent = progress >= 100 ? 'Finalizing hangar presentation' : `Loading hero assets · ${progress}%`;
+  loadingStatus.textContent = progress >= 100 ? 'Preparing crew selection' : `Loading crew assets · ${progress}%`;
+}
+
+function createLighting(): void {
+  scene.add(new THREE.AmbientLight('#a7b8ff', 1.55));
+  scene.add(new THREE.HemisphereLight('#b9c9ff', '#071126', 1.15));
+
+  const key = new THREE.DirectionalLight('#eef2ff', 3.4);
+  key.position.set(-14, 24, 18);
+  scene.add(key);
+
+  const rim = new THREE.DirectionalLight('#8f64ff', 3.2);
+  rim.position.set(18, 16, -18);
+  scene.add(rim);
 }
 
 function animate(): void {
   requestAnimationFrame(animate);
   const elapsed = clock.getElapsedTime();
-
-  if (cameraTransitioning) {
-    camera.position.lerp(cameraGoal, 0.075);
-    controls.target.lerp(targetGoal, 0.075);
-    if (camera.position.distanceTo(cameraGoal) < 0.025 && controls.target.distanceTo(targetGoal) < 0.025) {
-      cameraTransitioning = false;
-    }
-  }
-  controls.update();
-
-  bayGroups.forEach((group, index) => {
-    const focused = index === selectedIndex;
-    const desiredScale = focused ? 1.14 : 0.96;
-    const desiredZ = bayBaseZ[index] + (focused ? 1.2 : 0);
-    group.scale.setScalar(THREE.MathUtils.lerp(group.scale.x, desiredScale, 0.065));
-    group.position.z = THREE.MathUtils.lerp(group.position.z, desiredZ, 0.065);
-    group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, 0, 0.065);
-  });
+  selectionScale = THREE.MathUtils.lerp(selectionScale, 1, 0.075);
+  selectedHeroGroup.scale.setScalar(selectionScale);
 
   floaters.forEach(({ object, baseY, phase }) => {
-    object.position.y = baseY + Math.sin(elapsed * 1.4 + phase) * 0.13;
-    object.rotation.y += 0.0018;
-  });
-
-  bayLights.forEach((light, lightIndex) => {
-    // Keep every hero fully visible. Selection is communicated through scale,
-    // color, and camera focus rather than dimming the other characters.
-    const targetIntensity = 7.5;
-    light.intensity = THREE.MathUtils.lerp(light.intensity, targetIntensity, 0.08) + Math.sin(elapsed * 2.2 + lightIndex) * 0.18;
+    object.position.y = baseY + Math.sin(elapsed * 1.35 + phase) * 0.12;
+    object.rotation.y += 0.0015;
   });
 
   renderer.render(scene, camera);
@@ -448,35 +259,23 @@ function handleResize(): void {
 
 async function init(): Promise<void> {
   buildBaySelector();
-  createBackdrop();
   createLighting();
 
   const loaderManager = new THREE.LoadingManager();
   loaderManager.onProgress = (_url, loaded, total) => updateLoading(loaded, total);
   const loader = new GLTFLoader(loaderManager);
-
-  const entries = [
-    ...heroes.flatMap((hero) => [hero.astronaut, hero.mech, hero.ship]),
-  ];
+  const entries = heroes.flatMap((hero) => [hero.astronaut, hero.mech, hero.ship]);
   const uniqueEntries = [...new Set(entries)];
-  const loadedModels = new Map<string, THREE.Object3D | null>();
   const loadedResults = await Promise.all(uniqueEntries.map((url) => loadModel(loader, url)));
   uniqueEntries.forEach((url, index) => loadedModels.set(url, loadedResults[index]));
 
-  heroes.forEach((hero, index) => {
-    const bay = createBay(index, hero);
-    addModelToBay(loadedModels.get(hero.astronaut) ?? null, bay, hero, 'astronaut', index);
-    addModelToBay(loadedModels.get(hero.mech) ?? null, bay, hero, 'mech', index);
-    addModelToBay(loadedModels.get(hero.ship) ?? null, bay, hero, 'ship', index);
-  });
-
-  updateSelection(0, true);
+  updateSelection(0);
   selectHeroButton.addEventListener('click', () => {
     selectHeroButton.classList.add('is-selected');
     window.setTimeout(() => selectHeroButton.classList.remove('is-selected'), 900);
   });
   loadingBar.style.width = '100%';
-  loadingStatus.textContent = 'Hangar ready';
+  loadingStatus.textContent = 'Crew selection ready';
   window.setTimeout(() => loadingScreen.classList.add('loaded'), 350);
   window.addEventListener('resize', handleResize);
   animate();
@@ -484,5 +283,5 @@ async function init(): Promise<void> {
 
 init().catch((error) => {
   console.error(error);
-  loadingStatus.textContent = 'Unable to initialize the hangar. Check the browser console.';
+  loadingStatus.textContent = 'Unable to initialize crew selection. Check the browser console.';
 });
