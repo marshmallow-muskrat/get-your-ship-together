@@ -23,12 +23,6 @@ interface Floater {
   phase: number;
 }
 
-interface BayModels {
-  astronaut: THREE.Object3D | null;
-  mech: THREE.Object3D | null;
-  ship: THREE.Object3D | null;
-}
-
 const SPACE_KIT_ROOT = '/assets/space-packs/Ultimate Space Kit - March 2023';
 
 const assetUrl = (relativePath: string): string => encodeURI(`${SPACE_KIT_ROOT}/${relativePath}`);
@@ -76,15 +70,6 @@ const heroes: HeroDefinition[] = [
   },
 ];
 
-const environmentAssets = {
-  dome: assetUrl('Environment/GLTF/GeodesicDome.gltf'),
-  building: assetUrl('Environment/GLTF/Building_L.gltf'),
-  solarPanel: assetUrl('Environment/GLTF/SolarPanel_Ground.gltf'),
-  rock: assetUrl('Environment/GLTF/Rock_Large_1.gltf'),
-  plant: assetUrl('Environment/GLTF/Plant_1.gltf'),
-  planet: assetUrl('Environment/GLTF/Planet_4.gltf'),
-};
-
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const loadingScreen = document.querySelector<HTMLDivElement>('#loading-screen')!;
 const loadingBar = document.querySelector<HTMLSpanElement>('#loading-bar')!;
@@ -101,11 +86,11 @@ if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector |
 }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#4a3d75');
-scene.fog = new THREE.Fog('#a76857', 42, 105);
+scene.background = new THREE.Color('#030714');
+scene.fog = new THREE.Fog('#030714', 60, 135);
 
 const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 180);
-camera.position.set(0, 10.5, 35);
+camera.position.set(0, 8.8, 31);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, canvas, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -124,19 +109,23 @@ controls.minDistance = 16;
 controls.maxDistance = 58;
 controls.minPolarAngle = 0.48;
 controls.maxPolarAngle = 1.32;
-controls.target.set(0, 3.7, -2);
+controls.target.set(0, 3.6, 1.2);
 
 const clock = new THREE.Clock();
 const bayGroups: THREE.Group[] = [];
-const bayHighlights: THREE.Mesh[] = [];
-const bayFocusHalos: THREE.Mesh[] = [];
-const bayModels: BayModels[] = [];
 const bayLights: THREE.PointLight[] = [];
 const bayBaseZ: number[] = [];
 const floaters: Floater[] = [];
 const cameraGoal = camera.position.clone();
 const targetGoal = controls.target.clone();
 let selectedIndex = 0;
+let cameraTransitioning = false;
+
+controls.addEventListener('start', () => {
+  // Orbiting and zooming are deliberately free-form. A hero click is the only
+  // interaction that starts a camera transition.
+  cameraTransitioning = false;
+});
 
 const palette = {
   ground: new THREE.MeshStandardMaterial({ color: '#b8683f', metalness: 0.08, roughness: 0.92 }),
@@ -191,65 +180,6 @@ function fitModel(model: THREE.Object3D, target: number, mode: 'height' | 'width
   return model;
 }
 
-function prepareModelMaterials(root: THREE.Object3D): void {
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-
-    const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material];
-    const preparedMaterials = sourceMaterials.map((sourceMaterial) => {
-      const material = sourceMaterial.clone();
-      const color = 'color' in material && material.color instanceof THREE.Color ? material.color.clone() : null;
-      const emissive = 'emissive' in material && material.emissive instanceof THREE.Color ? material.emissive.clone() : null;
-      material.userData.hangarOriginal = {
-        color,
-        emissive,
-        emissiveIntensity: 'emissiveIntensity' in material ? material.emissiveIntensity : 0,
-        opacity: material.opacity,
-        transparent: material.transparent,
-        depthWrite: material.depthWrite,
-      };
-      return material;
-    });
-
-    child.material = Array.isArray(child.material) ? preparedMaterials : preparedMaterials[0];
-  });
-}
-
-function setModelFocus(root: THREE.Object3D, focused: boolean): void {
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    const materials = Array.isArray(child.material) ? child.material : [child.material];
-
-    materials.forEach((material) => {
-      const original = material.userData.hangarOriginal as {
-        color: THREE.Color | null;
-        emissive: THREE.Color | null;
-        emissiveIntensity: number;
-        opacity: number;
-        transparent: boolean;
-        depthWrite: boolean;
-      } | undefined;
-      if (!original) return;
-
-      if (original.color && 'color' in material && material.color instanceof THREE.Color) {
-        material.color.copy(original.color);
-        if (!focused) material.color.multiplyScalar(0.22);
-      }
-      if (original.emissive && 'emissive' in material && material.emissive instanceof THREE.Color) {
-        material.emissive.copy(original.emissive);
-        if (!focused) material.emissive.multiplyScalar(0.12);
-      }
-      if ('emissiveIntensity' in material) {
-        material.emissiveIntensity = focused ? original.emissiveIntensity : original.emissiveIntensity * 0.16;
-      }
-      material.opacity = focused ? original.opacity : Math.min(original.opacity, 0.3);
-      material.transparent = focused || original.transparent;
-      material.depthWrite = focused ? original.depthWrite : false;
-      material.needsUpdate = true;
-    });
-  });
-}
-
 function createFallbackModel(accent: string, height: number): THREE.Group {
   const fallback = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.35, metalness: 0.35 });
@@ -277,135 +207,20 @@ function loadModel(loader: GLTFLoader, url: string): Promise<THREE.Object3D | nu
   });
 }
 
-function createHangarShell(): void {
-  const worldWidth = 58;
-  const worldDepth = 37;
-
-  box([worldWidth, 0.7, worldDepth], [0, -0.42, -1], palette.ground);
-  box([worldWidth - 2, 0.1, worldDepth - 2], [0, -0.02, -1], palette.groundInset);
-  box([6.2, 0.12, worldDepth - 4], [0, 0.1, -1], palette.cream);
-  box([5.4, 0.08, worldDepth - 5], [0, 0.18, -1], palette.groundInset);
-
-  // A shallow launch court gives the selection screen a real sense of place.
-  box([worldWidth - 4, 1.3, 0.65], [0, 0.55, -16.8], palette.cream);
-  box([worldWidth - 4, 0.2, 0.28], [0, 1.25, -16.4], palette.trim);
-  box([worldWidth - 4, 0.18, 0.26], [0, 2.45, -16.25], palette.teal);
-
-  for (const x of [-26, 26]) {
-    box([1.1, 5.8, 1.2], [x, 2.8, -15.9], palette.cream);
-    box([1.35, 0.3, 1.45], [x, 5.58, -15.9], palette.trim);
-    addGlowStrip([x, 3.3, -15.28], [0.16, 2.2, 0.12]);
-  }
-
-  // The launch gate supplies a colorful visual anchor behind the selected hero.
-  const gate = new THREE.Mesh(new THREE.TorusGeometry(5.4, 0.32, 12, 64), palette.cream);
-  gate.position.set(0, 6.8, -15.95);
-  scene.add(gate);
-  const gateInner = new THREE.Mesh(
-    new THREE.CircleGeometry(5.05, 64),
-    new THREE.MeshBasicMaterial({ color: '#4ec9e9', transparent: true, opacity: 0.28, side: THREE.DoubleSide }),
-  );
-  gateInner.position.set(0, 6.8, -16.15);
-  scene.add(gateInner);
-  const gateCore = new THREE.Mesh(new THREE.CircleGeometry(2.8, 32), palette.violetGlow);
-  gateCore.position.set(0, 6.8, -16.22);
-  scene.add(gateCore);
-
-  for (const x of [-23, -11.5, 0, 11.5, 23]) {
-    box([0.3, 2.4, 0.55], [x, 1.2, -14.8], palette.cream);
-    box([0.46, 0.16, 0.72], [x, 2.36, -14.8], palette.trim);
-  }
-
-  // Warm low-poly cliff silhouettes keep the bright court grounded in the alien world.
-  for (const x of [-28, -20, 20, 28]) {
-    const cliff = new THREE.Mesh(new THREE.ConeGeometry(3.8, 7 + Math.random() * 3, 6), palette.rock ?? palette.ground);
-    cliff.position.set(x, 3.2, -10 - Math.random() * 4);
-    cliff.rotation.y = Math.random() * Math.PI;
-    cliff.castShadow = true;
-    scene.add(cliff);
-  }
-}
-
 function createBay(index: number, hero: HeroDefinition): THREE.Group {
   const group = new THREE.Group();
   const x = (index - 1.5) * 10.8;
   const baseZ = -Math.abs(index - 1.5) * 1.8;
   group.position.set(x, 0, baseZ);
-  group.rotation.y = (1.5 - index) * 0.025;
   group.userData.heroId = hero.id;
   scene.add(group);
   bayGroups.push(group);
   bayBaseZ.push(baseZ);
-  bayModels.push({ astronaut: null, mech: null, ship: null });
 
-  const bayWidth = 9.5;
-  const bayDepth = 22.5;
-  box([bayWidth, 0.08, bayDepth], [0, 0.12, -1], palette.cream, group);
-  box([bayWidth - 0.6, 0.05, bayDepth - 0.7], [0, 0.18, -1], palette.floorInset, group);
-
-  for (const localX of [-4.15, 4.15]) {
-    box([0.16, 0.06, bayDepth - 1.2], [localX, 0.21, -1], palette.trim, group);
-  }
-
-  const astronautPad = new THREE.Mesh(new THREE.CylinderGeometry(2.08, 2.08, 0.1, 32), palette.goldGlow);
-  astronautPad.position.set(0, 0.2, 6.15);
-  astronautPad.scale.z = 0.86;
-  group.add(astronautPad);
-
-  const mechPad = new THREE.Mesh(new THREE.CylinderGeometry(2.75, 2.75, 0.48, 8), palette.cream);
-  mechPad.position.set(0, 0.5, 0.25);
-  group.add(mechPad);
-  const mechPadTop = new THREE.Mesh(new THREE.CylinderGeometry(2.63, 2.63, 0.08, 8), palette.teal);
-  mechPadTop.position.set(0, 0.77, 0.25);
-  group.add(mechPadTop);
-
-  const shipPad = new THREE.Mesh(new THREE.CylinderGeometry(3.15, 3.15, 0.34, 12), palette.cream);
-  shipPad.position.set(0, 3.16, -6.25);
-  group.add(shipPad);
-  const shipRing = new THREE.Mesh(new THREE.TorusGeometry(3.05, 0.11, 10, 48), palette.violetGlow);
-  shipRing.rotation.x = Math.PI / 2;
-  shipRing.position.set(0, 3.4, -6.25);
-  group.add(shipRing);
-
-  addGlowStrip([0, 0.26, 3.35], [0.18, 0.08, 2.15], group);
-  addGlowStrip([0, 0.26, -2.65], [0.18, 0.08, 2.15], group);
-
-  for (const z of [3.25, -2.55]) {
-    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.72, 4), palette.teal);
-    arrow.rotation.x = -Math.PI / 2;
-    arrow.position.set(0, 0.38, z);
-    group.add(arrow);
-  }
-
-  const gantryHeight = 7.2;
-  for (const localX of [-3.75, 3.75]) {
-    box([0.38, gantryHeight, 0.42], [localX, gantryHeight / 2, -7.5], palette.wall, group);
-    box([0.56, 0.18, 0.62], [localX, gantryHeight - 0.25, -7.5], palette.trim, group);
-  }
-  box([8.65, 0.42, 0.48], [0, gantryHeight, -7.5], palette.trim, group);
-  addGlowStrip([0, gantryHeight - 0.28, -7.27], [7.2, 0.12, 0.14], group);
-
-  const accentLight = new THREE.PointLight(hero.accent, 12, 17, 2);
-  accentLight.position.set(0, 5.6, -3.8);
+  const accentLight = new THREE.PointLight(hero.accent, 7.5, 22, 2);
+  accentLight.position.set(0, 5.5, 0);
   group.add(accentLight);
   bayLights.push(accentLight);
-
-  const highlight = new THREE.Mesh(
-    new THREE.RingGeometry(3.65, 3.85, 48),
-    new THREE.MeshBasicMaterial({ color: hero.accent, transparent: true, opacity: index === 0 ? 0.95 : 0.18, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
-  );
-  highlight.rotation.x = -Math.PI / 2;
-  highlight.position.set(0, 0.26, 6.15);
-  group.add(highlight);
-  bayHighlights.push(highlight);
-
-  const focusHalo = new THREE.Mesh(
-    new THREE.RingGeometry(4.15, 4.42, 64),
-    new THREE.MeshBasicMaterial({ color: hero.accent, transparent: true, opacity: index === 0 ? 0.55 : 0.05, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
-  );
-  focusHalo.position.set(0, 5.9, -9.4);
-  group.add(focusHalo);
-  bayFocusHalos.push(focusHalo);
 
   return group;
 }
@@ -421,72 +236,81 @@ function addModelToBay(
   // Astronauts and mechs are skinned GLTFs; SkeletonUtils keeps their bones and
   // skin bindings intact when each hero is duplicated into the hangar.
   const target = source ? SkeletonUtils.clone(source) : createFallbackModel(hero.accent, fallbackSizes[kind]);
-  prepareModelMaterials(target);
   const model = fitModel(target, kind === 'ship' ? 6.3 : fallbackSizes[kind], kind === 'ship' ? 'width' : 'height');
 
   if (kind === 'astronaut') {
-    model.position.set(0, 0.26, 6.15);
-    model.rotation.y = Math.PI;
+    model.position.set(0, 0.4, 5.1);
+    model.rotation.y = 0;
   } else if (kind === 'mech') {
-    model.position.set(0, 0.78, 0.25);
-    model.rotation.y = Math.PI;
+    model.position.set(0, 0.75, -0.1);
+    model.rotation.y = 0;
   } else {
-    model.position.set(0, 3.65, -6.1);
+    model.position.set(0, 5.0, -5.8);
     model.rotation.y = Math.PI;
     floaters.push({ object: model, baseY: model.position.y, phase: index * 0.9 });
   }
 
-  bayModels[index][kind] = model;
   bay.add(model);
-}
-
-function addEnvironmentModel(source: THREE.Object3D | null, url: string, position: [number, number, number], targetHeight: number, rotationY = 0): void {
-  if (!source) return;
-  const model = fitModel(SkeletonUtils.clone(source), targetHeight, 'height');
-  model.position.set(...position);
-  model.rotation.y = rotationY;
-  scene.add(model);
 }
 
 function createBackdrop(): void {
   const backdrop = new THREE.Mesh(
-    new THREE.PlaneGeometry(120, 70),
+    new THREE.PlaneGeometry(150, 95),
     new THREE.ShaderMaterial({
       uniforms: {
-        topColor: { value: new THREE.Color('#4d427d') },
-        bottomColor: { value: new THREE.Color('#d77b52') },
+        deepColor: { value: new THREE.Color('#030714') },
+        violetColor: { value: new THREE.Color('#261348') },
+        cyanColor: { value: new THREE.Color('#073c54') },
       },
       vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `uniform vec3 topColor; uniform vec3 bottomColor; varying vec2 vUv; void main() { float blend = smoothstep(0.05, 0.92, vUv.y); gl_FragColor = vec4(mix(bottomColor, topColor, blend), 1.0); }`,
+      fragmentShader: `
+        uniform vec3 deepColor;
+        uniform vec3 violetColor;
+        uniform vec3 cyanColor;
+        varying vec2 vUv;
+        void main() {
+          vec2 p = vUv - 0.5;
+          float sweep = exp(-pow((p.x * 1.35 + p.y * 0.72 + 0.03) * 3.2, 2.0));
+          float wisps = 0.5 + 0.5 * sin(p.x * 22.0 + sin(p.y * 13.0) * 3.4);
+          float secondary = exp(-pow((p.x * 1.05 - p.y * 1.2 - 0.08) * 3.8, 2.0));
+          vec3 color = deepColor;
+          color += violetColor * sweep * (0.42 + wisps * 0.28);
+          color += cyanColor * secondary * 0.38;
+          color += vec3(0.08, 0.025, 0.14) * (0.5 + 0.5 * sin(p.y * 8.0));
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
       depthWrite: false,
+      side: THREE.DoubleSide,
     }),
   );
-  backdrop.position.set(0, 18, -21);
+  backdrop.position.set(0, 18, -28);
   backdrop.renderOrder = -10;
   scene.add(backdrop);
-
-  const planetGlow = new THREE.Mesh(
-    new THREE.CircleGeometry(10.5, 32),
-    new THREE.MeshBasicMaterial({ color: '#ffb768', transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }),
-  );
-  planetGlow.position.set(22, 15, -27.2);
-  scene.add(planetGlow);
 
   const stars = new THREE.BufferGeometry();
   const starPositions: number[] = [];
   for (let i = 0; i < 180; i += 1) {
-    starPositions.push((Math.random() - 0.5) * 100, 10 + Math.random() * 28, -18 - Math.random() * 26);
+    starPositions.push((Math.random() - 0.5) * 120, -4 + Math.random() * 48, -20 - Math.random() * 55);
   }
   stars.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-  const starField = new THREE.Points(stars, new THREE.PointsMaterial({ color: '#fff0ba', size: 0.12, transparent: true, opacity: 0.9 }));
+  const starField = new THREE.Points(stars, new THREE.PointsMaterial({ color: '#c7d7ff', size: 0.1, transparent: true, opacity: 0.86 }));
   scene.add(starField);
+
+  const coloredStars = new THREE.BufferGeometry();
+  const coloredPositions: number[] = [];
+  for (let i = 0; i < 55; i += 1) {
+    coloredPositions.push((Math.random() - 0.5) * 110, -2 + Math.random() * 42, -22 - Math.random() * 48);
+  }
+  coloredStars.setAttribute('position', new THREE.Float32BufferAttribute(coloredPositions, 3));
+  scene.add(new THREE.Points(coloredStars, new THREE.PointsMaterial({ color: '#72ddff', size: 0.17, transparent: true, opacity: 0.75 })));
 }
 
 function createLighting(): void {
-  scene.add(new THREE.HemisphereLight('#ffd6a1', '#67445a', 2.1));
+  scene.add(new THREE.HemisphereLight('#8aa1ff', '#071126', 1.35));
 
-  const key = new THREE.DirectionalLight('#fff0c8', 5.6);
-  key.position.set(-18, 30, 18);
+  const key = new THREE.DirectionalLight('#d9e2ff', 2.8);
+  key.position.set(-18, 26, 18);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
   key.shadow.camera.left = -34;
@@ -496,13 +320,9 @@ function createLighting(): void {
   key.shadow.bias = -0.0003;
   scene.add(key);
 
-  const rim = new THREE.DirectionalLight('#67d9ef', 3.8);
+  const rim = new THREE.DirectionalLight('#8e64ff', 2.5);
   rim.position.set(22, 17, -24);
   scene.add(rim);
-
-  const warmFill = new THREE.PointLight('#f59a56', 18, 35, 2);
-  warmFill.position.set(-18, 7, 4);
-  scene.add(warmFill);
 }
 
 function updateSelection(index: number, moveCamera = true): void {
@@ -513,19 +333,6 @@ function updateSelection(index: number, moveCamera = true): void {
   selectedSpecies.textContent = hero.species;
   selectedRole.textContent = hero.role;
   selectHeroButton.textContent = `SELECT ${hero.name.toUpperCase()}`;
-  bayHighlights.forEach((highlight, highlightIndex) => {
-    const material = highlight.material as THREE.MeshBasicMaterial;
-    material.opacity = highlightIndex === index ? 0.95 : 0.1;
-  });
-  bayFocusHalos.forEach((halo, haloIndex) => {
-    const material = halo.material as THREE.MeshBasicMaterial;
-    material.opacity = haloIndex === index ? 0.58 : 0.025;
-  });
-  bayModels.forEach((models, modelIndex) => {
-    (Object.values(models) as Array<THREE.Object3D | null>).forEach((model) => {
-      if (model) setModelFocus(model, modelIndex === index);
-    });
-  });
   document.documentElement.style.setProperty('--bay-accent', hero.accent);
   baySelector.querySelectorAll<HTMLButtonElement>('.bay-button').forEach((button, buttonIndex) => {
     button.classList.toggle('active', buttonIndex === index);
@@ -534,8 +341,9 @@ function updateSelection(index: number, moveCamera = true): void {
 
   if (moveCamera) {
     const x = (index - 1.5) * 10.8;
-    cameraGoal.set(x * 0.3, 9.3, 30.5);
-    targetGoal.set(x * 0.22, 3.75, -2.35);
+    cameraGoal.set(x, 8.8, 31);
+    targetGoal.set(x, 3.6, 1.2);
+    cameraTransitioning = true;
   }
 }
 
@@ -563,18 +371,22 @@ function animate(): void {
   requestAnimationFrame(animate);
   const elapsed = clock.getElapsedTime();
 
-  camera.position.lerp(cameraGoal, 0.045);
-  controls.target.lerp(targetGoal, 0.045);
+  if (cameraTransitioning) {
+    camera.position.lerp(cameraGoal, 0.075);
+    controls.target.lerp(targetGoal, 0.075);
+    if (camera.position.distanceTo(cameraGoal) < 0.025 && controls.target.distanceTo(targetGoal) < 0.025) {
+      cameraTransitioning = false;
+    }
+  }
   controls.update();
 
   bayGroups.forEach((group, index) => {
     const focused = index === selectedIndex;
-    const desiredScale = focused ? 1.12 : 0.84;
-    const desiredZ = bayBaseZ[index] + (focused ? 1.35 : 0);
-    const baseRotation = (1.5 - index) * 0.025;
+    const desiredScale = focused ? 1.14 : 0.96;
+    const desiredZ = bayBaseZ[index] + (focused ? 1.2 : 0);
     group.scale.setScalar(THREE.MathUtils.lerp(group.scale.x, desiredScale, 0.065));
     group.position.z = THREE.MathUtils.lerp(group.position.z, desiredZ, 0.065);
-    group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, focused ? 0 : baseRotation, 0.065);
+    group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, 0, 0.065);
   });
 
   floaters.forEach(({ object, baseY, phase }) => {
@@ -582,9 +394,11 @@ function animate(): void {
     object.rotation.y += 0.0018;
   });
 
-  bayLights.forEach((light, index) => {
-    const targetIntensity = index === selectedIndex ? 14 : 1.8;
-    light.intensity = THREE.MathUtils.lerp(light.intensity, targetIntensity, 0.08) + Math.sin(elapsed * 2.2 + index) * 0.35;
+  bayLights.forEach((light, lightIndex) => {
+    // Keep every hero fully visible. Selection is communicated through scale,
+    // color, and camera focus rather than dimming the other characters.
+    const targetIntensity = 7.5;
+    light.intensity = THREE.MathUtils.lerp(light.intensity, targetIntensity, 0.08) + Math.sin(elapsed * 2.2 + lightIndex) * 0.18;
   });
 
   renderer.render(scene, camera);
@@ -601,7 +415,6 @@ async function init(): Promise<void> {
   buildBaySelector();
   createBackdrop();
   createLighting();
-  createHangarShell();
 
   const loaderManager = new THREE.LoadingManager();
   loaderManager.onProgress = (_url, loaded, total) => updateLoading(loaded, total);
@@ -609,7 +422,6 @@ async function init(): Promise<void> {
 
   const entries = [
     ...heroes.flatMap((hero) => [hero.astronaut, hero.mech, hero.ship]),
-    ...Object.values(environmentAssets),
   ];
   const uniqueEntries = [...new Set(entries)];
   const loadedModels = new Map<string, THREE.Object3D | null>();
@@ -623,19 +435,7 @@ async function init(): Promise<void> {
     addModelToBay(loadedModels.get(hero.ship) ?? null, bay, hero, 'ship', index);
   });
 
-  addEnvironmentModel(loadedModels.get(environmentAssets.dome) ?? null, environmentAssets.dome, [-25, 0, -10], 5.8, 0.25);
-  addEnvironmentModel(loadedModels.get(environmentAssets.building) ?? null, environmentAssets.building, [25, 0, -10], 6.5, -0.4);
-  addEnvironmentModel(loadedModels.get(environmentAssets.planet) ?? null, environmentAssets.planet, [22, 15, -27], 12, 0.15);
-  addEnvironmentModel(loadedModels.get(environmentAssets.solarPanel) ?? null, environmentAssets.solarPanel, [-25, 0, 4.3], 2.9, 0.35);
-  addEnvironmentModel(loadedModels.get(environmentAssets.solarPanel) ?? null, environmentAssets.solarPanel, [25, 0, 5.2], 2.7, -0.45);
-  addEnvironmentModel(loadedModels.get(environmentAssets.rock) ?? null, environmentAssets.rock, [27, 0, 4], 5.2, 0.1);
-  addEnvironmentModel(loadedModels.get(environmentAssets.rock) ?? null, environmentAssets.rock, [-28, 0, 4], 4.4, -0.2);
-  addEnvironmentModel(loadedModels.get(environmentAssets.rock) ?? null, environmentAssets.rock, [-22, 0, 9], 3.2, 0.4);
-  addEnvironmentModel(loadedModels.get(environmentAssets.plant) ?? null, environmentAssets.plant, [-28, 0, 0], 3.2, -0.1);
-  addEnvironmentModel(loadedModels.get(environmentAssets.plant) ?? null, environmentAssets.plant, [28, 0, 1], 3.6, 0.6);
-  addEnvironmentModel(loadedModels.get(environmentAssets.plant) ?? null, environmentAssets.plant, [20, 0, 8], 2.8, -0.3);
-
-  updateSelection(0, false);
+  updateSelection(0, true);
   selectHeroButton.addEventListener('click', () => {
     selectHeroButton.textContent = `${heroes[selectedIndex].name.toUpperCase()} READY`;
     window.setTimeout(() => updateSelection(selectedIndex, false), 900);
