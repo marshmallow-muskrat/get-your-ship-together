@@ -185,7 +185,7 @@ button {
 .bay-button {
   position: relative;
   flex: 0 0 clamp(6.3rem, 11.4vw, 9.8rem);
-  aspect-ratio: 5 / 7;
+  aspect-ratio: 3 / 4;
   height: auto;
   overflow: hidden;
   padding: 0;
