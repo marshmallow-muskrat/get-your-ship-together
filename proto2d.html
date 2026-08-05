@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Get Your Ship Together — 2D Scroller Prototype</title>
+  </head>
+  <body>
+    <div id="proto-root">
+      <canvas id="proto-canvas"></canvas>
+      <div id="proto-hud">
+        <div class="hud-row hud-top">
+          <span class="hud-act">PROTOTYPE · 2D PAINTED SCROLLER</span>
+          <span class="hud-fps" id="proto-fps">— fps</span>
+        </div>
+        <div class="hud-row hud-bottom">
+          <span class="hud-keys">WASD move · SPACE fire · [ ] act · M mirror-tile · P pause</span>
+        </div>
+      </div>
+      <div id="proto-missing" hidden>
+        <h1>Drop the level art in</h1>
+        <p>
+          Save the three-panel concept-art sheet to
+          <code>public/concept-art/level/acts-composite.png</code>
+          and reload. The panels are cropped at draw time, so no splitting is needed —
+          press <strong>[</strong> and <strong>]</strong> to flip between acts.
+        </p>
+      </div>
+    </div>
+    <script type="module" src="/src/proto2d.ts"></script>
+  </body>
+</html>
