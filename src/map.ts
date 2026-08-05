@@ -12,7 +12,6 @@ export interface MapHero {
 
 export interface ActOneWorldOptions {
   scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
   models: Map<string, THREE.Object3D | null>;
   hero: MapHero;
@@ -21,7 +20,9 @@ export interface ActOneWorldOptions {
 }
 
 export interface MapRuntime {
+  camera: THREE.OrthographicCamera;
   update: (delta: number, elapsed: number) => void;
+  resize: (width: number, height: number) => void;
   dispose: () => void;
 }
 
@@ -112,14 +113,14 @@ function terrainHeight(x: number, z: number): number {
 function prepareMeshes(root: THREE.Object3D): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
+    child.castShadow = false;
+    child.receiveShadow = false;
     const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material];
     const materials = sourceMaterials.map((source) => {
       const material = source.clone();
       if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
-        material.roughness = Math.max(material.roughness, 0.5);
-        material.envMapIntensity = 0.65;
+        material.roughness = Math.max(material.roughness, 0.72);
+        material.envMapIntensity = 0.3;
       }
       material.needsUpdate = true;
       return material;
@@ -205,41 +206,31 @@ function addSky(scene: THREE.Scene): void {
 }
 
 function addLighting(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMappingExposure = 0.8;
+  renderer.shadowMap.enabled = false;
+  renderer.toneMappingExposure = 0.9;
 
-  scene.add(new THREE.HemisphereLight('#ffc08b', '#281437', 0.92));
-  scene.add(new THREE.AmbientLight('#6d5c92', 0.24));
+  scene.add(new THREE.HemisphereLight('#ffd0a1', '#56304d', 1.5));
+  scene.add(new THREE.AmbientLight('#ffe1bd', 0.62));
 
-  const sunLight = new THREE.DirectionalLight('#ffd3a1', 2.35);
-  sunLight.position.set(-42, 70, 35);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
-  sunLight.shadow.camera.left = -42;
-  sunLight.shadow.camera.right = 42;
-  sunLight.shadow.camera.top = 46;
-  sunLight.shadow.camera.bottom = -46;
-  sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far = 180;
-  sunLight.shadow.bias = -0.0003;
+  const sunLight = new THREE.DirectionalLight('#fff0ce', 1.65);
+  sunLight.position.set(-28, 60, 24);
   scene.add(sunLight);
 
-  const coolFill = new THREE.DirectionalLight('#6edcff', 0.78);
+  const coolFill = new THREE.DirectionalLight('#70d7e8', 0.38);
   coolFill.position.set(28, 22, -48);
   scene.add(coolFill);
 }
 
 function createTerrain(root: THREE.Group): void {
   const width = 56;
-  const length = 218;
-  const centerZ = -87;
+  const length = 280;
+  const centerZ = -80;
   const geometry = new THREE.PlaneGeometry(width, length, 44, 136);
   geometry.rotateX(-Math.PI / 2);
   const positions = geometry.attributes.position;
   const colors: number[] = [];
-  const trailColor = new THREE.Color('#b95b32');
-  const shoulderColor = new THREE.Color('#8f3e31');
+  const trailColor = new THREE.Color('#8d3d25');
+  const shoulderColor = new THREE.Color('#6e2a29');
   const ridgeColor = new THREE.Color('#48243a');
 
   for (let index = 0; index < positions.count; index += 1) {
@@ -270,15 +261,15 @@ function createTerrain(root: THREE.Group): void {
   const pathIndices: number[] = [];
   for (let row = 0; row <= rows; row += 1) {
     const t = row / rows;
-    const z = THREE.MathUtils.lerp(START_Z + 4, EXTRACTION_Z - 7, t);
+    const z = THREE.MathUtils.lerp(42, EXTRACTION_Z - 20, t);
     const center = pathCenter(z);
-    const widthAtRow = 5.5 + Math.sin(t * Math.PI * 5) * 0.48;
+    const widthAtRow = 2.55 + Math.sin(t * Math.PI * 5) * 0.32;
     const left = center - widthAtRow;
     const right = center + widthAtRow;
     pathPositions.push(left, terrainHeight(left, z) + 0.07, z, right, terrainHeight(right, z) + 0.07, z);
     if (row < rows) {
       const base = row * 2;
-      pathIndices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+      pathIndices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
     }
   }
   const pathGeometry = new THREE.BufferGeometry();
@@ -288,7 +279,7 @@ function createTerrain(root: THREE.Group): void {
   const path = new THREE.Mesh(
     pathGeometry,
     new THREE.MeshStandardMaterial({
-      color: '#db7d3d',
+      color: '#bd6c3b',
       roughness: 1,
       flatShading: true,
       polygonOffset: true,
@@ -328,7 +319,7 @@ function addDust(root: THREE.Group): void {
   const random = seededRandom(29);
   const positions: number[] = [];
   for (let index = 0; index < 520; index += 1) {
-    const z = THREE.MathUtils.lerp(22, -190, random());
+    const z = THREE.MathUtils.lerp(42, -200, random());
     const x = THREE.MathUtils.lerp(-34, 34, random());
     positions.push(x, terrainHeight(x, z) + 0.7 + random() * 8, z);
   }
@@ -417,8 +408,10 @@ function createExtractionPad(root: THREE.Group, x: number, z: number): { beaconL
 }
 
 export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
-  const { scene, camera, renderer, models, hero, onProgress, onComplete } = options;
+  const { scene, renderer, models, hero, onProgress, onComplete } = options;
   const root = new THREE.Group();
+  root.rotation.y = Math.PI / 4;
+  const camera = new THREE.OrthographicCamera(-14, 14, 26, -26, 0.1, 500);
   const colliders: Collider[] = [];
   const random = seededRandom(1307);
   const keys = new Set<string>();
@@ -427,7 +420,7 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
 
   scene.clear();
   scene.background = new THREE.Color('#2c132e');
-  scene.fog = new THREE.FogExp2('#70343d', 0.0047);
+  scene.fog = new THREE.FogExp2('#4e2740', 0.0024);
   scene.add(root);
   addSky(scene);
   addLighting(scene, renderer);
@@ -452,15 +445,16 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   };
 
   const cliffPalette = ['#6f302f', '#843a31', '#54273a', '#9c4931'];
-  for (let index = 0; index < 28; index += 1) {
-    const z = 19 - index * 7.15 + (random() - 0.5) * 2.5;
+  for (let index = 0; index < 35; index += 1) {
+    const z = 42 - index * 7.15 + (random() - 0.5) * 2.5;
     for (const side of [-1, 1]) {
-      const wallDistance = combatHalfWidth(z) + 6.2 + random() * 2.8;
+      if (side < 0 && z > -8 && z < 22) continue;
+      const wallDistance = combatHalfWidth(z) + 7.4 + random() * 2.8;
       addCliffMass(
         root,
         pathCenter(z) + side * wallDistance,
         z,
-        3.2 + random() * 2.7,
+        2.8 + random() * 2,
         cliffPalette[(index + (side > 0 ? 1 : 0)) % cliffPalette.length],
         random,
       );
@@ -468,8 +462,8 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   }
 
   const largeRockUrls = [ACT_ONE_ASSETS.rockLarge1, ACT_ONE_ASSETS.rockLarge2, ACT_ONE_ASSETS.rockLarge3];
-  for (let index = 0; index < 34; index += 1) {
-    const z = 18 - index * 6 + (random() - 0.5) * 5;
+  for (let index = 0; index < 40; index += 1) {
+    const z = 40 - index * 6 + (random() - 0.5) * 5;
     const side = random() < 0.5 ? -1 : 1;
     const x = pathCenter(z) + side * (combatHalfWidth(z) + 2.2 + random() * 5.4);
     spawn(largeRockUrls[index % largeRockUrls.length], {
@@ -492,8 +486,8 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
     ACT_ONE_ASSETS.treeSpiral1,
     ACT_ONE_ASSETS.treeSwirl1,
   ];
-  for (let index = 0; index < 56; index += 1) {
-    const z = 15 - random() * 190;
+  for (let index = 0; index < 72; index += 1) {
+    const z = 38 - random() * 230;
     const side = random() < 0.5 ? -1 : 1;
     const x = pathCenter(z) + side * (6.7 + random() * (combatHalfWidth(z) + 5.5));
     spawn(floraUrls[index % floraUrls.length], {
@@ -558,7 +552,7 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
 
   const astronautSource = models.get(hero.astronaut);
   if (!astronautSource) throw new Error(`Missing astronaut model for ${hero.name}.`);
-  const player = normalizedClone(astronautSource, 2.75, 'height');
+  const player = normalizedClone(astronautSource, 2.4, 'height');
   player.position.set(pathCenter(START_Z), terrainHeight(pathCenter(START_Z), START_Z) + 0.06, START_Z);
   player.rotation.y = Math.PI;
   root.add(player);
@@ -570,12 +564,12 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   playerShadow.rotation.x = -Math.PI / 2;
   root.add(playerShadow);
 
-  camera.fov = 38;
-  camera.near = 0.1;
-  camera.far = 560;
-  camera.updateProjectionMatrix();
-  const lookTarget = new THREE.Vector3(player.position.x, 0.8, player.position.z - 10.5);
-  camera.position.set(player.position.x, 22.5, player.position.z + 19.5);
+  const cameraOffset = new THREE.Vector3(32, 27, 32);
+  const lookTarget = new THREE.Vector3();
+  const initialTargetLocal = new THREE.Vector3(pathCenter(player.position.z), player.position.y + 0.5, player.position.z - 12);
+  root.localToWorld(initialTargetLocal);
+  lookTarget.copy(initialTargetLocal);
+  camera.position.copy(lookTarget).add(cameraOffset);
   camera.lookAt(lookTarget);
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -595,6 +589,7 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   const movement = new THREE.Vector3();
   const desiredCamera = new THREE.Vector3();
   const desiredLook = new THREE.Vector3();
+  const targetLocal = new THREE.Vector3();
 
   const resolveColliders = (position: THREE.Vector3): void => {
     for (const collider of colliders) {
@@ -611,6 +606,16 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   };
 
   return {
+    camera,
+    resize(width, height) {
+      const visibleHeight = 52;
+      const aspect = width / Math.max(1, height);
+      camera.left = -(visibleHeight * aspect) / 2;
+      camera.right = (visibleHeight * aspect) / 2;
+      camera.top = visibleHeight / 2;
+      camera.bottom = -visibleHeight / 2;
+      camera.updateProjectionMatrix();
+    },
     update(delta, elapsed) {
       if (!complete) {
         const horizontal = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft'));
@@ -634,9 +639,11 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
       player.position.y = groundY + 0.06 + Math.sin(elapsed * 5.2) * (movement.lengthSq() > 0 ? 0.055 : 0.018);
       playerShadow.position.set(player.position.x, groundY + 0.045, player.position.z);
 
-      desiredCamera.set(player.position.x, player.position.y + 22.5, player.position.z + 19.5);
+      targetLocal.set(pathCenter(player.position.z), player.position.y + 0.5, player.position.z - 12);
+      desiredLook.copy(targetLocal);
+      root.localToWorld(desiredLook);
+      desiredCamera.copy(desiredLook).add(cameraOffset);
       camera.position.lerp(desiredCamera, 1 - Math.pow(0.001, delta));
-      desiredLook.set(player.position.x, player.position.y + 0.65, player.position.z - 10.5);
       lookTarget.lerp(desiredLook, 1 - Math.pow(0.002, delta));
       camera.lookAt(lookTarget);
 

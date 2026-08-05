@@ -42,7 +42,12 @@ button {
 }
 
 #scene.map-mode {
+  right: auto;
+  left: 50%;
+  width: min(100vw, 56.25vh);
   background: #2c132e;
+  box-shadow: 0 0 80px rgba(0, 0, 0, 0.72);
+  transform: translateX(-50%);
 }
 
 .hidden {
@@ -398,6 +403,7 @@ button {
 }
 
 .map-hud {
+  --play-width: min(100vw, 56.25vh);
   position: fixed;
   z-index: 3;
   inset: 0;
@@ -420,21 +426,23 @@ button {
 .map-topbar {
   position: absolute;
   top: clamp(1rem, 2.4vw, 2.4rem);
-  right: clamp(1rem, 2.5vw, 2.7rem);
-  left: clamp(1rem, 2.5vw, 2.7rem);
+  left: 50%;
+  width: calc(var(--play-width) - 2rem);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 2rem;
+  transform: translateX(-50%);
 }
 
 .map-title-card h1 {
   margin: 0.32rem 0 0.1rem;
   color: #ffd08c;
   font-family: 'Audiowide', sans-serif;
-  font-size: clamp(1.25rem, 2.6vw, 2.7rem);
+  font-size: clamp(0.9rem, 1.35vw, 1.35rem);
   font-weight: 400;
   letter-spacing: 0.035em;
+  white-space: nowrap;
 }
 
 .map-title-card > p:last-child {
@@ -447,7 +455,7 @@ button {
 }
 
 .map-identity {
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: flex-end;
   text-transform: uppercase;
@@ -472,7 +480,7 @@ button {
 
 .map-controls {
   position: absolute;
-  right: clamp(1rem, 2.5vw, 2.7rem);
+  right: calc((100vw - var(--play-width)) / 2 + 1rem);
   bottom: clamp(1rem, 2vw, 2rem);
   display: flex;
   flex-direction: column;
@@ -495,9 +503,9 @@ button {
 
 .map-route {
   position: absolute;
-  bottom: clamp(1rem, 2vw, 2rem);
+  bottom: 3.8rem;
   left: 50%;
-  width: min(30rem, 42vw);
+  width: calc(var(--play-width) - 2rem);
   transform: translateX(-50%);
 }
 
@@ -539,7 +547,7 @@ button {
 .map-action {
   position: absolute;
   bottom: clamp(1rem, 2vw, 2rem);
-  left: clamp(1rem, 2.5vw, 2.7rem);
+  left: calc((100vw - var(--play-width)) / 2 + 1rem);
   padding: 0.52rem 0.8rem;
   border: 1px solid rgba(255, 208, 140, 0.62);
   border-radius: 0.12rem;

@@ -91,9 +91,10 @@ if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector |
 }
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(31, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 7.6, 35);
-camera.lookAt(0, 4.1, 0);
+const selectionCamera = new THREE.PerspectiveCamera(31, window.innerWidth / window.innerHeight, 0.1, 100);
+selectionCamera.position.set(0, 7.6, 35);
+selectionCamera.lookAt(0, 4.1, 0);
+let activeCamera: THREE.Camera = selectionCamera;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, canvas, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -311,12 +312,13 @@ function showSelectionScreen(): void {
   scene.environment = environmentTexture;
   renderer.shadowMap.enabled = false;
   renderer.toneMappingExposure = 0.8;
-  camera.fov = 31;
-  camera.near = 0.1;
-  camera.far = 100;
-  camera.position.set(0, 7.6, 35);
-  camera.lookAt(0, 4.1, 0);
-  camera.updateProjectionMatrix();
+  selectionCamera.fov = 31;
+  selectionCamera.near = 0.1;
+  selectionCamera.far = 100;
+  selectionCamera.position.set(0, 7.6, 35);
+  selectionCamera.lookAt(0, 4.1, 0);
+  selectionCamera.updateProjectionMatrix();
+  activeCamera = selectionCamera;
   selectedHeroGroup.position.set(0, 1.4, 0);
   scene.add(selectedHeroGroup);
   createLighting();
@@ -325,6 +327,7 @@ function showSelectionScreen(): void {
   selectionHud.classList.remove('hidden');
   mapHud.classList.add('hidden');
   mapComplete.classList.add('hidden');
+  handleResize();
 }
 
 function startActOne(): void {
@@ -342,7 +345,6 @@ function startActOne(): void {
   mapRuntime?.dispose();
   mapRuntime = createActOneWorld({
     scene,
-    camera,
     renderer,
     models: loadedModels,
     hero,
@@ -355,6 +357,8 @@ function startActOne(): void {
       mapComplete.classList.remove('hidden');
     },
   });
+  activeCamera = mapRuntime.camera;
+  handleResize();
 }
 
 function animate(): void {
@@ -377,13 +381,19 @@ function animate(): void {
     mapRuntime?.update(delta, elapsed);
   }
 
-  renderer.render(scene, camera);
+  renderer.render(scene, activeCamera);
 }
 
 function handleResize(): void {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (screenMode === 'map' && mapRuntime) {
+    const playWidth = Math.min(window.innerWidth, Math.round(window.innerHeight * (9 / 16)));
+    mapRuntime.resize(playWidth, window.innerHeight);
+    renderer.setSize(playWidth, window.innerHeight);
+  } else {
+    selectionCamera.aspect = window.innerWidth / window.innerHeight;
+    selectionCamera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 }
 
