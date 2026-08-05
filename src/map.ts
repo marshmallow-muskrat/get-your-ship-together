@@ -100,14 +100,14 @@ function combatHalfWidth(z: number): number {
     return total + Math.exp(-(distance * distance)) * 3.25;
   }, 0);
   const gateRhythm = Math.max(0, Math.cos((z + 8) * 0.09)) * 0.7;
-  return 8.2 + arenaWidening - gateRhythm;
+  return 12 + arenaWidening - gateRhythm;
 }
 
 function terrainHeight(x: number, z: number): number {
   const trailDistance = Math.abs(x - pathCenter(z));
   const ridge = Math.max(0, (trailDistance - combatHalfWidth(z) - 4.2) / 9.5);
   const undulation = Math.sin(x * 0.19 + z * 0.035) * 0.34 + Math.cos(z * 0.073 - x * 0.04) * 0.24;
-  return undulation + ridge * ridge * 7.5;
+  return undulation + ridge * ridge * 1.8;
 }
 
 function prepareMeshes(root: THREE.Object3D): void {
@@ -222,16 +222,16 @@ function addLighting(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
 }
 
 function createTerrain(root: THREE.Group): void {
-  const width = 56;
-  const length = 280;
+  const width = 110;
+  const length = 300;
   const centerZ = -80;
-  const geometry = new THREE.PlaneGeometry(width, length, 44, 136);
+  const geometry = new THREE.PlaneGeometry(width, length, 88, 150);
   geometry.rotateX(-Math.PI / 2);
   const positions = geometry.attributes.position;
   const colors: number[] = [];
-  const trailColor = new THREE.Color('#8d3d25');
-  const shoulderColor = new THREE.Color('#6e2a29');
-  const ridgeColor = new THREE.Color('#48243a');
+  const trailColor = new THREE.Color('#b8552c');
+  const shoulderColor = new THREE.Color('#a04530');
+  const ridgeColor = new THREE.Color('#6b3340');
 
   for (let index = 0; index < positions.count; index += 1) {
     const x = positions.getX(index);
@@ -242,7 +242,10 @@ function createTerrain(root: THREE.Group): void {
     const distance = Math.abs(x - pathCenter(worldZ));
     const blend = THREE.MathUtils.clamp((distance - 7) / 22, 0, 1);
     const color = trailColor.clone().lerp(shoulderColor, Math.min(1, blend * 1.3)).lerp(ridgeColor, Math.max(0, blend - 0.45));
-    color.offsetHSL((Math.sin(index * 12.37) + 1) * 0.004, 0, Math.sin(index * 4.1) * 0.025);
+    // Noise keyed to world position, not vertex index — an index-based term
+    // lines up with the grid rows and reads as horizontal banding.
+    const grain = Math.sin(x * 1.7 + worldZ * 0.9) * Math.cos(x * 0.6 - worldZ * 1.3);
+    color.offsetHSL(grain * 0.006, 0, grain * 0.02);
     colors.push(color.r, color.g, color.b);
   }
 
@@ -279,7 +282,7 @@ function createTerrain(root: THREE.Group): void {
   const path = new THREE.Mesh(
     pathGeometry,
     new THREE.MeshStandardMaterial({
-      color: '#bd6c3b',
+      color: '#e0a05e',
       roughness: 1,
       flatShading: true,
       polygonOffset: true,
@@ -380,7 +383,7 @@ function createBeacon(root: THREE.Group, x: number, z: number, color = '#6ff4ff'
 function createExtractionPad(root: THREE.Group, x: number, z: number): { beaconLight: THREE.PointLight; ring: THREE.Mesh } {
   const y = terrainHeight(x, z) + 0.22;
   const pad = new THREE.Mesh(
-    new THREE.CylinderGeometry(7.2, 7.8, 0.68, 14),
+    new THREE.CylinderGeometry(4.4, 4.8, 0.5, 14),
     new THREE.MeshStandardMaterial({ color: '#777985', roughness: 0.5, metalness: 0.38 }),
   );
   pad.position.set(x, y, z);
@@ -389,7 +392,7 @@ function createExtractionPad(root: THREE.Group, x: number, z: number): { beaconL
   root.add(pad);
 
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(5.45, 0.22, 8, 48),
+    new THREE.TorusGeometry(3.35, 0.16, 8, 48),
     new THREE.MeshStandardMaterial({ color: '#7df5ff', emissive: '#21d8ff', emissiveIntensity: 3.8, roughness: 0.24 }),
   );
   ring.rotation.x = Math.PI / 2;
@@ -398,7 +401,7 @@ function createExtractionPad(root: THREE.Group, x: number, z: number): { beaconL
 
   for (let index = 0; index < 4; index += 1) {
     const angle = (index / 4) * Math.PI * 2 + Math.PI / 4;
-    createBeacon(root, x + Math.cos(angle) * 6.5, z + Math.sin(angle) * 6.5, '#7df5ff', 2.5);
+    createBeacon(root, x + Math.cos(angle) * 4, z + Math.sin(angle) * 4, '#7df5ff', 1.5);
   }
 
   const beaconLight = new THREE.PointLight('#59eaff', 0, 26, 2);
@@ -444,17 +447,19 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
     return object;
   };
 
+  // Rock masses are scattered set dressing at the concept-art scale: many small
+  // props rather than a handful of frame-filling walls.
   const cliffPalette = ['#6f302f', '#843a31', '#54273a', '#9c4931'];
-  for (let index = 0; index < 35; index += 1) {
-    const z = 42 - index * 7.15 + (random() - 0.5) * 2.5;
+  for (let index = 0; index < 90; index += 1) {
+    const z = 42 - index * 2.8 + (random() - 0.5) * 2.5;
     for (const side of [-1, 1]) {
       if (side < 0 && z > -8 && z < 22) continue;
-      const wallDistance = combatHalfWidth(z) + 7.4 + random() * 2.8;
+      const wallDistance = combatHalfWidth(z) + 1.5 + random() * 12;
       addCliffMass(
         root,
         pathCenter(z) + side * wallDistance,
         z,
-        2.8 + random() * 2,
+        0.9 + random() * 0.7,
         cliffPalette[(index + (side > 0 ? 1 : 0)) % cliffPalette.length],
         random,
       );
@@ -462,14 +467,14 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   }
 
   const largeRockUrls = [ACT_ONE_ASSETS.rockLarge1, ACT_ONE_ASSETS.rockLarge2, ACT_ONE_ASSETS.rockLarge3];
-  for (let index = 0; index < 40; index += 1) {
-    const z = 40 - index * 6 + (random() - 0.5) * 5;
+  for (let index = 0; index < 160; index += 1) {
+    const z = 40 - index * 1.5 + (random() - 0.5) * 5;
     const side = random() < 0.5 ? -1 : 1;
-    const x = pathCenter(z) + side * (combatHalfWidth(z) + 2.2 + random() * 5.4);
+    const x = pathCenter(z) + side * (2.0 + random() * (combatHalfWidth(z) + 12));
     spawn(largeRockUrls[index % largeRockUrls.length], {
       x,
       z,
-      target: 2.8 + random() * 4.8,
+      target: 0.7 + random() * 1.7,
       mode: 'height',
       rotationY: random() * Math.PI * 2,
     });
@@ -486,23 +491,31 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
     ACT_ONE_ASSETS.treeSpiral1,
     ACT_ONE_ASSETS.treeSwirl1,
   ];
-  for (let index = 0; index < 72; index += 1) {
-    const z = 38 - random() * 230;
+  // Flora clusters: a seed point every few units with a tight knot of plants
+  // around it, so density reads as designed rather than as even scatter.
+  for (let cluster = 0; cluster < 170; cluster += 1) {
+    const seedZ = 38 - random() * 230;
     const side = random() < 0.5 ? -1 : 1;
-    const x = pathCenter(z) + side * (6.7 + random() * (combatHalfWidth(z) + 5.5));
-    spawn(floraUrls[index % floraUrls.length], {
-      x,
-      z,
-      target: 1.25 + random() * 2.9,
-      mode: 'height',
-      rotationY: random() * Math.PI * 2,
-    });
+    const seedX = pathCenter(seedZ) + side * (2.0 + random() * (combatHalfWidth(seedZ) + 11));
+    const members = 2 + Math.floor(random() * 4);
+    for (let member = 0; member < members; member += 1) {
+      const x = seedX + (random() - 0.5) * 4.2;
+      const z = seedZ + (random() - 0.5) * 4.2;
+      if (Math.abs(x - pathCenter(z)) < 1.6) continue;
+      spawn(floraUrls[Math.floor(random() * floraUrls.length)], {
+        x,
+        z,
+        target: 0.7 + random() * 1.5,
+        mode: 'height',
+        rotationY: random() * Math.PI * 2,
+      });
+    }
   }
 
   // Crash crater and the selected hero's matching ship establish the story immediately.
-  const craterX = pathCenter(7) - 7.5;
+  const craterX = pathCenter(7) - 8.5;
   const crater = new THREE.Mesh(
-    new THREE.TorusGeometry(6.8, 1.25, 5, 24),
+    new THREE.TorusGeometry(4.2, 0.8, 5, 24),
     new THREE.MeshStandardMaterial({ color: '#512737', roughness: 1, flatShading: true }),
   );
   crater.rotation.x = Math.PI / 2;
@@ -511,28 +524,28 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   crater.castShadow = true;
   crater.receiveShadow = true;
   root.add(crater);
-  spawn(hero.ship, { x: craterX, z: 7, target: 8.5, mode: 'width', rotationY: -0.62, pitch: 0.28, roll: -0.2, yOffset: 0.35, colliderRadius: 4.4 });
-  createBeacon(root, craterX - 5.6, 10.5, hero.accent, 2.2);
-  createBeacon(root, craterX + 5.8, 4, '#6ff4ff', 1.6);
+  spawn(hero.ship, { x: craterX, z: 7, target: 5.2, mode: 'width', rotationY: -0.62, pitch: 0.28, roll: -0.2, yOffset: 0.25, colliderRadius: 2.7 });
+  createBeacon(root, craterX - 3.4, 10.5, hero.accent, 1.4);
+  createBeacon(root, craterX + 3.6, 4, '#6ff4ff', 1.0);
 
   // Habitat ruins and the first large visual landmark.
   const habitatZ = -44;
-  spawn(ACT_ONE_ASSETS.geodesicDome, { x: pathCenter(habitatZ) + 10.5, z: habitatZ, target: 9.5, mode: 'width', rotationY: -0.35, colliderRadius: 4.8 });
-  spawn(ACT_ONE_ASSETS.houseCylinder, { x: pathCenter(-53) - 10.5, z: -53, target: 7.8, mode: 'width', rotationY: 0.5, colliderRadius: 4 });
-  spawn(ACT_ONE_ASSETS.solarPanel, { x: pathCenter(-59) + 9.2, z: -59, target: 5.2, mode: 'width', rotationY: -0.15, colliderRadius: 2.6 });
-  spawn(ACT_ONE_ASSETS.rover, { x: pathCenter(-70) - 7.8, z: -70, target: 3.7, mode: 'width', rotationY: 0.75, colliderRadius: 2 });
+  spawn(ACT_ONE_ASSETS.geodesicDome, { x: pathCenter(habitatZ) + 12.5, z: habitatZ, target: 6, mode: 'width', rotationY: -0.35, colliderRadius: 3 });
+  spawn(ACT_ONE_ASSETS.houseCylinder, { x: pathCenter(-53) - 12.5, z: -53, target: 4.8, mode: 'width', rotationY: 0.5, colliderRadius: 2.5 });
+  spawn(ACT_ONE_ASSETS.solarPanel, { x: pathCenter(-59) + 11, z: -59, target: 3.2, mode: 'width', rotationY: -0.15, colliderRadius: 1.6 });
+  spawn(ACT_ONE_ASSETS.rover, { x: pathCenter(-70) - 9.5, z: -70, target: 2.3, mode: 'width', rotationY: 0.75, colliderRadius: 1.2 });
   createBeacon(root, pathCenter(-42) - 5.4, -42, '#76ecff', 2.1);
   createBeacon(root, pathCenter(-67) + 5.7, -67, '#ffba63', 1.8);
 
   // Abandoned frontier station creates the final change in visual rhythm before extraction.
-  spawn(ACT_ONE_ASSETS.houseLong, { x: pathCenter(-108) - 11.5, z: -108, target: 11.5, mode: 'width', rotationY: 0.1, colliderRadius: 5.2 });
-  spawn(ACT_ONE_ASSETS.houseSingle, { x: pathCenter(-120) + 10, z: -120, target: 7.5, mode: 'width', rotationY: -0.52, colliderRadius: 3.8 });
+  spawn(ACT_ONE_ASSETS.houseLong, { x: pathCenter(-108) - 13, z: -108, target: 7, mode: 'width', rotationY: 0.1, colliderRadius: 3.2 });
+  spawn(ACT_ONE_ASSETS.houseSingle, { x: pathCenter(-120) + 12, z: -120, target: 4.6, mode: 'width', rotationY: -0.52, colliderRadius: 2.3 });
   createBeacon(root, pathCenter(-102) + 5.8, -102, '#ffb759', 2.2);
   createBeacon(root, pathCenter(-126) - 5.8, -126, '#75f3ff', 2.2);
 
   const extractionX = pathCenter(EXTRACTION_Z);
   const { beaconLight, ring: extractionRing } = createExtractionPad(root, extractionX, EXTRACTION_Z);
-  spawn(ACT_ONE_ASSETS.baseLarge, { x: extractionX + 13.5, z: EXTRACTION_Z - 3, target: 13, mode: 'width', rotationY: -0.2, colliderRadius: 6 });
+  spawn(ACT_ONE_ASSETS.baseLarge, { x: extractionX + 15, z: EXTRACTION_Z - 3, target: 8, mode: 'width', rotationY: -0.2, colliderRadius: 3.7 });
 
   const mech = spawn(hero.mech, {
     x: extractionX + 7.2,
@@ -552,7 +565,9 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
 
   const astronautSource = models.get(hero.astronaut);
   if (!astronautSource) throw new Error(`Missing astronaut model for ${hero.name}.`);
-  const player = normalizedClone(astronautSource, 2.4, 'height');
+  // Deliberately oversized against the environment scale so the hero stays
+  // readable at the pulled-back diorama camera.
+  const player = normalizedClone(astronautSource, 2.8, 'height');
   player.position.set(pathCenter(START_Z), terrainHeight(pathCenter(START_Z), START_Z) + 0.06, START_Z);
   player.rotation.y = Math.PI;
   root.add(player);
@@ -608,7 +623,7 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   return {
     camera,
     resize(width, height) {
-      const visibleHeight = 52;
+      const visibleHeight = 78;
       const aspect = width / Math.max(1, height);
       camera.left = -(visibleHeight * aspect) / 2;
       camera.right = (visibleHeight * aspect) / 2;
