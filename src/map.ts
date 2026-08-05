@@ -32,6 +32,12 @@ interface Collider {
   radius: number;
 }
 
+interface Floater {
+  object: THREE.Object3D;
+  baseY: number;
+  phase: number;
+}
+
 interface SpawnOptions {
   x: number;
   z: number;
@@ -42,6 +48,7 @@ interface SpawnOptions {
   roll?: number;
   yOffset?: number;
   colliderRadius?: number;
+  tint?: THREE.Color;
 }
 
 const SPACE_KIT_ROOT = '/assets/space-packs/Ultimate Space Kit - March 2023';
@@ -60,19 +67,58 @@ const ACT_ONE_ASSETS = {
   rock1: kitUrl('Environment/GLTF/Rock_1.gltf'),
   rock2: kitUrl('Environment/GLTF/Rock_2.gltf'),
   rock3: kitUrl('Environment/GLTF/Rock_3.gltf'),
+  rock4: kitUrl('Environment/GLTF/Rock_4.gltf'),
   plant1: kitUrl('Environment/GLTF/Plant_1.gltf'),
   plant2: kitUrl('Environment/GLTF/Plant_2.gltf'),
   plant3: kitUrl('Environment/GLTF/Plant_3.gltf'),
   bush1: kitUrl('Environment/GLTF/Bush_1.gltf'),
   bush2: kitUrl('Environment/GLTF/Bush_2.gltf'),
+  bush3: kitUrl('Environment/GLTF/Bush_3.gltf'),
+  grass1: kitUrl('Environment/GLTF/Grass_1.gltf'),
+  grass2: kitUrl('Environment/GLTF/Grass_2.gltf'),
+  grass3: kitUrl('Environment/GLTF/Grass_3.gltf'),
+  treeBlob1: kitUrl('Environment/GLTF/Tree_Blob_1.gltf'),
+  treeBlob2: kitUrl('Environment/GLTF/Tree_Blob_2.gltf'),
+  treeBlob3: kitUrl('Environment/GLTF/Tree_Blob_3.gltf'),
   treeLava1: kitUrl('Environment/GLTF/Tree_Lava_1.gltf'),
   treeLava2: kitUrl('Environment/GLTF/Tree_Lava_2.gltf'),
+  treeLava3: kitUrl('Environment/GLTF/Tree_Lava_3.gltf'),
+  treeLight1: kitUrl('Environment/GLTF/Tree_Light_1.gltf'),
+  treeLight2: kitUrl('Environment/GLTF/Tree_Light_2.gltf'),
+  treeSpikes1: kitUrl('Environment/GLTF/Tree_Spikes_1.gltf'),
+  treeSpikes2: kitUrl('Environment/GLTF/Tree_Spikes_2.gltf'),
   treeSpiral1: kitUrl('Environment/GLTF/Tree_Spiral_1.gltf'),
+  treeSpiral2: kitUrl('Environment/GLTF/Tree_Spiral_2.gltf'),
+  treeSpiral3: kitUrl('Environment/GLTF/Tree_Spiral_3.gltf'),
   treeSwirl1: kitUrl('Environment/GLTF/Tree_Swirl_1.gltf'),
+  treeSwirl2: kitUrl('Environment/GLTF/Tree_Swirl_2.gltf'),
+  // Modular tech clutter — the concept art's ground is littered with crates,
+  // supports and pipework around every structure.
+  connector: kitUrl('Environment/GLTF/Connector.gltf'),
+  metalSupport: kitUrl('Environment/GLTF/MetalSupport.gltf'),
+  stairs: kitUrl('Environment/GLTF/Stairs.gltf'),
+  ramp: kitUrl('Environment/GLTF/Ramp.gltf'),
+  roofVentL: kitUrl('Environment/GLTF/Roof_VentL.gltf'),
+  roofVentR: kitUrl('Environment/GLTF/Roof_VentR.gltf'),
+  roofRadar: kitUrl('Environment/GLTF/Roof_Radar.gltf'),
+  roofAntenna: kitUrl('Environment/GLTF/Roof_Antenna.gltf'),
+  buildingL: kitUrl('Environment/GLTF/Building_L.gltf'),
+  houseOpen: kitUrl('Environment/GLTF/House_Open.gltf'),
+  solarPanelStructure: kitUrl('Environment/GLTF/SolarPanel_Structure.gltf'),
+  // Ambient wildlife. The little critters are most of the concept art's charm.
+  critterTiny: kitUrl('Characters/GLTF/Enemy_ExtraSmall.gltf'),
+  critterSmall: kitUrl('Characters/GLTF/Enemy_Small.gltf'),
+  critterLarge: kitUrl('Characters/GLTF/Enemy_Large.gltf'),
+  critterFlying: kitUrl('Characters/GLTF/Enemy_Flying.gltf'),
   rover: kitUrl('Vehicles/GLTF/Rover_1.gltf'),
+  rover2: kitUrl('Vehicles/GLTF/Rover_2.gltf'),
+  roverRound: kitUrl('Vehicles/GLTF/Rover_Round.gltf'),
 } as const;
 
 export const MAP_ASSET_URLS = Object.values(ACT_ONE_ASSETS);
+
+// Key-light direction, held constant relative to the travelling shadow frustum.
+const SUN_OFFSET = new THREE.Vector3(-56, 52, 40);
 
 const START_Z = 12;
 const EXTRACTION_Z = -158;
@@ -100,27 +146,63 @@ function combatHalfWidth(z: number): number {
     return total + Math.exp(-(distance * distance)) * 3.25;
   }, 0);
   const gateRhythm = Math.max(0, Math.cos((z + 8) * 0.09)) * 0.7;
-  return 12 + arenaWidening - gateRhythm;
+  return 9.5 + arenaWidening - gateRhythm;
 }
+
+// A broad, slowly varying rock field. Quantising it produces the concept art's
+// chunky flat-topped mesas instead of soft rolling dunes.
+function mesaField(x: number, z: number): number {
+  // A broad octave carries the large plateau masses; the finer ones break their
+  // outlines up so the terraces don't read as regular blobs.
+  return (
+    Math.sin(x * 0.032 - z * 0.026) * 1.15 +
+    Math.sin(x * 0.085 + z * 0.031) * Math.cos(z * 0.062 - x * 0.048) +
+    Math.sin(x * 0.041 - z * 0.077) * 0.6 +
+    Math.cos(x * 0.13 + z * 0.11) * 0.25
+  );
+}
+
+const TERRACE_STEP = 1.45;
 
 function terrainHeight(x: number, z: number): number {
   const trailDistance = Math.abs(x - pathCenter(z));
-  const ridge = Math.max(0, (trailDistance - combatHalfWidth(z) - 4.2) / 9.5);
-  const undulation = Math.sin(x * 0.19 + z * 0.035) * 0.34 + Math.cos(z * 0.073 - x * 0.04) * 0.24;
-  return undulation + ridge * ridge * 1.8;
+  const halfWidth = combatHalfWidth(z);
+  // The playable lane stays flat; mesas only rise once we're clear of it.
+  const mesaMask = THREE.MathUtils.smoothstep(trailDistance, halfWidth - 2, halfWidth + 4);
+  const terraces = Math.max(0, Math.floor((mesaField(x, z) + 0.35) * 2.2));
+  const sand = Math.sin(x * 0.19 + z * 0.035) * 0.16 + Math.cos(z * 0.073 - x * 0.04) * 0.12;
+  return sand * (1 - mesaMask * 0.6) + terraces * TERRACE_STEP * mesaMask;
 }
 
-function prepareMeshes(root: THREE.Object3D): void {
+// How steep the ground is at a point, used to keep props off cliff faces.
+function terrainSlope(x: number, z: number): number {
+  const h = terrainHeight(x, z);
+  return Math.max(
+    Math.abs(terrainHeight(x + 0.6, z) - h),
+    Math.abs(terrainHeight(x - 0.6, z) - h),
+    Math.abs(terrainHeight(x, z + 0.6) - h),
+    Math.abs(terrainHeight(x, z - 0.6) - h),
+  );
+}
+
+function prepareMeshes(root: THREE.Object3D, tint?: THREE.Color): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    child.castShadow = false;
-    child.receiveShadow = false;
+    child.castShadow = true;
+    child.receiveShadow = true;
     const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material];
     const materials = sourceMaterials.map((source) => {
       const material = source.clone();
       if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
-        material.roughness = Math.max(material.roughness, 0.72);
-        material.envMapIntensity = 0.3;
+        material.roughness = Math.max(material.roughness, 0.78);
+        material.metalness = Math.min(material.metalness, 0.15);
+        material.envMapIntensity = 0.22;
+        material.flatShading = true;
+        // Push toward the concept art's poster-like saturation.
+        const hsl = { h: 0, s: 0, l: 0 };
+        material.color.getHSL(hsl);
+        material.color.setHSL(hsl.h, Math.min(1, hsl.s * 1.28), hsl.l);
+        if (tint) material.color.lerp(tint, 0.32);
       }
       material.needsUpdate = true;
       return material;
@@ -129,9 +211,9 @@ function prepareMeshes(root: THREE.Object3D): void {
   });
 }
 
-function normalizedClone(source: THREE.Object3D, target: number, mode: 'height' | 'width' | 'max'): THREE.Group {
+function normalizedClone(source: THREE.Object3D, target: number, mode: 'height' | 'width' | 'max', tint?: THREE.Color): THREE.Group {
   const clone = SkeletonUtils.clone(source);
-  prepareMeshes(clone);
+  prepareMeshes(clone, tint);
   clone.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(clone);
   const size = bounds.getSize(new THREE.Vector3());
@@ -155,9 +237,9 @@ function addSky(scene: THREE.Scene): void {
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        topColor: { value: new THREE.Color('#120a30') },
-        middleColor: { value: new THREE.Color('#4b2144') },
-        horizonColor: { value: new THREE.Color('#e56e45') },
+        topColor: { value: new THREE.Color('#0d0824') },
+        middleColor: { value: new THREE.Color('#1c1442') },
+        horizonColor: { value: new THREE.Color('#3a2358') },
       },
       vertexShader: `
         varying vec3 vPosition;
@@ -205,33 +287,54 @@ function addSky(scene: THREE.Scene): void {
   scene.add(ring);
 }
 
-function addLighting(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
-  renderer.shadowMap.enabled = false;
-  renderer.toneMappingExposure = 0.9;
+function addLighting(scene: THREE.Scene, renderer: THREE.WebGLRenderer): THREE.DirectionalLight {
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Filmic tone mapping desaturates and lifts exactly the saturated mid-tones
+  // this art style is built from. The poster look needs the raw linear values.
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1;
 
-  scene.add(new THREE.HemisphereLight('#ffd0a1', '#56304d', 1.5));
-  scene.add(new THREE.AmbientLight('#ffe1bd', 0.62));
+  // Ambient is deliberately low. The previous mix was ambient-dominated, which
+  // flattened every form; the concept art has a clear key-to-shadow separation.
+  scene.add(new THREE.HemisphereLight('#ffd9ad', '#3a2350', 0.58));
+  scene.add(new THREE.AmbientLight('#ffe1bd', 0.2));
 
-  const sunLight = new THREE.DirectionalLight('#fff0ce', 1.65);
+  const sunLight = new THREE.DirectionalLight('#fff3d6', 1.45);
   sunLight.position.set(-28, 60, 24);
+  sunLight.castShadow = true;
+  // A tight shadow frustum that travels with the player keeps texel density
+  // high; covering the whole 300-unit map at once would be far too coarse.
+  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.camera.left = -58;
+  sunLight.shadow.camera.right = 58;
+  sunLight.shadow.camera.top = 58;
+  sunLight.shadow.camera.bottom = -58;
+  sunLight.shadow.camera.near = 1;
+  sunLight.shadow.camera.far = 190;
+  sunLight.shadow.bias = -0.0012;
+  sunLight.shadow.normalBias = 0.05;
   scene.add(sunLight);
+  scene.add(sunLight.target);
 
-  const coolFill = new THREE.DirectionalLight('#70d7e8', 0.38);
+  const coolFill = new THREE.DirectionalLight('#7fb6ff', 0.5);
   coolFill.position.set(28, 22, -48);
   scene.add(coolFill);
+
+  return sunLight;
 }
 
 function createTerrain(root: THREE.Group): void {
-  const width = 110;
-  const length = 300;
-  const centerZ = -80;
-  const geometry = new THREE.PlaneGeometry(width, length, 88, 150);
+  const width = 130;
+  const length = 380;
+  const centerZ = -70;
+  const geometry = new THREE.PlaneGeometry(width, length, 150, 240);
   geometry.rotateX(-Math.PI / 2);
   const positions = geometry.attributes.position;
   const colors: number[] = [];
-  const trailColor = new THREE.Color('#b8552c');
-  const shoulderColor = new THREE.Color('#a04530');
-  const ridgeColor = new THREE.Color('#6b3340');
+  const sandColor = new THREE.Color('#c26a30');
+  const rockColor = new THREE.Color('#a94d25');
+  const faceColor = new THREE.Color('#5f2620');
 
   for (let index = 0; index < positions.count; index += 1) {
     const x = positions.getX(index);
@@ -239,13 +342,17 @@ function createTerrain(root: THREE.Group): void {
     const worldZ = localZ + centerZ;
     const height = terrainHeight(x, worldZ);
     positions.setY(index, height);
-    const distance = Math.abs(x - pathCenter(worldZ));
-    const blend = THREE.MathUtils.clamp((distance - 7) / 22, 0, 1);
-    const color = trailColor.clone().lerp(shoulderColor, Math.min(1, blend * 1.3)).lerp(ridgeColor, Math.max(0, blend - 0.45));
+
+    // Height picks the sand-to-rock ramp; slope darkens the near-vertical mesa
+    // faces. That single slope term is what reads as bevelled, chunky rock.
+    const lift = THREE.MathUtils.clamp(height / (TERRACE_STEP * 3), 0, 1);
+    const steepness = THREE.MathUtils.clamp(terrainSlope(x, worldZ) / TERRACE_STEP, 0, 1);
+    const color = sandColor.clone().lerp(rockColor, lift).lerp(faceColor, steepness * 0.85);
+
     // Noise keyed to world position, not vertex index — an index-based term
     // lines up with the grid rows and reads as horizontal banding.
     const grain = Math.sin(x * 1.7 + worldZ * 0.9) * Math.cos(x * 0.6 - worldZ * 1.3);
-    color.offsetHSL(grain * 0.006, 0, grain * 0.02);
+    color.offsetHSL(grain * 0.006, 0, grain * 0.018);
     colors.push(color.r, color.g, color.b);
   }
 
@@ -282,7 +389,7 @@ function createTerrain(root: THREE.Group): void {
   const path = new THREE.Mesh(
     pathGeometry,
     new THREE.MeshStandardMaterial({
-      color: '#e0a05e',
+      color: '#d1904f',
       roughness: 1,
       flatShading: true,
       polygonOffset: true,
@@ -322,35 +429,18 @@ function addDust(root: THREE.Group): void {
   const random = seededRandom(29);
   const positions: number[] = [];
   for (let index = 0; index < 520; index += 1) {
-    const z = THREE.MathUtils.lerp(42, -200, random());
-    const x = THREE.MathUtils.lerp(-34, 34, random());
+    const z = THREE.MathUtils.lerp(95, -220, random());
+    const x = THREE.MathUtils.lerp(-44, 44, random());
     positions.push(x, terrainHeight(x, z) + 0.7 + random() * 8, z);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   const particles = new THREE.Points(
     geometry,
-    new THREE.PointsMaterial({ color: '#ffc47b', size: 0.18, transparent: true, opacity: 0.26, depthWrite: false }),
+    new THREE.PointsMaterial({ color: '#ffc47b', size: 0.16, transparent: true, opacity: 0.12, depthWrite: false }),
   );
   particles.name = 'dust';
   root.add(particles);
-}
-
-function addCliffMass(root: THREE.Group, x: number, z: number, scale: number, color: string, random: () => number): void {
-  const group = new THREE.Group();
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.96, flatShading: true });
-  const pieces = 3 + Math.floor(random() * 3);
-  for (let index = 0; index < pieces; index += 1) {
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), material);
-    rock.scale.set(scale * (0.65 + random() * 0.7), scale * (1 + random() * 1.15), scale * (0.7 + random() * 0.75));
-    rock.position.set((random() - 0.5) * scale * 1.5, rock.scale.y * 0.72, (random() - 0.5) * scale * 1.2);
-    rock.rotation.set(random() * 0.3, random() * Math.PI, random() * 0.18);
-    rock.castShadow = true;
-    rock.receiveShadow = true;
-    group.add(rock);
-  }
-  group.position.set(x, terrainHeight(x, z) - 0.4, z);
-  root.add(group);
 }
 
 function createBeacon(root: THREE.Group, x: number, z: number, color = '#6ff4ff', height = 1.7): THREE.Group {
@@ -422,24 +512,33 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
   let revealProgress = 0;
 
   scene.clear();
-  scene.background = new THREE.Color('#2c132e');
-  scene.fog = new THREE.FogExp2('#4e2740', 0.0024);
+  scene.background = new THREE.Color('#150e33');
+  // Only enough haze to soften the far edge. The old density washed a warm
+  // film over the whole frame and killed the ground's colour separation.
+  scene.fog = new THREE.FogExp2('#241a4a', 0.0009);
   scene.add(root);
   addSky(scene);
-  addLighting(scene, renderer);
+  const sunLight = addLighting(scene, renderer);
   createTerrain(root);
   addDust(root);
 
   const spawn = (url: string, spawnOptions: SpawnOptions): THREE.Group | null => {
     const source = models.get(url);
     if (!source) return null;
-    const object = normalizedClone(source, spawnOptions.target, spawnOptions.mode ?? 'height');
+    const object = normalizedClone(source, spawnOptions.target, spawnOptions.mode ?? 'height', spawnOptions.tint);
     object.rotation.set(spawnOptions.pitch ?? 0, spawnOptions.rotationY ?? 0, spawnOptions.roll ?? 0);
     object.position.set(
       spawnOptions.x,
       terrainHeight(spawnOptions.x, spawnOptions.z) + (spawnOptions.yOffset ?? 0),
       spawnOptions.z,
     );
+    // Ground cover and critters are too small for their shadows to read, and
+    // they make up most of the object count — skip them in the shadow pass.
+    if (spawnOptions.target < 0.9) {
+      object.traverse((child) => {
+        if (child instanceof THREE.Mesh) child.castShadow = false;
+      });
+    }
     root.add(object);
     if (spawnOptions.colliderRadius) {
       colliders.push({ x: spawnOptions.x, z: spawnOptions.z, radius: spawnOptions.colliderRadius });
@@ -447,66 +546,161 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
     return object;
   };
 
-  // Rock masses are scattered set dressing at the concept-art scale: many small
-  // props rather than a handful of frame-filling walls.
-  const cliffPalette = ['#6f302f', '#843a31', '#54273a', '#9c4931'];
-  for (let index = 0; index < 90; index += 1) {
-    const z = 42 - index * 2.8 + (random() - 0.5) * 2.5;
-    for (const side of [-1, 1]) {
-      if (side < 0 && z > -8 && z < 22) continue;
-      const wallDistance = combatHalfWidth(z) + 1.5 + random() * 12;
-      addCliffMass(
-        root,
-        pathCenter(z) + side * wallDistance,
-        z,
-        0.9 + random() * 0.7,
-        cliffPalette[(index + (side > 0 ? 1 : 0)) % cliffPalette.length],
-        random,
-      );
-    }
-  }
+  const pick = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)];
 
-  const largeRockUrls = [ACT_ONE_ASSETS.rockLarge1, ACT_ONE_ASSETS.rockLarge2, ACT_ONE_ASSETS.rockLarge3];
-  for (let index = 0; index < 160; index += 1) {
-    const z = 40 - index * 1.5 + (random() - 0.5) * 5;
+  // Props must sit on flat ground. Dropping one on a mesa face leaves it
+  // half-buried or floating off the cliff edge.
+  const findFlatSpot = (
+    seedX: number,
+    seedZ: number,
+    spread: number,
+  ): { x: number; z: number } | null => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const x = seedX + (random() - 0.5) * spread;
+      const z = seedZ + (random() - 0.5) * spread;
+      if (Math.abs(x - pathCenter(z)) < 1.5) continue;
+      if (terrainSlope(x, z) < 0.35) return { x, z };
+    }
+    return null;
+  };
+
+  // Rock boulders in the terrain's own colour family. The kit's stock greys and
+  // mauves read as a different painting from the orange ground.
+  const rockTint = new THREE.Color('#b05a2e');
+  const rockUrls = [
+    ACT_ONE_ASSETS.rock1,
+    ACT_ONE_ASSETS.rock2,
+    ACT_ONE_ASSETS.rock3,
+    ACT_ONE_ASSETS.rock4,
+    ACT_ONE_ASSETS.rockLarge1,
+    ACT_ONE_ASSETS.rockLarge2,
+    ACT_ONE_ASSETS.rockLarge3,
+  ];
+  for (let index = 0; index < 340; index += 1) {
+    const seedZ = 95 - random() * 300;
     const side = random() < 0.5 ? -1 : 1;
-    const x = pathCenter(z) + side * (2.0 + random() * (combatHalfWidth(z) + 12));
-    spawn(largeRockUrls[index % largeRockUrls.length], {
-      x,
-      z,
-      target: 0.7 + random() * 1.7,
+    const seedX = pathCenter(seedZ) + side * (2.0 + random() * (combatHalfWidth(seedZ) + 14));
+    const spot = findFlatSpot(seedX, seedZ, 3);
+    if (!spot) continue;
+    spawn(pick(rockUrls), {
+      x: spot.x,
+      z: spot.z,
+      target: 0.45 + random() * 1.5,
       mode: 'height',
       rotationY: random() * Math.PI * 2,
+      tint: rockTint,
     });
   }
 
+  // Flora clusters: a seed point with a tight knot of plants around it, so
+  // density reads as designed rather than as even scatter. The concept art's
+  // colour comes almost entirely from these, so the roster is deliberately wide.
   const floraUrls = [
     ACT_ONE_ASSETS.plant1,
     ACT_ONE_ASSETS.plant2,
     ACT_ONE_ASSETS.plant3,
     ACT_ONE_ASSETS.bush1,
     ACT_ONE_ASSETS.bush2,
+    ACT_ONE_ASSETS.bush3,
+    ACT_ONE_ASSETS.treeBlob1,
+    ACT_ONE_ASSETS.treeBlob2,
+    ACT_ONE_ASSETS.treeBlob3,
     ACT_ONE_ASSETS.treeLava1,
     ACT_ONE_ASSETS.treeLava2,
+    ACT_ONE_ASSETS.treeLava3,
+    ACT_ONE_ASSETS.treeLight1,
+    ACT_ONE_ASSETS.treeLight2,
+    ACT_ONE_ASSETS.treeSpikes1,
+    ACT_ONE_ASSETS.treeSpikes2,
     ACT_ONE_ASSETS.treeSpiral1,
+    ACT_ONE_ASSETS.treeSpiral2,
+    ACT_ONE_ASSETS.treeSpiral3,
     ACT_ONE_ASSETS.treeSwirl1,
+    ACT_ONE_ASSETS.treeSwirl2,
   ];
-  // Flora clusters: a seed point every few units with a tight knot of plants
-  // around it, so density reads as designed rather than as even scatter.
-  for (let cluster = 0; cluster < 170; cluster += 1) {
-    const seedZ = 38 - random() * 230;
+  const grassUrls = [ACT_ONE_ASSETS.grass1, ACT_ONE_ASSETS.grass2, ACT_ONE_ASSETS.grass3];
+  for (let cluster = 0; cluster < 270; cluster += 1) {
+    const seedZ = 95 - random() * 300;
     const side = random() < 0.5 ? -1 : 1;
-    const seedX = pathCenter(seedZ) + side * (2.0 + random() * (combatHalfWidth(seedZ) + 11));
-    const members = 2 + Math.floor(random() * 4);
+    const seedX = pathCenter(seedZ) + side * (2.0 + random() * (combatHalfWidth(seedZ) + 13));
+    // One species per cluster — mixed-species knots read as noise.
+    const species = pick(floraUrls);
+    const members = 3 + Math.floor(random() * 5);
     for (let member = 0; member < members; member += 1) {
-      const x = seedX + (random() - 0.5) * 4.2;
-      const z = seedZ + (random() - 0.5) * 4.2;
-      if (Math.abs(x - pathCenter(z)) < 1.6) continue;
-      spawn(floraUrls[Math.floor(random() * floraUrls.length)], {
-        x,
-        z,
+      const spot = findFlatSpot(seedX, seedZ, 4.5);
+      if (!spot) continue;
+      spawn(species, {
+        x: spot.x,
+        z: spot.z,
         target: 0.7 + random() * 1.5,
         mode: 'height',
+        rotationY: random() * Math.PI * 2,
+      });
+    }
+    // Scrubby ground cover fringing each cluster.
+    for (let blade = 0; blade < 3; blade += 1) {
+      const spot = findFlatSpot(seedX, seedZ, 7);
+      if (!spot) continue;
+      spawn(pick(grassUrls), {
+        x: spot.x,
+        z: spot.z,
+        target: 0.35 + random() * 0.5,
+        mode: 'height',
+        rotationY: random() * Math.PI * 2,
+      });
+    }
+  }
+
+  // Scattered wildlife. Small, colourful and everywhere — this is most of what
+  // makes the concept art feel inhabited rather than like empty terrain.
+  const critterUrls = [
+    ACT_ONE_ASSETS.critterTiny,
+    ACT_ONE_ASSETS.critterSmall,
+    ACT_ONE_ASSETS.critterLarge,
+    ACT_ONE_ASSETS.critterFlying,
+  ];
+  const critters: Floater[] = [];
+  for (let index = 0; index < 115; index += 1) {
+    const seedZ = 90 - random() * 295;
+    const side = random() < 0.5 ? -1 : 1;
+    const seedX = pathCenter(seedZ) + side * (3.5 + random() * (combatHalfWidth(seedZ) + 10));
+    const spot = findFlatSpot(seedX, seedZ, 5);
+    if (!spot) continue;
+    const flying = random() < 0.25;
+    const critter = spawn(flying ? ACT_ONE_ASSETS.critterFlying : pick(critterUrls), {
+      x: spot.x,
+      z: spot.z,
+      target: 0.45 + random() * 0.55,
+      mode: 'height',
+      rotationY: random() * Math.PI * 2,
+      yOffset: flying ? 1.1 + random() * 1.4 : 0,
+    });
+    if (critter) critters.push({ object: critter, baseY: critter.position.y, phase: random() * Math.PI * 2 });
+  }
+
+  // Human-made debris: crates, supports and pipework, clustered around the
+  // structures rather than sprinkled evenly across the map.
+  const debrisUrls = [
+    ACT_ONE_ASSETS.connector,
+    ACT_ONE_ASSETS.metalSupport,
+    ACT_ONE_ASSETS.stairs,
+    ACT_ONE_ASSETS.ramp,
+    ACT_ONE_ASSETS.roofVentL,
+    ACT_ONE_ASSETS.roofVentR,
+    ACT_ONE_ASSETS.roofRadar,
+    ACT_ONE_ASSETS.roofAntenna,
+  ];
+  const debrisAnchors = [7, -44, -53, -59, -70, -108, -120, EXTRACTION_Z];
+  for (const anchorZ of debrisAnchors) {
+    for (let index = 0; index < 16; index += 1) {
+      const seedX = pathCenter(anchorZ) + (random() - 0.5) * 30;
+      const spot = findFlatSpot(seedX, anchorZ + (random() - 0.5) * 22, 6);
+      if (!spot) continue;
+      spawn(pick(debrisUrls), {
+        x: spot.x,
+        z: spot.z,
+        target: 0.4 + random() * 1.1,
+        mode: 'max',
         rotationY: random() * Math.PI * 2,
       });
     }
@@ -646,7 +840,13 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
           resolveColliders(nextPosition);
           player.position.x = nextPosition.x;
           player.position.z = nextPosition.z;
-          player.rotation.y = THREE.MathUtils.lerp(player.rotation.y, Math.atan2(movement.x, movement.z), 0.2);
+          // Turn along the shortest arc. A plain lerp toward atan2 spins the
+          // long way round whenever the target crosses the -PI/+PI seam, which
+          // is exactly what forward-left does from the starting heading of PI.
+          const desiredHeading = Math.atan2(movement.x, movement.z);
+          let headingDelta = desiredHeading - player.rotation.y;
+          headingDelta = Math.atan2(Math.sin(headingDelta), Math.cos(headingDelta));
+          player.rotation.y += headingDelta * 0.2;
         }
       }
 
@@ -664,6 +864,18 @@ export function createActOneWorld(options: ActOneWorldOptions): MapRuntime {
 
       const progress = THREE.MathUtils.clamp((START_Z - player.position.z) / (START_Z - EXTRACTION_Z), 0, 1);
       onProgress(progress);
+
+      // The shadow frustum is tight, so it has to travel with the player.
+      sunLight.target.position.copy(desiredLook);
+      sunLight.position.copy(desiredLook).add(SUN_OFFSET);
+      sunLight.target.updateMatrixWorld();
+
+      // Idle life: fliers bob, ground critters shuffle in place.
+      for (let index = 0; index < critters.length; index += 1) {
+        const critter = critters[index];
+        critter.object.position.y = critter.baseY + Math.sin(elapsed * 1.6 + critter.phase) * 0.12;
+        critter.object.rotation.y += Math.sin(elapsed * 0.5 + critter.phase) * delta * 0.35;
+      }
 
       const dust = root.getObjectByName('dust');
       if (dust) dust.rotation.y = elapsed * 0.008;

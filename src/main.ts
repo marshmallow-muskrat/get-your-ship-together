@@ -311,6 +311,9 @@ function showSelectionScreen(): void {
   scene.fog = null;
   scene.environment = environmentTexture;
   renderer.shadowMap.enabled = false;
+  // The map switches this off for a flatter, more saturated look; the crew
+  // screen's lit metal still wants the filmic curve.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.8;
   selectionCamera.fov = 31;
   selectionCamera.near = 0.1;
