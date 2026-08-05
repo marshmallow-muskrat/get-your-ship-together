@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         proto2d: resolve(__dirname, 'proto2d.html'),
+        base: resolve(__dirname, 'base.html'),
       },
     },
   },
