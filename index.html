@@ -18,9 +18,9 @@
         </div>
       </div>
 
-      <canvas id="scene" aria-label="Selected hero astronaut, mech, and spaceship"></canvas>
+      <canvas id="scene" aria-label="Get Your Ship Together game scene"></canvas>
 
-      <section class="hud" aria-label="Hero selection screen">
+      <section id="selection-hud" class="hud" aria-label="Hero selection screen">
         <header class="selection-header">
           <div class="game-lockup">
             <h1 class="game-title" aria-label="Get Your Ship Together">
@@ -33,7 +33,7 @@
 
           <div class="selected-identity" aria-live="polite">
             <span id="selected-number" class="selected-number">01 / 04</span>
-            <strong id="selected-hero">Barbara</strong>
+            <strong id="selected-hero">Boswell</strong>
             <span id="selected-species">The Bee</span>
           </div>
         </header>
@@ -45,6 +45,40 @@
         <div class="corner-actions" aria-label="Screen actions">
           <button class="select-hero-button exit-button" type="button">EXIT</button>
           <button id="select-hero-button" class="select-hero-button" type="button">CONTINUE</button>
+        </div>
+      </section>
+
+      <section id="map-hud" class="map-hud hidden" aria-label="Act One crash-site route">
+        <header class="map-topbar">
+          <div class="map-title-card">
+            <p class="eyebrow">ACT I · THE CRASH SITE</p>
+            <h1>CRASHED &amp; CONFUSED</h1>
+            <p>Reach the extraction beacon</p>
+          </div>
+          <div class="map-identity">
+            <span>STRANDED CREW</span>
+            <strong id="map-hero">Boswell</strong>
+            <small id="map-species">The Bee</small>
+          </div>
+        </header>
+
+        <div class="map-controls" aria-label="Movement controls">
+          <span><kbd>WASD</kbd> / <kbd>ARROWS</kbd></span>
+          <small>MOVE</small>
+        </div>
+
+        <div class="map-route" aria-label="Route progress">
+          <div class="route-labels"><span>CRASH SITE</span><span>EXTRACTION</span></div>
+          <div class="route-track"><span id="map-progress-fill"></span></div>
+          <strong id="map-distance">0%</strong>
+        </div>
+
+        <button id="return-to-crew" class="map-action" type="button">RETURN TO CREW</button>
+
+        <div id="map-complete" class="map-complete hidden" role="status" aria-live="polite">
+          <p class="eyebrow">EXTRACTION REACHED</p>
+          <h2>MECH ONLINE</h2>
+          <p>Proof-of-concept route complete.</p>
         </div>
       </section>
     </main>

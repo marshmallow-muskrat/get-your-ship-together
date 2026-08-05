@@ -3,6 +3,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import './style.css';
+import { createActOneWorld, MAP_ASSET_URLS, type MapRuntime } from './map';
 
 type FormKind = 'astronaut' | 'mech' | 'ship';
 
@@ -76,8 +77,16 @@ const selectedSpecies = document.querySelector<HTMLElement>('#selected-species')
 const selectedNumber = document.querySelector<HTMLElement>('#selected-number')!;
 const selectHeroButton = document.querySelector<HTMLButtonElement>('#select-hero-button')!;
 const exitButtons = document.querySelectorAll<HTMLButtonElement>('.exit-button');
+const selectionHud = document.querySelector<HTMLElement>('#selection-hud')!;
+const mapHud = document.querySelector<HTMLElement>('#map-hud')!;
+const mapHero = document.querySelector<HTMLElement>('#map-hero')!;
+const mapSpecies = document.querySelector<HTMLElement>('#map-species')!;
+const mapProgressFill = document.querySelector<HTMLElement>('#map-progress-fill')!;
+const mapDistance = document.querySelector<HTMLElement>('#map-distance')!;
+const mapComplete = document.querySelector<HTMLElement>('#map-complete')!;
+const returnToCrewButton = document.querySelector<HTMLButtonElement>('#return-to-crew')!;
 
-if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector || !selectedHero || !selectedSpecies || !selectedNumber || !selectHeroButton) {
+if (!canvas || !loadingScreen || !loadingBar || !loadingStatus || !baySelector || !selectedHero || !selectedSpecies || !selectedNumber || !selectHeroButton || !selectionHud || !mapHud || !mapHero || !mapSpecies || !mapProgressFill || !mapDistance || !mapComplete || !returnToCrewButton) {
   throw new Error('The hero selection screen is missing a required element.');
 }
 
@@ -96,7 +105,8 @@ renderer.toneMappingExposure = 0.8;
 
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
 const roomEnvironment = new RoomEnvironment();
-scene.environment = pmremGenerator.fromScene(roomEnvironment, 0.035).texture;
+const environmentTexture = pmremGenerator.fromScene(roomEnvironment, 0.035).texture;
+scene.environment = environmentTexture;
 roomEnvironment.dispose();
 pmremGenerator.dispose();
 
@@ -107,6 +117,8 @@ const floaters: Floater[] = [];
 const loadedModels = new Map<string, THREE.Object3D | null>();
 let selectedIndex = 0;
 let selectionScale = 1;
+let screenMode: 'selection' | 'map' = 'selection';
+let mapRuntime: MapRuntime | null = null;
 
 scene.add(selectedHeroGroup);
 selectedHeroGroup.position.y = 1.4;
@@ -289,20 +301,81 @@ function createLighting(): void {
   scene.add(magentaRim);
 }
 
+function showSelectionScreen(): void {
+  mapRuntime?.dispose();
+  mapRuntime = null;
+  screenMode = 'selection';
+  scene.clear();
+  scene.background = null;
+  scene.fog = null;
+  scene.environment = environmentTexture;
+  renderer.shadowMap.enabled = false;
+  renderer.toneMappingExposure = 0.8;
+  camera.fov = 31;
+  camera.near = 0.1;
+  camera.far = 100;
+  camera.position.set(0, 7.6, 35);
+  camera.lookAt(0, 4.1, 0);
+  camera.updateProjectionMatrix();
+  selectedHeroGroup.position.set(0, 1.4, 0);
+  scene.add(selectedHeroGroup);
+  createLighting();
+  showSelectedHero(selectedIndex);
+  canvas.classList.remove('map-mode');
+  selectionHud.classList.remove('hidden');
+  mapHud.classList.add('hidden');
+  mapComplete.classList.add('hidden');
+}
+
+function startActOne(): void {
+  const hero = heroes[selectedIndex];
+  screenMode = 'map';
+  selectionHud.classList.add('hidden');
+  mapHud.classList.remove('hidden');
+  mapComplete.classList.add('hidden');
+  canvas.classList.add('map-mode');
+  mapHero.textContent = hero.name;
+  mapSpecies.textContent = hero.species;
+  mapProgressFill.style.width = '0%';
+  mapDistance.textContent = '0%';
+
+  mapRuntime?.dispose();
+  mapRuntime = createActOneWorld({
+    scene,
+    camera,
+    renderer,
+    models: loadedModels,
+    hero,
+    onProgress(progress) {
+      const percent = Math.round(progress * 100);
+      mapProgressFill.style.width = `${percent}%`;
+      mapDistance.textContent = `${percent}%`;
+    },
+    onComplete() {
+      mapComplete.classList.remove('hidden');
+    },
+  });
+}
+
 function animate(): void {
   requestAnimationFrame(animate);
-  const elapsed = clock.getElapsedTime();
-  selectionScale = THREE.MathUtils.lerp(selectionScale, 0.9, 0.075);
-  selectedHeroGroup.scale.setScalar(selectionScale);
+  const delta = Math.min(clock.getDelta(), 0.05);
+  const elapsed = clock.elapsedTime;
+  if (screenMode === 'selection') {
+    selectionScale = THREE.MathUtils.lerp(selectionScale, 0.9, 0.075);
+    selectedHeroGroup.scale.setScalar(selectionScale);
 
-  floaters.forEach(({ object, baseY, phase }) => {
-    object.position.y = baseY + Math.sin(elapsed * 1.35 + phase) * 0.12;
-    object.rotation.y += 0.0015;
-  });
+    floaters.forEach(({ object, baseY, phase }) => {
+      object.position.y = baseY + Math.sin(elapsed * 1.35 + phase) * 0.12;
+      object.rotation.y += 0.0015;
+    });
 
-  selectedHeroLight.position.x = Math.sin(elapsed * 0.55) * 4.2;
-  selectedHeroLight.position.z = 5 + Math.cos(elapsed * 0.55) * 1.8;
-  selectedHeroLight.intensity = 3.6 + Math.sin(elapsed * 0.8) * 0.2;
+    selectedHeroLight.position.x = Math.sin(elapsed * 0.55) * 4.2;
+    selectedHeroLight.position.z = 5 + Math.cos(elapsed * 0.55) * 1.8;
+    selectedHeroLight.intensity = 3.6 + Math.sin(elapsed * 0.8) * 0.2;
+  } else {
+    mapRuntime?.update(delta, elapsed);
+  }
 
   renderer.render(scene, camera);
 }
@@ -316,21 +389,19 @@ function handleResize(): void {
 
 async function init(): Promise<void> {
   buildBaySelector();
-  createLighting();
 
   const loaderManager = new THREE.LoadingManager();
   loaderManager.onProgress = (_url, loaded, total) => updateLoading(loaded, total);
   const loader = new GLTFLoader(loaderManager);
-  const entries = heroes.flatMap((hero) => [hero.astronaut, hero.mech, hero.ship]);
+  const entries = [...heroes.flatMap((hero) => [hero.astronaut, hero.mech, hero.ship]), ...MAP_ASSET_URLS];
   const uniqueEntries = [...new Set(entries)];
   const loadedResults = await Promise.all(uniqueEntries.map((url) => loadModel(loader, url)));
   uniqueEntries.forEach((url, index) => loadedModels.set(url, loadedResults[index]));
 
   updateSelection(0);
-  selectHeroButton.addEventListener('click', () => {
-    selectHeroButton.classList.add('is-selected');
-    window.setTimeout(() => selectHeroButton.classList.remove('is-selected'), 900);
-  });
+  showSelectionScreen();
+  selectHeroButton.addEventListener('click', startActOne);
+  returnToCrewButton.addEventListener('click', showSelectionScreen);
   exitButtons.forEach((button) => {
     button.addEventListener('click', () => {
       button.classList.add('is-selected');
