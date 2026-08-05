@@ -184,8 +184,8 @@ button {
 
 .bay-button {
   position: relative;
-  flex: 0 0 clamp(6.3rem, 11.4vw, 9.8rem);
-  aspect-ratio: 3 / 4;
+  flex: 0 0 clamp(6.6rem, 12vw, 10.25rem);
+  aspect-ratio: 4 / 5;
   height: auto;
   overflow: hidden;
   padding: 0;
@@ -424,7 +424,7 @@ button {
   }
 
   .bay-button {
-    flex-basis: 6.1rem;
+    flex-basis: 6.35rem;
   }
 
   .hero-card-info {
