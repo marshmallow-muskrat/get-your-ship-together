@@ -95,25 +95,43 @@ export function normalizeKeybinds(raw: unknown): KeybindMap {
   return out;
 }
 
+export const UI_SCALE_MIN = 0.75;
+export const UI_SCALE_MAX = 1.5;
+export const UI_SCALE_DEFAULT = 1;
+
 export interface StoredSettings {
   version: 1;
   keybinds: KeybindMap;
+  uiScale: number;
+}
+
+export function clampUiScale(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return UI_SCALE_DEFAULT;
+  const stepped = Math.round(n * 20) / 20; // 0.05 steps
+  return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, stepped));
 }
 
 export function loadSettings(): StoredSettings {
   try {
     if (typeof localStorage === 'undefined') {
-      return { version: 1, keybinds: cloneDefaults() };
+      return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
     }
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) return { version: 1, keybinds: cloneDefaults() };
+    if (!raw) return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return { version: 1, keybinds: cloneDefaults() };
-    const p = parsed as { version?: unknown; keybinds?: unknown };
-    if (p.version !== 1) return { version: 1, keybinds: cloneDefaults() };
-    return { version: 1, keybinds: normalizeKeybinds(p.keybinds) };
+    if (!parsed || typeof parsed !== 'object') {
+      return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+    }
+    const p = parsed as { version?: unknown; keybinds?: unknown; uiScale?: unknown };
+    if (p.version !== 1) return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+    return {
+      version: 1,
+      keybinds: normalizeKeybinds(p.keybinds),
+      uiScale: clampUiScale(p.uiScale ?? UI_SCALE_DEFAULT),
+    };
   } catch {
-    return { version: 1, keybinds: cloneDefaults() };
+    return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
   }
 }
 
@@ -123,6 +141,7 @@ export function saveSettings(settings: StoredSettings): void {
     const payload: StoredSettings = {
       version: 1,
       keybinds: normalizeKeybinds(settings.keybinds),
+      uiScale: clampUiScale(settings.uiScale),
     };
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload));
   } catch {

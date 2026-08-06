@@ -155,6 +155,8 @@ export interface SurvivorBoss {
   id: number;
   /** 1-based schedule index */
   index: number;
+  defId: string;
+  displayName: string;
   active: boolean;
   x: number;
   z: number;
@@ -294,6 +296,8 @@ export function emptyBoss(): SurvivorBoss {
   return {
     id: 0,
     index: 0,
+    defId: 'blue-demon',
+    displayName: 'Breach Demon',
     active: false,
     x: 0,
     z: 0,

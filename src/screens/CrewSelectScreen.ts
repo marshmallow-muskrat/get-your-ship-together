@@ -3,6 +3,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { HERO_LIST, type HeroDef, type HeroId } from '../game/content/heroes';
 import { AssetLibrary } from '../game/assets/AssetLibrary';
+import {
+  formatSurvivalTime,
+  getHeroLeaderboard,
+} from '../game/modes/survivor/survivorRecords';
 
 export type CrewSelectHandlers = {
   onContinue: (heroId: HeroId) => void;
@@ -160,8 +164,18 @@ export class CrewSelectScreen {
       <div class="corner-actions" aria-label="Screen actions">
         <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
         <div class="mode-actions">
+          <button id="leaderboard-button" class="select-hero-button ghost-button" type="button">LEADERBOARDS</button>
           <button id="survivor-button" class="select-hero-button survivor-button" type="button">CONTAINMENT PROTOCOL</button>
           <button id="select-hero-button" class="select-hero-button" type="button">CAMPAIGN</button>
+        </div>
+      </div>
+      <div id="crew-leaderboard" class="crew-leaderboard hidden" role="dialog" aria-label="Local leaderboards">
+        <div class="crew-lb-panel">
+          <p class="eyebrow">LOCAL RECORDS</p>
+          <h2>Leaderboards</h2>
+          <div id="crew-lb-tabs" class="crew-lb-tabs"></div>
+          <div id="crew-lb-list" class="crew-lb-list"></div>
+          <button type="button" id="crew-lb-close" class="select-hero-button">BACK</button>
         </div>
       </div>
     `;
@@ -186,9 +200,57 @@ export class CrewSelectScreen {
 
     this.hud.querySelector('#select-hero-button')?.addEventListener('click', () => this.continue());
     this.hud.querySelector('#survivor-button')?.addEventListener('click', () => this.launchSurvivor());
+    this.hud.querySelector('#leaderboard-button')?.addEventListener('click', () => this.openLeaderboard());
+    this.hud.querySelector('#crew-lb-close')?.addEventListener('click', () => this.closeLeaderboard());
     this.hud.querySelector('#exit-button')?.addEventListener('click', () => {
       // Soft exit: stay on selection.
     });
+  }
+
+  private openLeaderboard(): void {
+    const hero = HERO_LIST[this.selectedIndex]!.id;
+    this.renderCrewLeaderboard(hero);
+    this.hud?.querySelector('#crew-leaderboard')?.classList.remove('hidden');
+  }
+
+  private closeLeaderboard(): void {
+    this.hud?.querySelector('#crew-leaderboard')?.classList.add('hidden');
+  }
+
+  private renderCrewLeaderboard(heroId: HeroId): void {
+    const tabs = this.hud?.querySelector('#crew-lb-tabs');
+    const list = this.hud?.querySelector('#crew-lb-list');
+    if (tabs) {
+      tabs.innerHTML = HERO_LIST.map(
+        (h) =>
+          `<button type="button" class="crew-lb-tab${h.id === heroId ? ' active' : ''}" data-hero="${h.id}">${h.name}</button>`,
+      ).join('');
+      tabs.querySelectorAll<HTMLButtonElement>('.crew-lb-tab').forEach((btn) => {
+        btn.addEventListener('click', () => this.renderCrewLeaderboard(btn.dataset.hero as HeroId));
+      });
+    }
+    if (list) {
+      const runs = getHeroLeaderboard(heroId);
+      if (runs.length === 0) {
+        list.innerHTML = '<p class="crew-lb-empty">No runs recorded yet for this hero.</p>';
+      } else {
+        list.innerHTML = runs
+          .map((r, i) => {
+            const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
+            const date = new Date(r.timestamp).toLocaleDateString();
+            return `<div class="crew-lb-row">
+              <strong>#${i + 1}</strong>
+              <span>${formatSurvivalTime(r.survivalTime)}</span>
+              <span>K ${r.kills}</span>
+              <span>L${r.level}</span>
+              <span>B ${r.bossesDefeated}</span>
+              <span class="crew-lb-meta">${date} · ${r.balanceVersion}</span>
+              <span class="crew-lb-build">${build}</span>
+            </div>`;
+          })
+          .join('');
+      }
+    }
   }
 
   private createLighting(): void {

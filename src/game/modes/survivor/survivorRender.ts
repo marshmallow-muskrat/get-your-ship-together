@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { HEROES } from '../../content/heroes';
 import { BOSS_DEMON, ENEMY_BY_ID, MELEE_BLOB } from '../../content/enemies';
 import { AssetLibrary, createAnimator } from '../../assets/AssetLibrary';
-import { HORDE, SURVIVOR, SURVIVOR_BOSS } from './survivorContent';
+import { BOSS_DEFS, HORDE, SURVIVOR, SURVIVOR_BOSS, bossDefForIndex } from './survivorContent';
 import type { SurvivorState } from './survivorState';
 
 type Animator = ReturnType<typeof createAnimator>;
@@ -31,6 +31,7 @@ export class SurvivorRenderer {
   private heroAccent = '#88e0ff';
   private enemies = new Map<number, ActorVis>();
   private bosses = new Map<number, ActorVis>();
+  private bossAuras = new Map<number, THREE.Group>();
   private projectiles = new Map<number, THREE.Mesh>();
   private pickups = new Map<number, THREE.Object3D>();
   private hazards = new Map<number, THREE.Object3D>();
@@ -291,6 +292,60 @@ export class SurvivorRenderer {
     }
   }
 
+  private makeBossAura(radius: number, color: string): THREE.Group {
+    const g = new THREE.Group();
+    g.name = 'boss-aura';
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.55, radius * 1.15, 40),
+      new THREE.MeshBasicMaterial({
+        color: '#ff2244',
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.06;
+    const glow = new THREE.Mesh(
+      new THREE.CircleGeometry(radius * 0.9, 32),
+      new THREE.MeshBasicMaterial({
+        color: color || '#ff3344',
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.04;
+    const light = new THREE.PointLight('#ff3344', 1.4, radius * 4, 2);
+    light.position.y = 1.4;
+    // Rising red particle sparks (reused meshes, no per-frame material alloc)
+    const particles = new THREE.Group();
+    particles.name = 'boss-aura-particles';
+    const pMat = new THREE.MeshBasicMaterial({
+      color: '#ff4466',
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const pGeo = new THREE.SphereGeometry(0.08, 6, 6);
+    for (let i = 0; i < 10; i += 1) {
+      const p = new THREE.Mesh(pGeo, pMat);
+      p.userData.baseY = 0.2 + (i % 5) * 0.18;
+      p.userData.speed = 0.6 + (i % 4) * 0.15;
+      p.userData.angle = (i / 10) * Math.PI * 2;
+      p.userData.orbit = radius * (0.35 + (i % 3) * 0.12);
+      particles.add(p);
+    }
+    g.add(ring, glow, light, particles);
+    return g;
+  }
+
   private syncBoss(state: SurvivorState, dt: number): void {
     const aliveIds = new Set(
       state.bosses.filter((b) => b.active || (b.state === 'dead' && b.timer > 0)).map((b) => b.id),
@@ -301,31 +356,101 @@ export class SurvivorRenderer {
         this.bosses.delete(id);
       }
     }
+    for (const [id, aura] of this.bossAuras) {
+      if (!aliveIds.has(id)) {
+        this.root.remove(aura);
+        this.bossAuras.delete(id);
+      }
+    }
     for (const b of state.bosses) {
       if (!b.active && !(b.state === 'dead' && b.timer > 0)) continue;
+      const def = BOSS_DEFS.find((d) => d.id === b.defId) ?? bossDefForIndex(b.index);
       let vis = this.bosses.get(b.id);
       if (!vis) {
         const created = this.makeFromUrl(
-          SURVIVOR_BOSS.url,
+          def.url,
           {
-            idle: [...BOSS_DEMON.anim.idle],
-            walk: [...BOSS_DEMON.anim.walk],
-            run: [...BOSS_DEMON.anim.walk],
-            shoot: [...BOSS_DEMON.anim.attack],
-            dodge: [...BOSS_DEMON.anim.idle],
-            hit: [...BOSS_DEMON.anim.hit],
-            death: [...BOSS_DEMON.anim.death],
-            ability: [...BOSS_DEMON.anim.attack],
+            idle: [...def.anim.idle],
+            walk: [...def.anim.walk],
+            run: [...def.anim.walk],
+            shoot: [...def.anim.attack],
+            dodge: [...def.anim.idle],
+            hit: [...def.anim.hit],
+            death: [...def.anim.death],
+            ability: [...def.anim.attack],
           },
           'boss',
         );
-        if (!created) continue;
-        vis = created;
+        if (!created) {
+          // Fallback to blue demon if load failed
+          const fallback = this.makeFromUrl(
+            SURVIVOR_BOSS.url,
+            {
+              idle: [...BOSS_DEMON.anim.idle],
+              walk: [...BOSS_DEMON.anim.walk],
+              run: [...BOSS_DEMON.anim.walk],
+              shoot: [...BOSS_DEMON.anim.attack],
+              dodge: [...BOSS_DEMON.anim.idle],
+              hit: [...BOSS_DEMON.anim.hit],
+              death: [...BOSS_DEMON.anim.death],
+              ability: [...BOSS_DEMON.anim.attack],
+            },
+            'boss',
+          );
+          if (!fallback) continue;
+          vis = fallback;
+        } else {
+          vis = created;
+        }
         this.bosses.set(b.id, vis);
         this.root.add(vis.root);
       }
-      const scale = SURVIVOR.actorScale.boss * (b.phase >= 3 ? 1.08 : 1) * (1 + b.breachEmpower * 0.05);
+      let aura = this.bossAuras.get(b.id);
+      if (!aura && b.active && b.state !== 'dead') {
+        aura = this.makeBossAura(def.colliderRadius * 2.2, def.accent);
+        this.bossAuras.set(b.id, aura);
+        this.root.add(aura);
+      }
+      const scale =
+        def.visualScale * (b.phase >= 3 ? 1.08 : 1) * (1 + b.breachEmpower * 0.05);
       this.place(vis, b.x, b.z, b.facingX, b.facingZ, scale);
+      if (aura) {
+        aura.visible = b.active && b.state !== 'dead';
+        aura.position.set(b.x, 0, b.z);
+        const t = performance.now() * 0.001;
+        const pulse = 0.9 + Math.sin(t * 6 + b.id) * 0.12;
+        const phaseBoost = b.phase === 3 ? 1.35 : b.phase === 2 ? 1.15 : 1;
+        aura.scale.setScalar(pulse * phaseBoost);
+        const particles = aura.getObjectByName('boss-aura-particles');
+        if (particles) {
+          for (const child of particles.children) {
+            const u = child.userData as {
+              baseY: number;
+              speed: number;
+              angle: number;
+              orbit: number;
+            };
+            const rise = ((t * u.speed + u.baseY) % 2.2);
+            child.position.set(
+              Math.cos(u.angle + t * 0.8) * u.orbit,
+              rise,
+              Math.sin(u.angle + t * 0.8) * u.orbit,
+            );
+          }
+        }
+        aura.traverse((c) => {
+          if (c instanceof THREE.PointLight) {
+            c.intensity = 1.2 * phaseBoost * pulse;
+          }
+          if (
+            c instanceof THREE.Mesh &&
+            c.material instanceof THREE.MeshBasicMaterial &&
+            c.parent?.name !== 'boss-aura-particles'
+          ) {
+            c.material.opacity = Math.min(0.7, (c.geometry.type === 'RingGeometry' ? 0.45 : 0.18) * phaseBoost);
+          }
+        });
+      }
       if (vis.animator) {
         if (b.state === 'dead') vis.animator.play('death', 0.08);
         else if (b.state === 'windup' || b.state === 'active') vis.animator.play('shoot', 0.06);
@@ -599,6 +724,7 @@ export class SurvivorRenderer {
     this.exhaustL = null;
     this.exhaustR = null;
     this.bosses.clear();
+    this.bossAuras.clear();
   }
 }
 

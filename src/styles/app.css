@@ -945,8 +945,99 @@ button {
 .survivor-button:hover {
   filter: brightness(1.12);
 }
+.ghost-button {
+  opacity: 0.88;
+  background: rgba(10, 16, 30, 0.72) !important;
+  border-color: rgba(160, 190, 255, 0.32) !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.1em !important;
+}
+.crew-leaderboard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 40%, rgba(12, 24, 48, 0.82), rgba(4, 8, 18, 0.92));
+  pointer-events: auto;
+}
+.crew-leaderboard.hidden {
+  display: none !important;
+}
+.crew-lb-panel {
+  width: min(560px, 94vw);
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  padding: 1.2rem 1.4rem 1.4rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(140, 180, 255, 0.28);
+  background: linear-gradient(180deg, rgba(14, 24, 42, 0.96), rgba(6, 10, 20, 0.98));
+  color: #eef4ff;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  align-items: center;
+}
+.crew-lb-panel h2 {
+  margin: 0;
+  font-family: 'Audiowide', sans-serif;
+  letter-spacing: 0.06em;
+}
+.crew-lb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+}
+.crew-lb-tab {
+  cursor: pointer;
+  border: 1px solid rgba(140, 180, 255, 0.28);
+  background: rgba(10, 16, 28, 0.85);
+  color: #e8f0ff;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+}
+.crew-lb-tab.active {
+  border-color: var(--bay-accent, #71f6da);
+  color: var(--bay-accent, #71f6da);
+}
+.crew-lb-list {
+  width: 100%;
+  max-height: min(48vh, 360px);
+  overflow: auto;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.crew-lb-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  padding: 0.4rem 0.5rem;
+  background: rgba(8, 14, 28, 0.75);
+  border-radius: 0.35rem;
+  border: 1px solid rgba(140, 180, 255, 0.14);
+}
+.crew-lb-meta,
+.crew-lb-build {
+  grid-column: 1 / -1;
+  color: rgba(180, 200, 230, 0.7);
+  font-size: 0.64rem;
+}
+.crew-lb-empty {
+  opacity: 0.7;
+  text-align: center;
+}
 
 /* Survivor HUD — MOBA bottom command panel */
+:root {
+  --ui-scale: 1;
+}
 .survivor-hud {
   position: fixed;
   inset: 0;
@@ -970,19 +1061,27 @@ button {
   gap: 0.8rem;
   padding: 0.7rem 1.1rem 0;
   align-items: start;
+  transform: scale(var(--ui-scale));
+  transform-origin: top center;
+}
+.survivor-hud .sv-identity {
+  transform-origin: top left;
 }
 .survivor-hud .sv-identity strong {
   color: var(--hud-accent);
-  font-size: 0.95rem;
+  font-size: clamp(1.1rem, 1.6vw, 1.35rem);
   font-weight: 600;
 }
 .survivor-hud .sv-timer-wrap {
   text-align: center;
   min-width: min(420px, 70vw);
 }
+.survivor-hud .sv-timer-wrap .eyebrow {
+  font-size: clamp(0.7rem, 1vw, 0.85rem);
+}
 .survivor-hud .sv-timer-wrap strong {
   font-family: 'Space Mono', monospace;
-  font-size: 1.45rem;
+  font-size: clamp(1.75rem, 2.6vw, 2.2rem);
   letter-spacing: 0.08em;
 }
 .survivor-hud .sv-meta {
@@ -990,7 +1089,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 0.8rem;
+  font-size: clamp(0.95rem, 1.35vw, 1.15rem);
+  transform-origin: top right;
 }
 .survivor-hud .sv-track {
   height: 9px;
@@ -1031,12 +1131,13 @@ button {
   position: absolute;
   left: 50%;
   bottom: 0.85rem;
-  transform: translateX(-50%);
-  width: min(720px, 94vw);
+  transform: translateX(-50%) scale(var(--ui-scale));
+  transform-origin: bottom center;
+  width: min(640px, 92vw);
   display: grid;
-  grid-template-columns: 1fr auto minmax(7rem, 9rem);
-  gap: 0.65rem;
-  align-items: end;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  align-items: stretch;
   padding: 0.65rem 0.8rem 0.7rem;
   border-radius: 0.75rem;
   background: linear-gradient(180deg, rgba(8, 14, 28, 0.55), rgba(6, 10, 20, 0.88));
@@ -1062,17 +1163,20 @@ button {
   color: rgba(200, 220, 255, 0.85);
 }
 .survivor-hud .sv-abilities {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.45rem;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: center;
+  width: 100%;
 }
 .survivor-hud .sv-ability {
   position: relative;
-  width: 4.4rem;
-  height: 4.4rem;
+  width: 100%;
+  min-width: 0;
+  height: 5.1rem;
   border-radius: 0.55rem;
-  border: 1px solid rgba(140, 180, 255, 0.28);
+  border: 2px solid rgba(140, 180, 255, 0.28);
   background:
     conic-gradient(from 0deg, rgba(4, 8, 18, 0.82) var(--cd, 0deg), transparent 0),
     linear-gradient(180deg, rgba(22, 36, 58, 0.95), rgba(8, 14, 28, 0.98));
@@ -1087,9 +1191,95 @@ button {
   opacity: 0.92;
 }
 .survivor-hud .sv-ability.ultimate {
-  width: 5.1rem;
-  height: 5.1rem;
-  border-width: 2px;
+  /* equal size; prominence via glow only */
+  border-color: color-mix(in srgb, var(--hud-accent) 40%, rgba(140, 180, 255, 0.28));
+}
+.survivor-hud .sv-ability.ultimate.ready,
+.survivor-hud .sv-ability.ultimate.charged,
+.survivor-hud .sv-ability.ultimate.pulse-ready {
+  animation: sv-mech-ready-spin 2.4s linear infinite, sv-mech-ready-pulse 1.1s ease-in-out infinite;
+  border-color: var(--hud-accent);
+  background:
+    conic-gradient(from var(--spin, 0deg), color-mix(in srgb, var(--hud-accent) 70%, white) 0deg 40deg, transparent 40deg 360deg),
+    conic-gradient(from 0deg, rgba(4, 8, 18, 0.55) var(--cd, 0deg), transparent 0),
+    linear-gradient(180deg, color-mix(in srgb, var(--hud-accent) 28%, #1a2a40), rgba(8, 14, 28, 0.98));
+  box-shadow:
+    0 0 22px color-mix(in srgb, var(--hud-accent) 55%, transparent),
+    0 0 40px color-mix(in srgb, var(--hud-accent) 25%, transparent),
+    inset 0 0 18px color-mix(in srgb, var(--hud-accent) 22%, transparent);
+  filter: brightness(1.12);
+}
+.survivor-hud .sv-ability.ultimate.ready::after,
+.survivor-hud .sv-ability.ultimate.charged::after,
+.survivor-hud .sv-ability.ultimate.pulse-ready::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 30%, color-mix(in srgb, var(--hud-accent) 70%, white) 0 2px, transparent 3px),
+    radial-gradient(circle at 80% 25%, color-mix(in srgb, var(--hud-accent) 60%, white) 0 1.5px, transparent 2.5px),
+    radial-gradient(circle at 70% 75%, color-mix(in srgb, var(--hud-accent) 65%, white) 0 2px, transparent 3px),
+    radial-gradient(circle at 25% 80%, color-mix(in srgb, var(--hud-accent) 55%, white) 0 1.5px, transparent 2.5px);
+  animation: sv-mech-sparks 0.9s steps(3) infinite;
+  opacity: 0.85;
+}
+@keyframes sv-mech-sparks {
+  0% {
+    opacity: 0.5;
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(8deg) scale(1.04);
+  }
+  100% {
+    opacity: 0.55;
+    transform: rotate(-6deg) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .survivor-hud .sv-ability.ultimate.ready,
+  .survivor-hud .sv-ability.ultimate.charged,
+  .survivor-hud .sv-ability.ultimate.pulse-ready {
+    animation: none;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--hud-accent) 45%, transparent);
+  }
+  .survivor-hud .sv-ability.ultimate.ready::after,
+  .survivor-hud .sv-ability.ultimate.charged::after,
+  .survivor-hud .sv-ability.ultimate.pulse-ready::after {
+    animation: none;
+    opacity: 0.45;
+  }
+}
+@keyframes sv-mech-ready-spin {
+  to {
+    --spin: 360deg;
+  }
+}
+@property --spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes sv-mech-ready-pulse {
+  /* Glow-only pulse — do not scale the slot (keeps equal outer dimensions with Dodge/Q/E). */
+  0%,
+  100% {
+    box-shadow:
+      0 0 18px color-mix(in srgb, var(--hud-accent) 45%, transparent),
+      0 0 32px color-mix(in srgb, var(--hud-accent) 20%, transparent),
+      inset 0 0 14px color-mix(in srgb, var(--hud-accent) 18%, transparent);
+    filter: brightness(1.08);
+  }
+  50% {
+    box-shadow:
+      0 0 28px color-mix(in srgb, var(--hud-accent) 70%, transparent),
+      0 0 48px color-mix(in srgb, var(--hud-accent) 35%, transparent),
+      inset 0 0 22px color-mix(in srgb, var(--hud-accent) 28%, transparent);
+    filter: brightness(1.2);
+  }
 }
 .survivor-hud .sv-ability.mech-flourish {
   animation: sv-mech-flourish 0.85s ease-out;
@@ -1097,15 +1287,15 @@ button {
 @keyframes sv-mech-flourish {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--hud-accent) 70%, transparent);
-    transform: scale(1);
+    filter: brightness(1);
   }
   40% {
-    box-shadow: 0 0 28px 8px color-mix(in srgb, var(--hud-accent) 55%, transparent);
-    transform: scale(1.08);
+    box-shadow: 0 0 32px 10px color-mix(in srgb, var(--hud-accent) 60%, transparent);
+    filter: brightness(1.35);
   }
   100% {
-    box-shadow: 0 0 14px color-mix(in srgb, var(--hud-accent) 35%, transparent);
-    transform: scale(1);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--hud-accent) 40%, transparent);
+    filter: brightness(1.1);
   }
 }
 .survivor-hud .sv-build {
@@ -1123,6 +1313,145 @@ button {
   border-radius: 0.5rem;
   background: rgba(6, 12, 24, 0.72);
   border: 1px solid rgba(140, 180, 255, 0.16);
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom right;
+}
+.survivor-hud .sv-modal {
+  transform: scale(var(--ui-scale));
+  transform-origin: center center;
+}
+/* Upgrade selection: +50% vs prior desktop (260→390, 920→1380, fonts/padding×1.5) */
+.survivor-hud #sv-levelup.sv-levelup-open {
+  animation: sv-levelup-in 0.32s ease-out;
+}
+@keyframes sv-levelup-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.survivor-hud #sv-levelup h2 {
+  font-size: clamp(1.6rem, 2.8vw, 2.25rem);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--hud-accent) 35%, transparent);
+}
+.survivor-hud #sv-levelup .sv-choices {
+  max-width: min(1380px, 96vw);
+  gap: 1.125rem;
+}
+.survivor-hud #sv-levelup .sv-choice {
+  width: min(390px, 92vw);
+  min-height: 9.6rem;
+  padding: 1.35rem 1.5rem;
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--hud-accent) 55%, white 12%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--hud-accent) 18%, transparent),
+    0 12px 28px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  animation: sv-choice-in 0.38s ease-out both;
+}
+.survivor-hud #sv-levelup .sv-choice:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.survivor-hud #sv-levelup .sv-choice:nth-child(3) {
+  animation-delay: 0.1s;
+}
+@keyframes sv-choice-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.survivor-hud #sv-levelup .sv-choice:hover,
+.survivor-hud #sv-levelup .sv-choice:focus-visible {
+  border-color: var(--hud-accent);
+  transform: translateY(-3px) scale(1.02);
+  box-shadow:
+    0 0 28px color-mix(in srgb, var(--hud-accent) 40%, transparent),
+    0 14px 32px rgba(0, 0, 0, 0.4);
+}
+.survivor-hud #sv-levelup .sv-choice strong {
+  font-size: clamp(1.35rem, 1.8vw, 1.6rem);
+  margin: 0.35rem 0;
+}
+.survivor-hud #sv-levelup .sv-choice small {
+  font-size: clamp(0.9rem, 1.1vw, 1.05rem);
+  line-height: 1.4;
+}
+.survivor-hud #sv-levelup .eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+}
+.survivor-hud .sv-ui-scale-row {
+  width: min(420px, 92vw);
+  margin: 0.4rem 0 0.8rem;
+  text-align: left;
+}
+.survivor-hud .sv-ui-scale-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.3rem;
+}
+.survivor-hud .sv-ui-scale-controls input[type='range'] {
+  flex: 1;
+  pointer-events: auto;
+  accent-color: var(--hud-accent);
+}
+.survivor-hud .sv-lb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-bottom: 0.7rem;
+}
+.survivor-hud .sv-lb-tab {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid rgba(140, 180, 255, 0.28);
+  background: rgba(10, 16, 28, 0.85);
+  color: #e8f0ff;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+}
+.survivor-hud .sv-lb-tab.active {
+  border-color: var(--hud-accent);
+  color: var(--hud-accent);
+}
+.survivor-hud .sv-lb-list {
+  width: min(520px, 94vw);
+  max-height: min(48vh, 400px);
+  overflow: auto;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.survivor-hud .sv-lb-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  padding: 0.4rem 0.5rem;
+  background: rgba(8, 14, 28, 0.75);
+  border-radius: 0.35rem;
+  border: 1px solid rgba(140, 180, 255, 0.14);
+}
+.survivor-hud .sv-lb-meta,
+.survivor-hud .sv-lb-build {
+  grid-column: 1 / -1;
+  color: rgba(180, 200, 230, 0.7);
+  font-size: 0.64rem;
+}
+.survivor-hud .sv-lb-empty {
+  opacity: 0.7;
 }
 .survivor-hud .sv-build-item {
   display: flex;
@@ -1145,15 +1474,15 @@ button {
 .survivor-hud .sv-inbound {
   margin-top: 0.25rem;
   font-family: 'Audiowide', sans-serif;
-  font-size: 0.78rem;
+  font-size: clamp(1.05rem, 1.7vw, 1.4rem);
   letter-spacing: 0.12em;
   color: #ff6a6a;
-  text-shadow: 0 0 12px rgba(255, 60, 60, 0.55);
+  text-shadow: 0 0 16px rgba(255, 60, 60, 0.65);
 }
 .survivor-hud .sv-bosses-active {
   margin-top: 0.2rem;
   font-family: 'Space Mono', monospace;
-  font-size: 0.68rem;
+  font-size: clamp(0.85rem, 1.15vw, 1.05rem);
   color: #ffb08a;
 }
 .survivor-hud .sv-mech-toast {

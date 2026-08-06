@@ -8,11 +8,13 @@ import {
   SURVIVOR_BOSS,
   TEMP_BUFFS,
   WEAPONS,
+  bossDefForIndex,
   bossDifficultyFor,
   bossPhaseFromHealth,
   bossTimeForIndex,
   compositionAt,
   endlessDifficultyAt,
+  playerPowerScale,
   weaponLevelDef,
   xpForLevel,
   type PassiveId,
@@ -116,8 +118,41 @@ function moveMul(state: SurvivorState): number {
   return 1 + passiveLevel(state, 'move-speed') * 0.08;
 }
 
-function magnetRadius(state: SurvivorState): number {
-  return SURVIVOR.xpMagnetBase + passiveLevel(state, 'pickup-radius') * 0.35;
+/** XP magnet radius — ship form expands from per-hero ship dims without double-multiplying Magnet Field. */
+export function magnetRadius(state: SurvivorState): number {
+  const magnet = SURVIVOR.xpMagnetBase + passiveLevel(state, 'pickup-radius') * 0.35;
+  if (state.player.form === 'ship') {
+    const ship = SURVIVOR.heroShips[state.heroId];
+    // Ship collection covers wings; magnet adds on top of ship base, not double-multiply
+    return Math.max(ship.collectionRadius, magnet + (ship.collectionRadius - SURVIVOR.playerRadius) * 0.55);
+  }
+  if (state.player.form === 'mech') {
+    return magnet * 1.15;
+  }
+  return magnet;
+}
+
+/** Direct pickup collider (Energy / repair / supply when overlapping). */
+export function directPickupRadius(state: SurvivorState): number {
+  if (state.player.form === 'ship') {
+    return SURVIVOR.heroShips[state.heroId].pickupRadius;
+  }
+  if (state.player.form === 'mech') return SURVIVOR.playerRadius * 1.35;
+  return 0.55;
+}
+
+/** Permanent-build thruster/wake damage multiplier (capped via playerPowerScale). */
+export function thrusterPower(state: SurvivorState): number {
+  const base = playerPowerScale({ weapons: state.weapons, passives: state.passives });
+  return base * (state.player.damageMul > 1 ? state.player.damageMul : 1);
+}
+
+export type DamageSourceKind = 'enemy' | 'boss' | 'hazard' | 'self';
+
+/** Breach Shielding: up to 40% reduction on boss-tagged damage only. */
+export function bossDamageReduction(state: SurvivorState): number {
+  const lv = passiveLevel(state, 'breach-shielding');
+  return Math.min(0.4, lv * 0.08);
 }
 
 function hasteMul(state: SurvivorState): number {
@@ -383,7 +418,11 @@ function damageEnemy(
   if (killed) killEnemy(state, e);
 }
 
-function damagePlayer(state: SurvivorState, amount: number): void {
+export function damagePlayer(
+  state: SurvivorState,
+  amount: number,
+  source: DamageSourceKind = 'enemy',
+): void {
   const p = state.player;
   if (!p.alive || p.invuln > 0 || p.dodgeActive > 0 || amount <= 0) return;
   if (p.barrierHits > 0) {
@@ -396,6 +435,7 @@ function damagePlayer(state: SurvivorState, amount: number): void {
   let mul = 1;
   if (p.form === 'mech') mul = SURVIVOR.mech.damageTakenMul;
   else if (p.form === 'ship') mul = SURVIVOR.ship.damageTakenMul;
+  if (source === 'boss') mul *= 1 - bossDamageReduction(state);
   const dealt = amount * mul;
   p.health = Math.max(0, p.health - dealt);
   p.hitFlash = 0.15;
@@ -1236,7 +1276,8 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       const dz = p.z - proj.z;
       const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
       if (dx * dx + dz * dz <= (proj.radius + pr) ** 2) {
-        damagePlayer(state, proj.damage);
+        const src = (proj as { fromBoss?: boolean }).fromBoss ? 'boss' : 'enemy';
+        damagePlayer(state, proj.damage, src as DamageSourceKind);
         proj.active = false;
         pushEffect(state, 'impact', proj.x, proj.z, 0.12, '#ff5566', 0.6);
       }
@@ -1389,7 +1430,7 @@ function updateEnemies(state: SurvivorState, dt: number): void {
       const bdx = e.x - p.x;
       const bdz = e.z - p.z;
       if (bdx * bdx + bdz * bdz <= (e.radius + SURVIVOR.ship.radius) ** 2) {
-        damageEnemy(state, e, SURVIVOR.ship.bodyDamage);
+        damageEnemy(state, e, SURVIVOR.ship.bodyDamage * thrusterPower(state));
         if (e.alive && !e.isMiniboss) {
           const len = Math.hypot(bdx, bdz) || 1;
           applyKnockback(e, bdx / len, bdz / len, SURVIVOR.ship.bodyPush);
@@ -1439,19 +1480,21 @@ function updateEnemies(state: SurvivorState, dt: number): void {
 function updatePickups(state: SurvivorState, dt: number): void {
   const p = state.player;
   const mag = magnetRadius(state);
+  const directR = directPickupRadius(state);
   for (const pk of state.pickups) {
     if (!pk.active) continue;
     const dx = p.x - pk.x;
     const dz = p.z - pk.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 < mag * mag) pk.magnetized = true;
-    if (pk.magnetized) {
+    // XP uses magnet; repair/supply use direct ship-sized collider primarily
+    if (pk.kind === 'xp' && d2 < mag * mag) pk.magnetized = true;
+    if (pk.kind === 'xp' && pk.magnetized) {
       const d = Math.sqrt(d2) || 1;
       const spd = 14;
       pk.x += (dx / d) * spd * dt;
       pk.z += (dz / d) * spd * dt;
     }
-    if (d2 < 0.55) {
+    if (d2 < directR * directR) {
       pk.active = false;
       if (pk.kind === 'xp') {
         gainXp(state, pk.value);
@@ -1790,7 +1833,7 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
           bz,
           SURVIVOR.ship.wakeRadius,
           SURVIVOR.ship.wakeLife,
-          SURVIVOR.ship.wakeDamage,
+          SURVIVOR.ship.wakeDamage * thrusterPower(state),
           state.accent,
         );
         pushEffect(state, 'wake', bx, bz, 0.35, state.accent, SURVIVOR.ship.wakeRadius);
@@ -1824,7 +1867,7 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
     // Taper width toward the tip
     const taper = halfW * (1.05 - (back / len) * 0.55);
     if (side > taper + e.radius) continue;
-    let dmg = SURVIVOR.ship.exhaustDamage;
+    let dmg = SURVIVOR.ship.exhaustDamage * thrusterPower(state);
     if (e.isMiniboss || e.isElite) dmg *= SURVIVOR.ship.exhaustEliteMul;
     damageEnemy(state, e, dmg, { kind: 'ability', pop: 0.7 });
     e.hazardHitCd = SURVIVOR.ship.wakeTickCd;
@@ -1837,7 +1880,7 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
     const back = -(dx * fx + dz * fz);
     const side = Math.abs(dx * sx + dz * sz);
     if (back >= 0.25 && back <= len && side <= halfW + SURVIVOR_BOSS.colliderRadius) {
-      damageBoss(state, SURVIVOR.ship.exhaustDamage * SURVIVOR.ship.exhaustBossMul, {
+      damageBoss(state, SURVIVOR.ship.exhaustDamage * thrusterPower(state) * SURVIVOR.ship.exhaustBossMul, {
         kind: 'ability',
         pop: 0.8,
         boss: b,
@@ -1904,9 +1947,12 @@ function spawnBossAtIndex(state: SurvivorState, index: number, fromStack = false
   bx = c.x;
   bz = c.z;
 
+  const bdef = bossDefForIndex(index);
   const b = emptyBoss();
   b.id = nextEntityId(state);
   b.index = index;
+  b.defId = bdef.id;
+  b.displayName = bdef.displayName;
   b.active = true;
   b.x = bx;
   b.z = bz;
@@ -1998,8 +2044,10 @@ function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number): void 
       b.z = c.z;
     }
     if (b.timer <= 0) {
-      const roll = rng(state);
-      b.pattern = roll < 0.26 ? 'pulse' : roll < 0.52 ? 'line' : roll < 0.78 ? 'fan' : 'summon';
+      const def = bossDefForIndex(b.index);
+      const prefs = def.preferredPatterns;
+      const roll = Math.floor(rng(state) * prefs.length);
+      b.pattern = prefs[roll] ?? (rng(state) < 0.26 ? 'pulse' : roll < 0.52 ? 'line' : roll < 0.78 ? 'fan' : 'summon');
       b.state = 'windup';
       if (b.pattern === 'pulse') {
         const pulse = SURVIVOR_BOSS.patterns.pulse;
@@ -2041,7 +2089,7 @@ function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number): void 
       const t = 1 - b.timer / pulse.active;
       b.telegraphR = pulse.maxRadius * t;
       const d = Math.hypot(p.x - b.x, p.z - b.z);
-      if (Math.abs(d - b.telegraphR) < 1.1) damagePlayer(state, pulse.damage * dmgScale * dt * 2.5);
+      if (Math.abs(d - b.telegraphR) < 1.1) damagePlayer(state, pulse.damage * dmgScale * dt * 2.5, 'boss');
       if (b.timer <= 0) {
         b.state = 'recover';
         b.timer = pulse.recovery * recScale;
@@ -2061,7 +2109,7 @@ function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number): void 
           SURVIVOR.playerRadius + line.width * 0.5,
         )
       ) {
-        damagePlayer(state, line.damage * dmgScale);
+        damagePlayer(state, line.damage * dmgScale, 'boss');
       }
       if (b.timer <= 0) {
         b.state = 'recover';
@@ -2084,6 +2132,7 @@ function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number): void 
             owner: 'enemy',
             color: phase >= 3 ? '#ff3366' : '#ff6688',
           });
+          (proj as { fromBoss?: boolean }).fromBoss = true;
         }
       }
       if (b.timer <= 0) {

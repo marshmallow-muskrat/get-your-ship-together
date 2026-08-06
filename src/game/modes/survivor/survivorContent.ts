@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-1.0.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-1.1.0';
 
 /** Centralized Containment Protocol tuning (endless high-score mode). */
 export const SURVIVOR = {
@@ -49,9 +49,10 @@ export const SURVIVOR = {
   regenPerLevel: 0.45,
   dodge: {
     cooldown: 10,
-    duration: 0.24,
-    invuln: 0.24,
-    distance: 4.5,
+    /** Distance tripled from prior 4.5 → 13.5 */
+    duration: 0.42,
+    invuln: 0.42,
+    distance: 13.5,
   },
   mech: {
     duration: 14,
@@ -99,7 +100,16 @@ export const SURVIVOR = {
     exhaustEliteMul: 0.55,
     exhaustBossMul: 0.4,
     exhaustVisualScale: 1.65,
+    /** Power scale caps thruster damage growth with permanent build. */
+    powerScaleCap: 6.0,
   },
+  /** Per-hero ship dimensions for pickup/exhaust (world units). */
+  heroShips: {
+    bee: { pickupRadius: 2.4, collectionRadius: 2.8, colliderLength: 3.2, colliderWidth: 2.6 },
+    flamingo: { pickupRadius: 2.6, collectionRadius: 3.0, colliderLength: 3.5, colliderWidth: 2.8 },
+    frog: { pickupRadius: 2.5, collectionRadius: 2.9, colliderLength: 3.3, colliderWidth: 2.7 },
+    'red-panda': { pickupRadius: 2.55, collectionRadius: 3.0, colliderLength: 3.4, colliderWidth: 2.75 },
+  } as Record<HeroId, { pickupRadius: number; collectionRadius: number; colliderLength: number; colliderWidth: number }>,
   damageNumbers: {
     aggregateWindow: 0.15,
     life: 0.85,
@@ -307,7 +317,8 @@ export type PassiveId =
   | 'weapon-haste'
   | 'area'
   | 'mech-charge'
-  | 'mech-duration';
+  | 'mech-duration'
+  | 'breach-shielding';
 
 export interface PassiveDef {
   id: PassiveId;
@@ -326,7 +337,131 @@ export const PASSIVES: PassiveDef[] = [
   { id: 'area', name: 'Containment Field', description: 'Larger weapon areas and blasts.', maxLevel: 5, perLevel: 0.1 },
   { id: 'mech-charge', name: 'Core Siphon', description: 'Mech meter fills faster from kills.', maxLevel: 5, perLevel: 0.15 },
   { id: 'mech-duration', name: 'Reactor Hold', description: 'Longer mech transform window.', maxLevel: 5, perLevel: 0.12 },
+  {
+    id: 'breach-shielding',
+    name: 'Breach Shielding',
+    description: 'Reduces damage from boss attacks by 8% per level (max 40%).',
+    maxLevel: 5,
+    perLevel: 0.08,
+  },
 ];
+
+/** Capped permanent-build power scale for thruster/wake damage. */
+export function playerPowerScale(input: {
+  weapons: Array<{ level: number }>;
+  passives: Partial<Record<PassiveId, number>>;
+}): number {
+  const owned = Math.max(1, input.weapons.length);
+  const totalWeaponLevels = input.weapons.reduce((n, w) => n + w.level, 0);
+  const weaponGrowth = Math.max(0, totalWeaponLevels - owned);
+  const passiveGrowth = Object.values(input.passives).reduce((n, v) => n + (v ?? 0), 0);
+  return Math.min(SURVIVOR.ship.powerScaleCap, 1 + 0.12 * weaponGrowth + 0.04 * passiveGrowth);
+}
+
+export type BossRole = 'brute' | 'charger' | 'caster' | 'summoner' | 'flyer';
+
+export interface BossDef {
+  id: string;
+  displayName: string;
+  url: string;
+  targetHeight: number;
+  colliderRadius: number;
+  visualScale: number;
+  role: BossRole;
+  accent: string;
+  anim: {
+    idle: string[];
+    walk: string[];
+    attack: string[];
+    hit: string[];
+    death: string[];
+  };
+  preferredPatterns: Array<'pulse' | 'line' | 'fan' | 'summon'>;
+}
+
+export const BOSS_DEFS: BossDef[] = [
+  {
+    id: 'blue-demon',
+    displayName: 'Breach Demon',
+    url: '/runtime/boss/blue-demon.gltf',
+    targetHeight: 3.6,
+    colliderRadius: 0.95,
+    visualScale: 1.85,
+    role: 'brute',
+    accent: '#ff4455',
+    anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
+    preferredPatterns: ['pulse', 'line', 'fan', 'summon'],
+  },
+  {
+    id: 'yeti',
+    displayName: 'Frost Warden',
+    url: '/runtime/boss/yeti.gltf',
+    targetHeight: 3.8,
+    colliderRadius: 1.05,
+    visualScale: 1.9,
+    role: 'brute',
+    accent: '#88c8ff',
+    anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
+    preferredPatterns: ['pulse', 'line', 'summon'],
+  },
+  {
+    id: 'dino',
+    displayName: 'Containment Saurian',
+    url: '/runtime/boss/dino.gltf',
+    targetHeight: 3.5,
+    colliderRadius: 1.0,
+    visualScale: 1.8,
+    role: 'charger',
+    accent: '#7dff9a',
+    anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Bite_Front', 'Jump'], hit: ['HitReact'], death: ['Death'] },
+    preferredPatterns: ['line', 'pulse', 'fan'],
+  },
+  {
+    id: 'demon',
+    displayName: 'Crimson Overseer',
+    url: '/runtime/boss/demon.gltf',
+    targetHeight: 3.7,
+    colliderRadius: 0.98,
+    visualScale: 1.88,
+    role: 'caster',
+    accent: '#ff3366',
+    anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
+    preferredPatterns: ['fan', 'pulse', 'line'],
+  },
+  {
+    id: 'dragon',
+    displayName: 'Void Drake',
+    url: '/runtime/boss/dragon.gltf',
+    targetHeight: 3.4,
+    colliderRadius: 1.1,
+    visualScale: 1.75,
+    role: 'flyer',
+    accent: '#c080ff',
+    anim: { idle: ['Flying_Idle', 'Idle'], walk: ['Fast_Flying', 'Fly'], attack: ['Punch', 'Headbutt', 'Attack'], hit: ['HitReact'], death: ['Death'] },
+    preferredPatterns: ['fan', 'line', 'summon'],
+  },
+  {
+    id: 'mushroom-king',
+    displayName: 'Spore Sovereign',
+    url: '/runtime/boss/mushroom-king.gltf',
+    targetHeight: 3.5,
+    colliderRadius: 1.15,
+    visualScale: 1.95,
+    role: 'summoner',
+    accent: '#ffaa44',
+    anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
+    preferredPatterns: ['summon', 'pulse', 'fan'],
+  },
+];
+
+/** Deterministic boss model for schedule index n (1-based). Avoids immediate repeats. */
+export function bossDefForIndex(index: number): BossDef {
+  const n = Math.max(1, Math.floor(index));
+  const len = BOSS_DEFS.length;
+  // Rotate with offset so consecutive bosses differ
+  const idx = (n - 1 + Math.floor((n - 1) / len)) % len;
+  return BOSS_DEFS[idx]!;
+}
 
 export function heroStarterWeapon(heroId: HeroId): WeaponId {
   switch (heroId) {

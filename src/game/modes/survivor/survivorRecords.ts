@@ -3,8 +3,11 @@ import { isHeroId } from '../../content/heroes';
 import { SURVIVOR_BALANCE_VERSION, type PassiveId, type WeaponId } from './survivorContent';
 
 export const RECORDS_STORAGE_KEY = 'gyst.survivor.records.v1';
+export const LEADERBOARDS_STORAGE_KEY = 'gyst.survivor.leaderboards.v2';
+export const MAX_LEADERBOARD_ENTRIES = 10;
 
 export interface RunSummary {
+  id: string;
   survivalTime: number;
   kills: number;
   level: number;
@@ -16,7 +19,18 @@ export interface RunSummary {
   balanceVersion: string;
 }
 
-export interface SurvivorRecords {
+export interface HeroLeaderboard {
+  heroId: HeroId;
+  runs: RunSummary[];
+}
+
+export interface SurvivorLeaderboards {
+  version: 2;
+  heroes: Record<HeroId, RunSummary[]>;
+}
+
+/** Legacy v1 shape (migration source). */
+export interface SurvivorRecordsV1 {
   version: 1;
   bestOverall: RunSummary | null;
   bestByHero: Partial<Record<HeroId, RunSummary>>;
@@ -25,19 +39,30 @@ export interface SurvivorRecords {
   mostBossesDefeated: number;
 }
 
-function emptyRecords(): SurvivorRecords {
+const HEROES: HeroId[] = ['bee', 'flamingo', 'frog', 'red-panda'];
+
+function emptyBoards(): SurvivorLeaderboards {
   return {
-    version: 1,
-    bestOverall: null,
-    bestByHero: {},
-    highestKills: 0,
-    highestLevel: 0,
-    mostBossesDefeated: 0,
+    version: 2,
+    heroes: {
+      bee: [],
+      flamingo: [],
+      frog: [],
+      'red-panda': [],
+    },
   };
 }
 
 function safeHero(id: unknown): HeroId | null {
   return typeof id === 'string' && isHeroId(id) ? id : null;
+}
+
+function ensureId(s: RunSummary): RunSummary {
+  if (s.id) return s;
+  return {
+    ...s,
+    id: `${s.heroId}-${s.timestamp}-${Math.floor(s.survivalTime * 100)}`,
+  };
 }
 
 function normalizeSummary(raw: unknown): RunSummary | null {
@@ -47,7 +72,8 @@ function normalizeSummary(raw: unknown): RunSummary | null {
   if (!heroId) return null;
   const survivalTime = Number(o.survivalTime);
   if (!Number.isFinite(survivalTime) || survivalTime < 0) return null;
-  return {
+  return ensureId({
+    id: typeof o.id === 'string' ? o.id : '',
     survivalTime,
     kills: Math.max(0, Math.floor(Number(o.kills) || 0)),
     level: Math.max(1, Math.floor(Number(o.level) || 1)),
@@ -71,47 +97,114 @@ function normalizeSummary(raw: unknown): RunSummary | null {
       : [],
     timestamp: Math.floor(Number(o.timestamp) || Date.now()),
     balanceVersion: String(o.balanceVersion ?? 'unknown'),
-  };
+  });
 }
 
-export function loadRecords(): SurvivorRecords {
+function sortRuns(runs: RunSummary[]): RunSummary[] {
+  return [...runs].sort((a, b) => {
+    if (b.survivalTime !== a.survivalTime) return b.survivalTime - a.survivalTime;
+    if (b.kills !== a.kills) return b.kills - a.kills;
+    return b.bossesDefeated - a.bossesDefeated;
+  });
+}
+
+function trim(runs: RunSummary[]): RunSummary[] {
+  return sortRuns(runs).slice(0, MAX_LEADERBOARD_ENTRIES);
+}
+
+/** Migrate v1 bests into v2 boards if needed. */
+function migrateFromV1(): SurvivorLeaderboards {
+  const boards = emptyBoards();
   try {
-    if (typeof localStorage === 'undefined') return emptyRecords();
+    if (typeof localStorage === 'undefined') return boards;
     const raw = localStorage.getItem(RECORDS_STORAGE_KEY);
-    if (!raw) return emptyRecords();
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return emptyRecords();
-    const p = parsed as Record<string, unknown>;
-    if (p.version !== 1) return emptyRecords();
-    const bestOverall = normalizeSummary(p.bestOverall);
-    const bestByHero: Partial<Record<HeroId, RunSummary>> = {};
-    if (p.bestByHero && typeof p.bestByHero === 'object') {
-      for (const [k, v] of Object.entries(p.bestByHero as Record<string, unknown>)) {
-        const h = safeHero(k);
-        const s = normalizeSummary(v);
-        if (h && s) bestByHero[h] = s;
+    if (!raw) return boards;
+    const parsed = JSON.parse(raw) as SurvivorRecordsV1;
+    if (!parsed || parsed.version !== 1) return boards;
+    for (const h of HEROES) {
+      const s = normalizeSummary(parsed.bestByHero?.[h] ?? null);
+      if (s) boards.heroes[h] = [s];
+    }
+    if (parsed.bestOverall) {
+      const s = normalizeSummary(parsed.bestOverall);
+      if (s && boards.heroes[s.heroId].length === 0) {
+        boards.heroes[s.heroId] = [s];
       }
     }
-    return {
-      version: 1,
-      bestOverall,
-      bestByHero,
-      highestKills: Math.max(0, Math.floor(Number(p.highestKills) || 0)),
-      highestLevel: Math.max(0, Math.floor(Number(p.highestLevel) || 0)),
-      mostBossesDefeated: Math.max(0, Math.floor(Number(p.mostBossesDefeated) || 0)),
-    };
   } catch {
-    return emptyRecords();
+    // ignore
+  }
+  return boards;
+}
+
+export function loadLeaderboards(): SurvivorLeaderboards {
+  try {
+    if (typeof localStorage === 'undefined') return emptyBoards();
+    const raw = localStorage.getItem(LEADERBOARDS_STORAGE_KEY);
+    if (!raw) {
+      const migrated = migrateFromV1();
+      saveLeaderboards(migrated);
+      return migrated;
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return emptyBoards();
+    const p = parsed as { version?: unknown; heroes?: unknown };
+    if (p.version !== 2 || !p.heroes || typeof p.heroes !== 'object') {
+      const migrated = migrateFromV1();
+      saveLeaderboards(migrated);
+      return migrated;
+    }
+    const boards = emptyBoards();
+    for (const h of HEROES) {
+      const list = (p.heroes as Record<string, unknown>)[h];
+      if (!Array.isArray(list)) continue;
+      boards.heroes[h] = trim(
+        list.map(normalizeSummary).filter((x): x is RunSummary => !!x),
+      );
+    }
+    return boards;
+  } catch {
+    return emptyBoards();
   }
 }
 
-export function saveRecords(records: SurvivorRecords): void {
+export function saveLeaderboards(boards: SurvivorLeaderboards): void {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(records));
+    localStorage.setItem(LEADERBOARDS_STORAGE_KEY, JSON.stringify(boards));
   } catch {
-    // private mode / quota
+    // quota / private
   }
+}
+
+/** Legacy API used by HUD — returns best overall from leaderboards. */
+export function loadRecords(): {
+  version: 2;
+  bestOverall: RunSummary | null;
+  bestByHero: Partial<Record<HeroId, RunSummary>>;
+  highestKills: number;
+  highestLevel: number;
+  mostBossesDefeated: number;
+} {
+  const boards = loadLeaderboards();
+  let bestOverall: RunSummary | null = null;
+  const bestByHero: Partial<Record<HeroId, RunSummary>> = {};
+  let highestKills = 0;
+  let highestLevel = 0;
+  let mostBossesDefeated = 0;
+  for (const h of HEROES) {
+    const top = boards.heroes[h][0];
+    if (top) {
+      bestByHero[h] = top;
+      if (!bestOverall || top.survivalTime > bestOverall.survivalTime) bestOverall = top;
+      for (const r of boards.heroes[h]) {
+        highestKills = Math.max(highestKills, r.kills);
+        highestLevel = Math.max(highestLevel, r.level);
+        mostBossesDefeated = Math.max(mostBossesDefeated, r.bossesDefeated);
+      }
+    }
+  }
+  return { version: 2, bestOverall, bestByHero, highestKills, highestLevel, mostBossesDefeated };
 }
 
 export function formatSurvivalTime(seconds: number): string {
@@ -119,40 +212,17 @@ export function formatSurvivalTime(seconds: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  }
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
 export interface RecordResult {
-  records: SurvivorRecords;
+  boards: SurvivorLeaderboards;
   isNewOverall: boolean;
   isNewHeroBest: boolean;
+  isTopTen: boolean;
+  rank: number;
   previousBest: number;
-}
-
-/** Apply a completed run once; returns whether new records were set. */
-export function recordRun(summary: RunSummary): RecordResult {
-  const records = loadRecords();
-  const previousBest = records.bestOverall?.survivalTime ?? 0;
-  let isNewOverall = false;
-  let isNewHeroBest = false;
-
-  if (!records.bestOverall || summary.survivalTime > records.bestOverall.survivalTime) {
-    records.bestOverall = summary;
-    isNewOverall = true;
-  }
-  const prevHero = records.bestByHero[summary.heroId];
-  if (!prevHero || summary.survivalTime > prevHero.survivalTime) {
-    records.bestByHero[summary.heroId] = summary;
-    isNewHeroBest = true;
-  }
-  records.highestKills = Math.max(records.highestKills, summary.kills);
-  records.highestLevel = Math.max(records.highestLevel, summary.level);
-  records.mostBossesDefeated = Math.max(records.mostBossesDefeated, summary.bossesDefeated);
-  saveRecords(records);
-  return { records, isNewOverall, isNewHeroBest, previousBest };
 }
 
 export function makeRunSummary(input: {
@@ -164,7 +234,9 @@ export function makeRunSummary(input: {
   weapons: Array<{ weaponId: WeaponId; level: number }>;
   passives: Partial<Record<PassiveId, number>>;
 }): RunSummary {
+  const timestamp = Date.now();
   return {
+    id: `${input.heroId}-${timestamp}-${Math.floor(input.survivalTime * 1000)}`,
     survivalTime: input.survivalTime,
     kills: input.kills,
     level: input.level,
@@ -175,7 +247,46 @@ export function makeRunSummary(input: {
       id,
       level: level ?? 1,
     })),
-    timestamp: Date.now(),
+    timestamp,
     balanceVersion: SURVIVOR_BALANCE_VERSION,
   };
+}
+
+/** Insert a completed run into that hero's top-10. Prevents duplicate ids. */
+export function recordRun(summary: RunSummary): RecordResult {
+  const boards = loadLeaderboards();
+  const heroRuns = boards.heroes[summary.heroId] ?? [];
+  const previousBest = heroRuns[0]?.survivalTime ?? 0;
+  const overallBefore = loadRecords().bestOverall?.survivalTime ?? 0;
+
+  if (heroRuns.some((r) => r.id === summary.id)) {
+    return {
+      boards,
+      isNewOverall: false,
+      isNewHeroBest: false,
+      isTopTen: heroRuns.some((r) => r.id === summary.id),
+      rank: heroRuns.findIndex((r) => r.id === summary.id) + 1,
+      previousBest,
+    };
+  }
+
+  const next = trim([...heroRuns, ensureId(summary)]);
+  boards.heroes[summary.heroId] = next;
+  saveLeaderboards(boards);
+
+  const rank = next.findIndex((r) => r.id === summary.id) + 1;
+  const isNewHeroBest = rank === 1 && summary.survivalTime > previousBest;
+  const isNewOverall = summary.survivalTime > overallBefore;
+  return {
+    boards,
+    isNewOverall,
+    isNewHeroBest,
+    isTopTen: rank > 0 && rank <= MAX_LEADERBOARD_ENTRIES,
+    rank,
+    previousBest,
+  };
+}
+
+export function getHeroLeaderboard(heroId: HeroId): RunSummary[] {
+  return loadLeaderboards().heroes[heroId] ?? [];
 }

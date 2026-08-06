@@ -25,23 +25,23 @@ npm run build
 
 ## Containment Protocol
 
-**Endless one-map run.** Timer counts **up**. Death ends the run. Score = survival time (local high scores).
+**Endless one-map run.** Timer counts **up**. Death ends the run. Score = survival time with **per-hero local top-10 leaderboards** (`gyst.survivor.leaderboards.v2`).
 
-Bosses arrive every **2 minutes** and scale forever. Permanent upgrades eventually cap; temporary consumables keep level-ups working.
+Bosses arrive every **2 minutes**, rotate through **six** distinct models with a red hostile aura, and scale forever. Permanent upgrades eventually cap; temporary consumables keep level-ups working.
 
 ### Default controls (remappable in Pause → Settings)
 
 | Action | Key |
 |---|---|
 | Move | WASD |
-| **Dodge** | **Space** (10s) |
+| **Dodge** | **Space** (10s, **13.5** units = 3× prior distance) |
 | Repulsor Burst | Q (30s, large shockwave) |
-| Afterburner | E (ship + thruster exhaust damage) |
-| Mech Overdrive | R (when charged) |
+| Afterburner | E (ship + thruster exhaust; damage scales with permanent build, cap 6×) |
+| Mech Overdrive | R (when charged; strong ready glow) |
 | Level-up | 1 / 2 / 3 |
-| Pause | Esc |
+| Pause | Esc → Settings (**UI Scale** 75–150%), Leaderboards |
 
-Energy bar = XP. One arena. Audio deferred.
+Energy bar = XP. Ship form expands Energy/repair pickup radius to match each hero’s ship. **Breach Shielding** passive cuts boss damage (up to 40%). One arena. Audio deferred.
 
 ### Fixtures
 

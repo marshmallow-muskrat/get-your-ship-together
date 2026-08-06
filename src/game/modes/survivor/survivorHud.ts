@@ -8,8 +8,15 @@ import {
   type ActionId,
   type KeybindMap,
 } from './survivorKeybinds';
-import { formatSurvivalTime, loadRecords, makeRunSummary, recordRun } from './survivorRecords';
+import {
+  formatSurvivalTime,
+  getHeroLeaderboard,
+  loadRecords,
+  makeRunSummary,
+  recordRun,
+} from './survivorRecords';
 import { aliveBossCount, primaryBoss } from './survivorState';
+import type { HeroId } from '../../content/heroes';
 
 export type HudPublishOpts = {
   settingsOpen: boolean;
@@ -28,6 +35,8 @@ export class SurvivorHud {
   private onCloseSettings: () => void;
   private onStartRebind: (a: ActionId) => void;
   private onResetKeybinds: () => void;
+  private onUiScale: (s: number) => void;
+  private onOpenLeaderboard: () => void;
   private getKeybinds: () => KeybindMap;
   private projectWorld: (x: number, z: number) => { x: number; y: number } | null;
   private lastChoicesKey = '';
@@ -51,6 +60,8 @@ export class SurvivorHud {
       onCloseSettings: () => void;
       onStartRebind: (a: ActionId) => void;
       onResetKeybinds: () => void;
+      onUiScale?: (s: number) => void;
+      onOpenLeaderboard?: () => void;
       getKeybinds: () => KeybindMap;
       projectWorld: (x: number, z: number) => { x: number; y: number } | null;
     },
@@ -63,6 +74,8 @@ export class SurvivorHud {
     this.onCloseSettings = handlers.onCloseSettings;
     this.onStartRebind = handlers.onStartRebind;
     this.onResetKeybinds = handlers.onResetKeybinds;
+    this.onUiScale = handlers.onUiScale ?? (() => undefined);
+    this.onOpenLeaderboard = handlers.onOpenLeaderboard ?? (() => undefined);
     this.getKeybinds = handlers.getKeybinds;
     this.projectWorld = handlers.projectWorld;
     this.root = document.createElement('section');
@@ -75,7 +88,7 @@ export class SurvivorHud {
         </div>
         <div class="sv-timer-wrap">
           <div id="sv-boss" class="sv-boss hidden">
-            <span class="eyebrow">CONTAINMENT BREACH · P<span id="sv-boss-phase">1</span></span>
+            <span class="eyebrow"><span id="sv-boss-name">CONTAINMENT BREACH</span> · P<span id="sv-boss-phase">1</span></span>
             <div class="sv-track boss"><i id="sv-boss-hp"></i></div>
           </div>
           <div id="sv-miniboss" class="sv-miniboss hidden">
@@ -90,6 +103,7 @@ export class SurvivorHud {
         <div class="sv-meta">
           <span>LVL <strong id="sv-level">1</strong></span>
           <span>KILLS <strong id="sv-kills">0</strong></span>
+          <span>BOSSES <strong id="sv-bosses">0</strong></span>
         </div>
       </div>
 
@@ -145,6 +159,7 @@ export class SurvivorHud {
         <div class="sv-end-actions sv-pause-actions">
           <button type="button" id="sv-resume" class="sv-btn">RESUME</button>
           <button type="button" id="sv-settings" class="sv-btn">SETTINGS</button>
+          <button type="button" id="sv-leaderboard" class="sv-btn ghost">LEADERBOARDS</button>
           <button type="button" id="sv-pause-restart" class="sv-btn ghost">RESTART RUN</button>
           <button type="button" id="sv-pause-crew" class="sv-btn ghost">CREW SELECT</button>
         </div>
@@ -154,10 +169,26 @@ export class SurvivorHud {
         <p class="eyebrow">CONFIGURATION</p>
         <h2>Controls</h2>
         <p class="sv-settings-hint" id="sv-rebind-hint">Click a row, then press a key. Escape cancels capture.</p>
+        <div class="sv-ui-scale-row">
+          <label class="eyebrow" for="sv-ui-scale">UI SCALE</label>
+          <div class="sv-ui-scale-controls">
+            <input type="range" id="sv-ui-scale" min="75" max="150" step="5" value="100" />
+            <span id="sv-ui-scale-val">100%</span>
+          </div>
+        </div>
         <div id="sv-bind-list" class="sv-bind-list"></div>
         <div class="sv-end-actions">
           <button type="button" id="sv-reset-binds" class="sv-btn ghost">RESET TO DEFAULTS</button>
           <button type="button" id="sv-close-settings" class="sv-btn">BACK</button>
+        </div>
+      </div>
+      <div id="sv-leaderboard-modal" class="sv-modal sv-leaderboard hidden">
+        <p class="eyebrow">LOCAL RECORDS</p>
+        <h2>Leaderboards</h2>
+        <div id="sv-lb-tabs" class="sv-lb-tabs"></div>
+        <div id="sv-lb-list" class="sv-lb-list"></div>
+        <div class="sv-end-actions">
+          <button type="button" id="sv-close-lb" class="sv-btn">BACK</button>
         </div>
       </div>
 
@@ -174,6 +205,7 @@ export class SurvivorHud {
         <div id="sv-end-build" class="sv-end-build"></div>
         <div class="sv-end-actions">
           <button type="button" id="sv-restart" class="sv-btn">RUN AGAIN</button>
+          <button type="button" id="sv-end-lb" class="sv-btn ghost">LEADERBOARDS</button>
           <button type="button" id="sv-crew" class="sv-btn ghost">CREW SELECT</button>
         </div>
       </div>
@@ -196,6 +228,77 @@ export class SurvivorHud {
     this.root.querySelector('#sv-reset-binds')?.addEventListener('click', this.onResetKeybinds);
 
     this.buildBindList();
+    this.root.querySelector('#sv-leaderboard')?.addEventListener('click', () => this.setLeaderboardOpen(true));
+    this.root.querySelector('#sv-end-lb')?.addEventListener('click', () => this.setLeaderboardOpen(true));
+    this.root.querySelector('#sv-close-lb')?.addEventListener('click', () => this.setLeaderboardOpen(false));
+    const scale = this.root.querySelector<HTMLInputElement>('#sv-ui-scale');
+    scale?.addEventListener('input', () => {
+      const v = Number(scale.value) / 100;
+      const lab = this.root.querySelector('#sv-ui-scale-val');
+      if (lab) lab.textContent = `${scale.value}%`;
+      this.onUiScale(v);
+    });
+  }
+
+  setUiScale(scale: number): void {
+    document.documentElement.style.setProperty('--ui-scale', String(scale));
+    const el = this.root.querySelector<HTMLInputElement>('#sv-ui-scale');
+    if (el) el.value = String(Math.round(scale * 100));
+    const lab = this.root.querySelector('#sv-ui-scale-val');
+    if (lab) lab.textContent = `${Math.round(scale * 100)}%`;
+  }
+
+  setLeaderboardOpen(open: boolean): void {
+    const modal = this.root.querySelector('#sv-leaderboard-modal');
+    modal?.classList.toggle('hidden', !open);
+    if (open) this.renderLeaderboard(this._lbHero);
+  }
+
+  private _lbHero: import('../../content/heroes').HeroId = 'bee';
+
+  private renderLeaderboard(hero: HeroId): void {
+    this._lbHero = hero;
+    const tabs = this.root.querySelector('#sv-lb-tabs');
+    const list = this.root.querySelector('#sv-lb-list');
+    if (tabs) {
+      const names: Record<HeroId, string> = {
+        bee: 'Bee',
+        flamingo: 'Flamingo',
+        frog: 'Frog',
+        'red-panda': 'Red Panda',
+      };
+      tabs.innerHTML = (['bee', 'flamingo', 'frog', 'red-panda'] as HeroId[])
+        .map(
+          (h) =>
+            `<button type="button" class="sv-lb-tab${h === hero ? ' active' : ''}" data-hero="${h}">${names[h]}</button>`,
+        )
+        .join('');
+      tabs.querySelectorAll<HTMLButtonElement>('.sv-lb-tab').forEach((btn) => {
+        btn.addEventListener('click', () => this.renderLeaderboard(btn.dataset.hero as HeroId));
+      });
+    }
+    if (list) {
+      const runs = getHeroLeaderboard(hero);
+      if (runs.length === 0) {
+        list.innerHTML = '<p class="sv-lb-empty">No runs recorded yet.</p>';
+      } else {
+        list.innerHTML = runs
+          .map((r, i) => {
+            const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
+            const date = new Date(r.timestamp).toLocaleDateString();
+            return `<div class="sv-lb-row">
+              <strong>#${i + 1}</strong>
+              <span>${formatSurvivalTime(r.survivalTime)}</span>
+              <span>K ${r.kills}</span>
+              <span>L${r.level}</span>
+              <span>B ${r.bossesDefeated}</span>
+              <span class="sv-lb-meta">${date} · ${r.balanceVersion}</span>
+              <span class="sv-lb-build">${build}</span>
+            </div>`;
+          })
+          .join('');
+      }
+    }
   }
 
   setSettingsOpen(open: boolean): void {
@@ -287,11 +390,21 @@ export class SurvivorHud {
     set('sv-hero', hero.fullName);
     set('sv-level', String(state.level));
     set('sv-kills', String(state.kills));
+    set('sv-bosses', String(state.bossesDefeated));
     set('sv-lvl-inline', `LVL ${state.level}`);
+    this._lbHero = state.heroId;
 
     set('sv-timer', formatSurvivalTime(state.time));
     const inbound = this.root.querySelector('#sv-inbound');
-    if (inbound) inbound.classList.toggle('hidden', state.inboundBanner <= 0);
+    if (inbound) {
+      inbound.classList.toggle('hidden', state.inboundBanner <= 0);
+      if (state.inboundBanner > 0) {
+        const pb = primaryBoss(state);
+        inbound.textContent = pb
+          ? `BOSS INBOUND · ${pb.displayName.toUpperCase()}`
+          : 'CONTAINMENT BREACH';
+      }
+    }
     const ba = this.root.querySelector('#sv-bosses-active');
     const nBoss = aliveBossCount(state);
     if (ba) {
@@ -450,6 +563,8 @@ export class SurvivorHud {
       }
       const phase = this.root.querySelector('#sv-boss-phase');
       if (phase && pb) phase.textContent = String(pb.phase);
+      const bname = this.root.querySelector('#sv-boss-name');
+      if (bname) bname.textContent = pb ? pb.displayName.toUpperCase() : 'CONTAINMENT BREACH';
     }
     const mb = this.root.querySelector('#sv-miniboss');
     if (mb) {
@@ -509,6 +624,7 @@ export class SurvivorHud {
     if (!levelup) return;
     const open = state.phase === 'levelup';
     levelup.classList.toggle('hidden', !open);
+    levelup.classList.toggle('sv-levelup-open', open);
     if (open) {
       const key = state.choices.map((c) => c.id).join('|') + formatKeyCode(binds.choice1);
       if (key !== this.lastChoicesKey) {
@@ -520,11 +636,17 @@ export class SurvivorHud {
             formatKeyCode(binds.choice2),
             formatKeyCode(binds.choice3),
           ];
+          const kindLabel = (kind: string) => {
+            if (kind === 'passive') return 'PASSIVE';
+            if (kind === 'new-weapon') return 'NEW WEAPON';
+            if (kind === 'temp') return 'CONSUMABLE';
+            return 'WEAPON';
+          };
           box.innerHTML = state.choices
             .map(
               (c, i) =>
                 `<button type="button" class="sv-choice" data-i="${i}">
-                  <span class="eyebrow">${c.kind === 'passive' ? 'PASSIVE' : c.kind === 'new-weapon' ? 'NEW WEAPON' : 'WEAPON'} · ${labels[i] ?? i + 1}</span>
+                  <span class="eyebrow">${kindLabel(c.kind)} · ${labels[i] ?? i + 1}</span>
                   <strong>${c.title}</strong>
                   <small>${c.body}</small>
                 </button>`,
