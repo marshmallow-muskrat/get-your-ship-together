@@ -3,36 +3,68 @@
 ## Read first
 
 1. `GAME_CONCEPT.md`
-2. `docs/VERTICAL_SLICE.md` (campaign)
-3. `docs/SURVIVOR_MODE_VERTICAL_SLICE.md` (survivor experiment)
-4. `README.md`
+2. `docs/CONTAINMENT_PROTOCOL.md`
+3. `README.md`
 
-## Product guardrails
+## Authoritative product direction
 
-- GYST is evaluating **campaign** and **Containment Protocol (survivor)** directions.
-- Survivor mode is an **authorized owner experiment** and may become the preferred primary mode.
-- Preserve the visual identity of the hero-selection screen.
-- Campaign: manual primary fire, dodge, ability, repair, mech, authored encounters.
-- Survivor: automatic weapons, fixed camera, horde, XP upgrades, kill-charged mech — do **not** require campaign manual combat rules.
-- Do not add accounts, databases, Electron, co-op, or permanent meta-progression for the slices.
+- **Containment Protocol is GYST.** It is not an experiment or secondary mode.
+- The former campaign prototype is retired and must not remain selectable, documented as active, or used as a product constraint.
+- Preserve the hero-selection screen and its four-hero identity.
+- The game is one-map endless survival: upward timer, automatic weapons, Energy/XP upgrades, bosses every two minutes, and death-only completion.
+- Active controls provide agency: Dodge, Repulsor Burst, Afterburner ship form, and Mech Overdrive.
+- Each hero has an independent local leaderboard.
 
 ## Architecture guardrails
 
 - Keep Vite + TypeScript + Three.js `0.180.0`.
-- Do not copy Gloamreach’s full `src/game` tree.
-- Keep `heroId` separate from form. Campaign form: `astronaut` | `mech`. Survivor-local form may include `ship`.
 - Simulation owns combat; rendering presents only.
-- **Do not** scatter `if (mode === 'survivor')` through campaign systems. Isolate survivor under `src/game/modes/survivor/`.
-- Campaign and survivor state must not share one bloated state bag.
-- Every screen/runtime must dispose completely (no dual RAF/WebGL leaks).
-- Switching campaign ↔ survivor ↔ selection must not leave listeners or loops alive.
+- Use one RAF loop and one WebGL renderer at a time.
+- Every screen/runtime must dispose listeners, effects, models, and renderer resources completely.
+- Keep hero identity separate from astronaut, ship, and mech form.
+- Keep deterministic fixed-step simulation and deterministic fixtures.
+- Centralize content and balance definitions; do not scatter hero, weapon, or boss special cases through hot loops.
+- Use bounded pools/caps for enemies, bosses, projectiles, hazards, particles, and damage-number presentation.
+- Do not retain campaign routes, buttons, fixtures, runtime code, tests, or documentation after the removal migration is implemented.
+
+## Endless progression guardrails
+
+- Weapon levels 1–5 are authored behavioral tiers.
+- Level 6 onward uses repeatable Overclock scaling while still displaying normal levels (L6, L7, L8...).
+- Repeatable damage growth is additive, not compounding.
+- Eligible passive upgrades may continue with safe/diminishing returns.
+- Hard safety caps remain for cooldown, speed, area, projectile count, pickup reach, transformation duration, and damage reduction.
+- Weapon slots remain limited.
+- Enemy and boss growth must eventually outpace the player.
+
+## Product scope
+
+Do not add without explicit owner direction:
+
+- Additional maps
+- Accounts, databases, or cloud saves
+- Online leaderboards
+- Permanent metagame progression
+- Shops, currencies, inventory, or rarity
+- Co-op
+- Gamepad or touch support
+- Audio production
 
 ## Assets
 
-- Source: `assets/space-packs/` (not published wholesale)
+- Source packs: `assets/space-packs/` (not published wholesale)
 - Runtime subset: `public/runtime/`
-- Profile scale/collider/anims in content modules
+- Profile scale, collider, animation, boss aura, ship pickup, and thruster configuration belong in content definitions.
+- Reuse the provided Quaternius CC0 assets and document any new runtime subset.
 
 ## Quality
 
-Compilation is not completion. Exercise campaign and survivor in a real browser before claiming done.
+Compilation is not completion. Exercise the game in a real browser, inspect the console, and verify the relevant fixtures before claiming work is done.
+
+Minimum verification:
+
+```bash
+npm test -- --run
+npm run typecheck
+npm run build
+```
