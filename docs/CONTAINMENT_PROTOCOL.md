@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-1.x`
+**Current balance line:** `endless-1.2.0`
 
 ## Purpose
 
@@ -69,7 +69,7 @@ L8 · Overclock III
 
 Overclock is explanatory language, not a replacement for the visible level. Upgrade cards and the build panel must never leave an upgraded weapon labeled L5.
 
-Recommended repeatable damage model:
+Implemented repeatable damage model (`weaponStatsAtLevel`):
 
 ```text
 overclockLevel = max(0, displayedLevel - 5)
@@ -78,23 +78,21 @@ damage = level5Damage * (1 + 0.08 * overclockLevel)
 
 The increase is additive against the Level-5 base. It must not compound as `1.08 ^ overclockLevel`.
 
-Repeatable scaling may affect direct, splash, damage-over-time, puddle, and other weapon damage. Structural properties such as projectile count, fire rate, pierce, area, and lifetime remain authored or safely capped.
+Repeatable scaling applies to direct and puddle damage. Structural properties (projectile count, fire rate, pierce, area, lifetime) stay at the Level-5 authored configuration.
+
+Overclock labels: Roman I–X, then Arabic (`Overclock 27`).
 
 ### Passive continuation
 
-Safe passives can continue beyond Level 5 with smaller or diminishing gains while still displaying L6, L7, and so on. Examples include maximum Integrity and carefully bounded regeneration.
+| Passive | After L5 |
+|---|---|
+| Hull Plating | Continues forever; +20 integrity L1–5, then +10 per level |
+| Nanite Bleed | Continues forever; diminishing (sqrt) gains after L5 |
+| Thruster Boost, Magnet Field, Weapon Overclock, Containment Field, Core Siphon, Reactor Hold, Breach Shielding | Hard-capped at L5; card shows MAX and is no longer offered |
 
-The following retain hard safety caps and display MAX when capped:
+Breach Shielding maxes at 40% boss-damage reduction.
 
-- Damage reduction
-- Fire-rate/cooldown reduction
-- Movement speed
-- Pickup reach
-- Area size
-- Projectile count
-- Mech or ship duration
-
-Temporary repair, barrier, and overcharge rewards remain valid choices, but they are not a substitute for visible endless weapon growth.
+Temporary repair, barrier, and overcharge rewards remain valid choices.
 
 ## Endless difficulty
 
@@ -113,7 +111,15 @@ Boss index `n` arrives at `n * 120` seconds. Boss health grows multiplicatively 
 
 ## Bosses
 
-The data-driven boss rotation uses a curated runtime subset from Ultimate Monsters. Bosses have distinct silhouettes, normalized scale/colliders, a red hostile aura, and pattern preferences. Concurrent boss pressure is bounded; scheduled pressure must never silently disappear.
+The data-driven boss rotation uses a curated runtime subset from Ultimate Monsters (six models). Bosses render at approximately **2×** the prior visual scale with a strong red hostile aura (outer ring, fill, light, rising particles). Concurrent boss pressure is bounded; scheduled pressure must never silently disappear.
+
+## Afterburner thrusters and pickup
+
+Per-hero ship pickup radii are large enough to cover wing edges (`pickupRadius` ≈ 4.2–4.5). Thruster exhaust base damage is high at Level 1 (`exhaustDamage` 42) and scales with permanent build power (`playerPowerScale`, cap 10).
+
+## Mech-ready presentation
+
+Equal-size ability slots. Ready state uses a strong pulsing glow only — no spinning perimeter ornament and no spark dots. One-shot large “MECH CORE READY” toast on first full charge.
 
 ## Hero records
 

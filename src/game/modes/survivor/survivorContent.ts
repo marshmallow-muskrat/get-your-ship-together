@@ -14,7 +14,10 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-1.1.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-1.2.0';
+
+/** Additive Overclock damage growth per level past L5. */
+export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.08;
 
 /** Centralized Containment Protocol tuning (endless high-score mode). */
 export const SURVIVOR = {
@@ -30,7 +33,8 @@ export const SURVIVOR = {
     enemy: 1.5,
     elite: 1.5,
     miniboss: 2.1,
-    boss: 1.85,
+    /** Doubled from prior 1.85 so bosses read as major threats. */
+    boss: 3.7,
     ship: 1.35,
   },
   playerMaxHealth: 100,
@@ -86,29 +90,30 @@ export const SURVIVOR = {
     wakeInterval: 0.14,
     wakeLife: 1.25,
     wakeRadius: 1.15,
-    wakeDamage: 10,
+    wakeDamage: 28,
     wakeTickCd: 0.28,
-    bodyDamage: 8,
+    bodyDamage: 18,
     bodyPush: 1.2,
     bodyTickCd: 0.35,
     radius: 0.7,
-    /** Continuous rear exhaust jet — more visible */
-    exhaustLength: 4.6,
-    exhaustWidth: 1.75,
-    exhaustDamage: 16,
-    exhaustTickCd: 0.24,
+    /** Continuous rear exhaust jet — more visible and lethal */
+    exhaustLength: 5.2,
+    exhaustWidth: 2.0,
+    /** Level-1 base: strong enough to shred early basics in the plume. */
+    exhaustDamage: 42,
+    exhaustTickCd: 0.2,
     exhaustEliteMul: 0.55,
-    exhaustBossMul: 0.4,
-    exhaustVisualScale: 1.65,
+    exhaustBossMul: 0.45,
+    exhaustVisualScale: 1.85,
     /** Power scale caps thruster damage growth with permanent build. */
-    powerScaleCap: 6.0,
+    powerScaleCap: 10.0,
   },
-  /** Per-hero ship dimensions for pickup/exhaust (world units). */
+  /** Per-hero ship dimensions for pickup/exhaust (world units). Substantially larger reach. */
   heroShips: {
-    bee: { pickupRadius: 2.4, collectionRadius: 2.8, colliderLength: 3.2, colliderWidth: 2.6 },
-    flamingo: { pickupRadius: 2.6, collectionRadius: 3.0, colliderLength: 3.5, colliderWidth: 2.8 },
-    frog: { pickupRadius: 2.5, collectionRadius: 2.9, colliderLength: 3.3, colliderWidth: 2.7 },
-    'red-panda': { pickupRadius: 2.55, collectionRadius: 3.0, colliderLength: 3.4, colliderWidth: 2.75 },
+    bee: { pickupRadius: 4.2, collectionRadius: 5.0, colliderLength: 4.6, colliderWidth: 4.0 },
+    flamingo: { pickupRadius: 4.5, collectionRadius: 5.3, colliderLength: 5.0, colliderWidth: 4.3 },
+    frog: { pickupRadius: 4.3, collectionRadius: 5.1, colliderLength: 4.7, colliderWidth: 4.1 },
+    'red-panda': { pickupRadius: 4.4, collectionRadius: 5.2, colliderLength: 4.8, colliderWidth: 4.2 },
   } as Record<HeroId, { pickupRadius: number; collectionRadius: number; colliderLength: number; colliderWidth: number }>,
   damageNumbers: {
     aggregateWindow: 0.15,
@@ -194,11 +199,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Piercing line that cuts through dense packs.',
     color: '#ff7ab8',
     levels: [
-      { level: 1, label: 'Rail Lance I', damage: 55, cadence: 2.2, count: 1, width: 0.45, length: 14 },
-      { level: 2, label: 'Rail Lance II', damage: 70, cadence: 2.0, count: 1, width: 0.55, length: 15 },
-      { level: 3, label: 'Twin Rails', damage: 70, cadence: 1.85, count: 2, width: 0.5, length: 15 },
-      { level: 4, label: 'Wide Beam', damage: 90, cadence: 1.7, count: 2, width: 0.7, length: 16 },
-      { level: 5, label: 'Lance Battery', damage: 110, cadence: 1.5, count: 3, width: 0.65, length: 17 },
+      // L1 tuned for early reliability: faster cycle, wider beam, higher damage
+      { level: 1, label: 'Rail Lance I', damage: 72, cadence: 1.75, count: 1, width: 0.62, length: 15 },
+      { level: 2, label: 'Rail Lance II', damage: 88, cadence: 1.6, count: 1, width: 0.7, length: 16 },
+      { level: 3, label: 'Twin Rails', damage: 88, cadence: 1.5, count: 2, width: 0.62, length: 16 },
+      { level: 4, label: 'Wide Beam', damage: 108, cadence: 1.4, count: 2, width: 0.82, length: 17 },
+      { level: 5, label: 'Lance Battery', damage: 128, cadence: 1.25, count: 3, width: 0.75, length: 18 },
     ],
   },
   gravity: {
@@ -220,11 +226,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Delayed area strikes on dense clusters.',
     color: '#ff8a4a',
     levels: [
-      { level: 1, label: 'Rocket Barrage I', damage: 48, cadence: 2.6, count: 3, radius: 1.3, life: 0.55 },
-      { level: 2, label: 'Rocket Barrage II', damage: 58, cadence: 2.4, count: 4, radius: 1.4, life: 0.55 },
-      { level: 3, label: 'Salvo', damage: 62, cadence: 2.2, count: 5, radius: 1.5, life: 0.5 },
-      { level: 4, label: 'Cluster', damage: 70, cadence: 2.0, count: 6, radius: 1.6, life: 0.5 },
-      { level: 5, label: 'Carpet Fire', damage: 82, cadence: 1.8, count: 8, radius: 1.75, life: 0.45 },
+      // L1: shorter arm time (life), faster cadence, stronger splash clusters
+      { level: 1, label: 'Rocket Barrage I', damage: 58, cadence: 2.05, count: 4, radius: 1.55, life: 0.38 },
+      { level: 2, label: 'Rocket Barrage II', damage: 68, cadence: 1.9, count: 5, radius: 1.65, life: 0.36 },
+      { level: 3, label: 'Salvo', damage: 74, cadence: 1.75, count: 6, radius: 1.75, life: 0.34 },
+      { level: 4, label: 'Cluster', damage: 82, cadence: 1.6, count: 7, radius: 1.85, life: 0.32 },
+      { level: 5, label: 'Carpet Fire', damage: 94, cadence: 1.45, count: 9, radius: 2.0, life: 0.3 },
     ],
   },
   bioplasma: {
@@ -236,72 +243,72 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 1,
         label: 'Bio-Plasma Glob I',
-        damage: 30,
-        cadence: 0.9,
+        damage: 38,
+        cadence: 0.78,
         count: 1,
-        speed: 16,
-        radius: 0.28,
-        life: 1.4,
-        splash: 1.35,
-        puddleRadius: 1.1,
-        puddleLife: 1.6,
-        puddleDamage: 8,
+        speed: 20,
+        radius: 0.32,
+        life: 1.45,
+        splash: 1.7,
+        puddleRadius: 1.45,
+        puddleLife: 2.1,
+        puddleDamage: 12,
       },
       {
         level: 2,
         label: 'Bio-Plasma Glob II',
-        damage: 38,
-        cadence: 0.85,
+        damage: 46,
+        cadence: 0.74,
         count: 1,
-        speed: 17,
-        radius: 0.3,
-        life: 1.45,
-        splash: 1.65,
-        puddleRadius: 1.2,
-        puddleLife: 1.8,
-        puddleDamage: 9,
+        speed: 21,
+        radius: 0.34,
+        life: 1.5,
+        splash: 1.9,
+        puddleRadius: 1.55,
+        puddleLife: 2.3,
+        puddleDamage: 13,
       },
       {
         level: 3,
         label: 'Corrosive Glob',
-        damage: 42,
-        cadence: 0.8,
+        damage: 50,
+        cadence: 0.7,
         count: 1,
-        speed: 17.5,
-        radius: 0.32,
-        life: 1.5,
-        splash: 1.7,
-        puddleRadius: 1.55,
-        puddleLife: 2.6,
-        puddleDamage: 12,
+        speed: 21.5,
+        radius: 0.36,
+        life: 1.55,
+        splash: 2.0,
+        puddleRadius: 1.85,
+        puddleLife: 2.9,
+        puddleDamage: 15,
       },
       {
         level: 4,
         label: 'Twin Globs',
-        damage: 40,
-        cadence: 0.78,
+        damage: 48,
+        cadence: 0.68,
         count: 2,
-        speed: 18,
-        radius: 0.3,
-        life: 1.5,
-        splash: 1.55,
-        puddleRadius: 1.4,
-        puddleLife: 2.2,
-        puddleDamage: 11,
+        speed: 22,
+        radius: 0.34,
+        life: 1.55,
+        splash: 1.85,
+        puddleRadius: 1.65,
+        puddleLife: 2.5,
+        puddleDamage: 14,
       },
       {
         level: 5,
         label: 'Virulent Cascade',
-        damage: 46,
-        cadence: 0.72,
+        damage: 54,
+        cadence: 0.62,
         count: 2,
-        speed: 18.5,
-        radius: 0.32,
-        life: 1.55,
-        splash: 1.75,
-        puddleRadius: 1.85,
-        puddleLife: 3.0,
-        puddleDamage: 14,
+        speed: 22.5,
+        radius: 0.36,
+        life: 1.6,
+        splash: 2.05,
+        puddleRadius: 2.1,
+        puddleLife: 3.2,
+        puddleDamage: 17,
         bounce: 1,
         split: 1,
       },
@@ -324,16 +331,33 @@ export interface PassiveDef {
   id: PassiveId;
   name: string;
   description: string;
+  /** Hard cap; Infinity for safe repeatable passives. */
   maxLevel: number;
   perLevel: number;
+  /** When true, levels past 5 use diminishing gains and display forever. */
+  repeatable?: boolean;
 }
 
 export const PASSIVES: PassiveDef[] = [
   { id: 'move-speed', name: 'Thruster Boost', description: 'Move faster through the horde.', maxLevel: 5, perLevel: 0.08 },
   { id: 'pickup-radius', name: 'Magnet Field', description: 'Pull energy cells from farther away.', maxLevel: 5, perLevel: 0.35 },
-  { id: 'max-health', name: 'Hull Plating', description: 'Increase max integrity.', maxLevel: 5, perLevel: 20 },
-  { id: 'regen', name: 'Nanite Bleed', description: 'Slow automatic repair over time.', maxLevel: 5, perLevel: 0.45 },
-  { id: 'weapon-haste', name: 'Overclock', description: 'All weapons fire faster.', maxLevel: 5, perLevel: 0.08 },
+  {
+    id: 'max-health',
+    name: 'Hull Plating',
+    description: 'Increase max integrity.',
+    maxLevel: Infinity,
+    perLevel: 20,
+    repeatable: true,
+  },
+  {
+    id: 'regen',
+    name: 'Nanite Bleed',
+    description: 'Slow automatic repair over time.',
+    maxLevel: Infinity,
+    perLevel: 0.45,
+    repeatable: true,
+  },
+  { id: 'weapon-haste', name: 'Weapon Overclock', description: 'All weapons fire faster.', maxLevel: 5, perLevel: 0.08 },
   { id: 'area', name: 'Containment Field', description: 'Larger weapon areas and blasts.', maxLevel: 5, perLevel: 0.1 },
   { id: 'mech-charge', name: 'Core Siphon', description: 'Mech meter fills faster from kills.', maxLevel: 5, perLevel: 0.15 },
   { id: 'mech-duration', name: 'Reactor Hold', description: 'Longer mech transform window.', maxLevel: 5, perLevel: 0.12 },
@@ -346,6 +370,29 @@ export const PASSIVES: PassiveDef[] = [
   },
 ];
 
+/** Integrity gained when taking Hull Plating to the given absolute level. */
+export function hullPlatingGainAtLevel(level: number): number {
+  if (level <= 0) return 0;
+  if (level <= 5) return 20;
+  // L6+: smaller linear gains
+  return 10;
+}
+
+/** Total max-health from N levels of Hull Plating. */
+export function hullPlatingTotal(levels: number): number {
+  let t = 0;
+  for (let i = 1; i <= levels; i += 1) t += hullPlatingGainAtLevel(i);
+  return t;
+}
+
+/** Regen per second at a given Nanite Bleed level (diminishing after 5). */
+export function regenPerSecondAtLevel(level: number): number {
+  if (level <= 0) return 0;
+  if (level <= 5) return level * 0.45;
+  // L1–5 full rate + sqrt growth beyond
+  return 5 * 0.45 + Math.sqrt(level - 5) * 0.35;
+}
+
 /** Capped permanent-build power scale for thruster/wake damage. */
 export function playerPowerScale(input: {
   weapons: Array<{ level: number }>;
@@ -354,8 +401,13 @@ export function playerPowerScale(input: {
   const owned = Math.max(1, input.weapons.length);
   const totalWeaponLevels = input.weapons.reduce((n, w) => n + w.level, 0);
   const weaponGrowth = Math.max(0, totalWeaponLevels - owned);
-  const passiveGrowth = Object.values(input.passives).reduce((n, v) => n + (v ?? 0), 0);
-  return Math.min(SURVIVOR.ship.powerScaleCap, 1 + 0.12 * weaponGrowth + 0.04 * passiveGrowth);
+  // Cap passive contribution so endless plating doesn't infinitely thruster-scale
+  const passiveGrowth = Math.min(
+    40,
+    Object.values(input.passives).reduce((n, v) => n + (v ?? 0), 0),
+  );
+  // Stronger growth so thrusters stay relevant midgame (still hard-capped)
+  return Math.min(SURVIVOR.ship.powerScaleCap, 1 + 0.18 * weaponGrowth + 0.05 * passiveGrowth);
 }
 
 export type BossRole = 'brute' | 'charger' | 'caster' | 'summoner' | 'flyer';
@@ -386,7 +438,7 @@ export const BOSS_DEFS: BossDef[] = [
     url: '/runtime/boss/blue-demon.gltf',
     targetHeight: 3.6,
     colliderRadius: 0.95,
-    visualScale: 1.85,
+    visualScale: 3.7,
     role: 'brute',
     accent: '#ff4455',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
@@ -398,7 +450,7 @@ export const BOSS_DEFS: BossDef[] = [
     url: '/runtime/boss/yeti.gltf',
     targetHeight: 3.8,
     colliderRadius: 1.05,
-    visualScale: 1.9,
+    visualScale: 3.8,
     role: 'brute',
     accent: '#88c8ff',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
@@ -410,7 +462,7 @@ export const BOSS_DEFS: BossDef[] = [
     url: '/runtime/boss/dino.gltf',
     targetHeight: 3.5,
     colliderRadius: 1.0,
-    visualScale: 1.8,
+    visualScale: 3.6,
     role: 'charger',
     accent: '#7dff9a',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Bite_Front', 'Jump'], hit: ['HitReact'], death: ['Death'] },
@@ -422,7 +474,7 @@ export const BOSS_DEFS: BossDef[] = [
     url: '/runtime/boss/demon.gltf',
     targetHeight: 3.7,
     colliderRadius: 0.98,
-    visualScale: 1.88,
+    visualScale: 3.76,
     role: 'caster',
     accent: '#ff3366',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
@@ -434,7 +486,7 @@ export const BOSS_DEFS: BossDef[] = [
     url: '/runtime/boss/dragon.gltf',
     targetHeight: 3.4,
     colliderRadius: 1.1,
-    visualScale: 1.75,
+    visualScale: 3.5,
     role: 'flyer',
     accent: '#c080ff',
     anim: { idle: ['Flying_Idle', 'Idle'], walk: ['Fast_Flying', 'Fly'], attack: ['Punch', 'Headbutt', 'Attack'], hit: ['HitReact'], death: ['Death'] },
@@ -446,7 +498,7 @@ export const BOSS_DEFS: BossDef[] = [
     url: '/runtime/boss/mushroom-king.gltf',
     targetHeight: 3.5,
     colliderRadius: 1.15,
-    visualScale: 1.95,
+    visualScale: 3.9,
     role: 'summoner',
     accent: '#ffaa44',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
@@ -476,10 +528,75 @@ export function heroStarterWeapon(heroId: HeroId): WeaponId {
   }
 }
 
+/** Authored L1–L5 only (clamped). Prefer weaponStatsAtLevel for combat. */
 export function weaponLevelDef(weaponId: WeaponId, level: number): WeaponLevelDef {
   const fam = WEAPONS[weaponId];
   const idx = Math.max(0, Math.min(fam.levels.length - 1, level - 1));
   return fam.levels[idx]!;
+}
+
+export function overclockLevel(displayedLevel: number): number {
+  return Math.max(0, Math.floor(displayedLevel) - 5);
+}
+
+/** Overclock I…X then Arabic for larger values. */
+export function formatOverclockLabel(oc: number): string {
+  if (oc <= 0) return '';
+  if (oc <= 10) {
+    const romans = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+    return `Overclock ${romans[oc - 1]}`;
+  }
+  return `Overclock ${oc}`;
+}
+
+/**
+ * Complete weapon stats at any displayed level.
+ * L1–L5: authored definitions.
+ * L6+: Level-5 structure + additive damage Overclocks (never mutates authored data).
+ */
+export function weaponStatsAtLevel(weaponId: WeaponId, displayedLevel: number): WeaponLevelDef {
+  const fam = WEAPONS[weaponId];
+  const level = Math.max(1, Math.floor(displayedLevel));
+  if (level <= fam.levels.length) {
+    return { ...fam.levels[level - 1]! };
+  }
+  const base = fam.levels[fam.levels.length - 1]!;
+  const oc = overclockLevel(level);
+  const mul = 1 + OVERCLOCK_DAMAGE_PER_LEVEL * oc;
+  return {
+    ...base,
+    level,
+    label: `${fam.name} L${level}`,
+    damage: base.damage * mul,
+    puddleDamage: base.puddleDamage != null ? base.puddleDamage * mul : undefined,
+  };
+}
+
+/** Primary damage delta text for upgrade cards. */
+export function weaponDamagePreview(weaponId: WeaponId, fromLevel: number, toLevel: number): string {
+  const a = weaponStatsAtLevel(weaponId, fromLevel);
+  const b = weaponStatsAtLevel(weaponId, toLevel);
+  const lines: string[] = [];
+  const dmgA = Math.round(a.damage);
+  const dmgB = Math.round(b.damage);
+  if (dmgA !== dmgB) {
+    const label = weaponId === 'bioplasma' ? 'Impact' : 'Damage';
+    lines.push(`${label} ${dmgA} → ${dmgB}`);
+  }
+  if (a.puddleDamage != null && b.puddleDamage != null) {
+    const pa = Math.round(a.puddleDamage);
+    const pb = Math.round(b.puddleDamage);
+    if (pa !== pb) lines.push(`Puddle ${pa} → ${pb}`);
+  }
+  if (lines.length === 0) lines.push(WEAPONS[weaponId].description);
+  return lines.join('\n');
+}
+
+export function isPassiveAvailable(id: PassiveId, currentLevel: number): boolean {
+  const def = PASSIVES.find((p) => p.id === id);
+  if (!def) return false;
+  if (!Number.isFinite(def.maxLevel)) return true;
+  return currentLevel < def.maxLevel;
 }
 
 export function xpForLevel(level: number): number {

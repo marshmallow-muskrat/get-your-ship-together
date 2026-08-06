@@ -1,4 +1,4 @@
-import { screenToWorldMove } from '../../simulation/screenBasis';
+import { screenToWorldMove } from './screenBasis';
 import { SpatialHash } from './spatialHash';
 import {
   HORDE,
@@ -14,8 +14,14 @@ import {
   bossTimeForIndex,
   compositionAt,
   endlessDifficultyAt,
+  formatOverclockLabel,
+  hullPlatingGainAtLevel,
+  isPassiveAvailable,
+  overclockLevel,
   playerPowerScale,
-  weaponLevelDef,
+  regenPerSecondAtLevel,
+  weaponDamagePreview,
+  weaponStatsAtLevel,
   xpForLevel,
   type PassiveId,
   type TempBuffId,
@@ -39,7 +45,7 @@ import {
 } from './survivorState';
 
 function wdef(weaponId: WeaponId, level: number) {
-  return weaponLevelDef(weaponId, level);
+  return weaponStatsAtLevel(weaponId, level);
 }
 
 export interface SurvivorInput {
@@ -905,7 +911,8 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const tz = cluster.z + state.player.facingX * ox + (rng(state) - 0.5) * 0.6;
         const proj = acquireProjectile(state);
         if (!proj) break;
-        const arm = 0.35 + i * 0.06;
+        // Shorter arming delay keeps Rocket competitive early
+        const arm = 0.22 + i * 0.05;
         resetProj(proj, state, 'rocket', 'rocket', tx, tz, 0, 0, {
           damage: def.damage * (mech ? 1.35 : 1) * p.damageMul,
           radius: 0.25,
@@ -1525,25 +1532,18 @@ function ownedWeaponLevel(state: SurvivorState, id: WeaponId): number {
 }
 
 export function generateChoices(state: SurvivorState): UpgradeChoice[] {
-  const pool: UpgradeChoice[] = [];
-  for (const w of state.weapons) {
-    const fam = WEAPONS[w.weaponId];
-    if (w.level < fam.levels.length) {
-      const next = fam.levels[w.level]!;
-      pool.push({
-        kind: 'weapon',
-        id: `w-${w.weaponId}-${w.level + 1}`,
-        title: next.label,
-        body: fam.description,
-        weaponId: w.weaponId,
-      });
-    }
-  }
+  // Priority tiers (shuffled within each, then drained high→low)
+  const newWeapons: UpgradeChoice[] = [];
+  const authored: UpgradeChoice[] = [];
+  const overclocks: UpgradeChoice[] = [];
+  const passives: UpgradeChoice[] = [];
+  const temps: UpgradeChoice[] = [];
+
   if (state.weapons.length < SURVIVOR.maxWeaponSlots) {
     for (const id of Object.keys(WEAPONS) as WeaponId[]) {
       if (ownedWeaponLevel(state, id) > 0) continue;
       const fam = WEAPONS[id];
-      pool.push({
+      newWeapons.push({
         kind: 'new-weapon',
         id: `new-${id}`,
         title: fam.name,
@@ -1552,39 +1552,87 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
       });
     }
   }
-  for (const pas of PASSIVES) {
-    const lv = passiveLevel(state, pas.id);
-    if (lv >= pas.maxLevel) continue;
-    pool.push({
-      kind: 'passive',
-      id: `p-${pas.id}-${lv + 1}`,
-      title: `${pas.name} ${lv + 1}`,
-      body: pas.description,
-      passiveId: pas.id,
-    });
-  }
 
-  // When permanent upgrades are exhausted, fill with temporary consumables
-  if (pool.length < 3) {
-    for (const t of TEMP_BUFFS) {
-      pool.push({
-        kind: 'temp',
-        id: `t-${t.id}-${state.level}`,
-        title: t.title,
-        body: t.body,
-        tempId: t.id,
+  for (const w of state.weapons) {
+    const fam = WEAPONS[w.weaponId];
+    const nextLv = w.level + 1;
+    const preview = weaponDamagePreview(w.weaponId, w.level, nextLv);
+    if (w.level < fam.levels.length) {
+      const next = fam.levels[w.level]!;
+      authored.push({
+        kind: 'weapon',
+        id: `w-${w.weaponId}-${nextLv}`,
+        title: next.label,
+        body: preview,
+        weaponId: w.weaponId,
+      });
+    } else {
+      const oc = overclockLevel(nextLv);
+      overclocks.push({
+        kind: 'weapon',
+        id: `w-${w.weaponId}-${nextLv}`,
+        title: `${fam.name} L${nextLv}`,
+        body: `${formatOverclockLabel(oc)}\n${preview}`,
+        weaponId: w.weaponId,
       });
     }
   }
 
+  for (const pas of PASSIVES) {
+    const lv = passiveLevel(state, pas.id);
+    if (!isPassiveAvailable(pas.id, lv)) continue;
+    const next = lv + 1;
+    let body = pas.description;
+    if (pas.id === 'max-health') {
+      const gain = hullPlatingGainAtLevel(next);
+      const cur = SURVIVOR.playerMaxHealth + hullPlatingTotalFromState(state);
+      body = `Integrity ${Math.round(cur)} → ${Math.round(cur + gain)}`;
+    } else if (pas.id === 'regen') {
+      const a = regenPerSecondAtLevel(lv).toFixed(2);
+      const b = regenPerSecondAtLevel(next).toFixed(2);
+      body = `Regen ${a}/s → ${b}/s`;
+    } else if (pas.repeatable && next > 5) {
+      body = `${pas.description} (L${next})`;
+    }
+    passives.push({
+      kind: 'passive',
+      id: `p-${pas.id}-${next}`,
+      title: `${pas.name} L${next}`,
+      body,
+      passiveId: pas.id,
+    });
+  }
+
+  for (const t of TEMP_BUFFS) {
+    temps.push({
+      kind: 'temp',
+      id: `t-${t.id}-${state.level}`,
+      title: t.title,
+      body: t.body,
+      tempId: t.id,
+    });
+  }
+
+  const shuffle = <T,>(arr: T[]): T[] => {
+    const bag = [...arr];
+    for (let i = bag.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(rng(state) * (i + 1));
+      [bag[i], bag[j]] = [bag[j]!, bag[i]!];
+    }
+    return bag;
+  };
+
+  // Weighted pick: prefer new weapons & authored, still allow overclocks/passives
+  const tiers = [
+    shuffle(newWeapons),
+    shuffle(authored),
+    shuffle(overclocks),
+    shuffle(passives),
+    shuffle(temps),
+  ];
   const choices: UpgradeChoice[] = [];
   const used = new Set<string>();
-  const bag = [...pool];
-  for (let i = bag.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng(state) * (i + 1));
-    [bag[i], bag[j]] = [bag[j]!, bag[i]!];
-  }
-  for (const c of bag) {
+  const tryAdd = (c: UpgradeChoice): boolean => {
     const key =
       c.kind === 'passive'
         ? `p:${c.passiveId}`
@@ -1593,16 +1641,23 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
           : c.kind === 'temp'
             ? `t:${c.tempId}`
             : `u:${c.weaponId}`;
-    if (used.has(key)) continue;
+    if (used.has(key)) return false;
     used.add(key);
     choices.push(c);
+    return true;
+  };
+
+  // Fill with interleaving: first take up to 1 from each high tier, then drain
+  for (const tier of tiers) {
     if (choices.length >= 3) break;
+    if (tier[0]) tryAdd(tier[0]!);
   }
-  while (choices.length < 3 && bag.length > 0) {
-    const c = bag[choices.length % bag.length]!;
-    choices.push(c);
+  for (const tier of tiers) {
+    for (const c of tier) {
+      if (choices.length >= 3) break;
+      tryAdd(c);
+    }
   }
-  // Absolute fallback
   while (choices.length < 3) {
     const t = TEMP_BUFFS[choices.length % TEMP_BUFFS.length]!;
     choices.push({
@@ -1616,6 +1671,13 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
   return choices.slice(0, 3);
 }
 
+function hullPlatingTotalFromState(state: SurvivorState): number {
+  const lv = passiveLevel(state, 'max-health');
+  let t = 0;
+  for (let i = 1; i <= lv; i += 1) t += hullPlatingGainAtLevel(i);
+  return t;
+}
+
 function openLevelUp(state: SurvivorState): void {
   state.phase = 'levelup';
   state.choices = generateChoices(state);
@@ -1627,9 +1689,9 @@ function openSupply(state: SurvivorState): void {
     state.player.health = Math.min(state.player.maxHealth, state.player.health + 35);
     pushEffect(state, 'pulse', state.player.x, state.player.z, 0.5, '#4df0d0', 1.8);
   } else {
-    const upgradable = state.weapons.filter((w) => w.level < WEAPONS[w.weaponId].levels.length);
-    if (upgradable.length > 0) {
-      const w = upgradable[Math.floor(rng(state) * upgradable.length)]!;
+    // Any owned weapon can gain a free level (including Overclocks)
+    if (state.weapons.length > 0) {
+      const w = state.weapons[Math.floor(rng(state) * state.weapons.length)]!;
       w.level += 1;
       pushEffect(state, 'levelup', state.player.x, state.player.z, 0.45, state.accent, 1.5);
     } else {
@@ -1643,7 +1705,7 @@ export function applyChoice(state: SurvivorState, index: number): void {
   if (!choice) return;
   if (choice.kind === 'weapon' && choice.weaponId) {
     const slot = state.weapons.find((w) => w.weaponId === choice.weaponId);
-    if (slot) slot.level = Math.min(WEAPONS[slot.weaponId].levels.length, slot.level + 1);
+    if (slot) slot.level += 1; // unbounded; L6+ are Overclocks
   } else if (choice.kind === 'new-weapon' && choice.weaponId) {
     if (
       state.weapons.length < SURVIVOR.maxWeaponSlots &&
@@ -1653,10 +1715,17 @@ export function applyChoice(state: SurvivorState, index: number): void {
     }
   } else if (choice.kind === 'passive' && choice.passiveId) {
     const id = choice.passiveId;
-    state.passives[id] = (state.passives[id] ?? 0) + 1;
+    if (!isPassiveAvailable(id, passiveLevel(state, id))) {
+      state.choices = [];
+      state.phase = 'playing';
+      return;
+    }
+    const next = (state.passives[id] ?? 0) + 1;
+    state.passives[id] = next;
     if (id === 'max-health') {
-      state.player.maxHealth += 20;
-      state.player.health += 20;
+      const gain = hullPlatingGainAtLevel(next);
+      state.player.maxHealth += gain;
+      state.player.health += gain;
     }
   } else if (choice.kind === 'temp' && choice.tempId) {
     applyTempBuff(state, choice.tempId);
@@ -1755,7 +1824,7 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   if (p.exhaustTickCd > 0) p.exhaustTickCd = Math.max(0, p.exhaustTickCd - dt);
   tickTempBuffs(state, dt);
 
-  const regen = passiveLevel(state, 'regen') * SURVIVOR.regenPerLevel;
+  const regen = regenPerSecondAtLevel(passiveLevel(state, 'regen'));
   if (regen > 0 && p.health < p.maxHealth && p.form !== 'ship') {
     p.health = Math.min(p.maxHealth, p.health + regen * dt);
   }

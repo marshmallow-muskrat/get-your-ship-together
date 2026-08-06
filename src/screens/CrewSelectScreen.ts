@@ -9,8 +9,8 @@ import {
 } from '../game/modes/survivor/survivorRecords';
 
 export type CrewSelectHandlers = {
-  onContinue: (heroId: HeroId) => void;
-  onSurvivor?: (heroId: HeroId) => void;
+  /** Launch Containment Protocol with the selected hero. */
+  onLaunch: (heroId: HeroId) => void;
 };
 
 /**
@@ -44,7 +44,7 @@ export class CrewSelectScreen {
     } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
       this.updateSelection((this.selectedIndex + 1) % HERO_LIST.length);
     } else if (e.key === 'Enter') {
-      this.continue();
+      this.launch();
     }
   };
 
@@ -165,8 +165,7 @@ export class CrewSelectScreen {
         <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
         <div class="mode-actions">
           <button id="leaderboard-button" class="select-hero-button ghost-button" type="button">LEADERBOARDS</button>
-          <button id="survivor-button" class="select-hero-button survivor-button" type="button">CONTAINMENT PROTOCOL</button>
-          <button id="select-hero-button" class="select-hero-button" type="button">CAMPAIGN</button>
+          <button id="launch-button" class="select-hero-button survivor-button" type="button">BEGIN CONTAINMENT PROTOCOL</button>
         </div>
       </div>
       <div id="crew-leaderboard" class="crew-leaderboard hidden" role="dialog" aria-label="Local leaderboards">
@@ -198,8 +197,7 @@ export class CrewSelectScreen {
       bay.appendChild(button);
     });
 
-    this.hud.querySelector('#select-hero-button')?.addEventListener('click', () => this.continue());
-    this.hud.querySelector('#survivor-button')?.addEventListener('click', () => this.launchSurvivor());
+    this.hud.querySelector('#launch-button')?.addEventListener('click', () => this.launch());
     this.hud.querySelector('#leaderboard-button')?.addEventListener('click', () => this.openLeaderboard());
     this.hud.querySelector('#crew-lb-close')?.addEventListener('click', () => this.closeLeaderboard());
     this.hud.querySelector('#exit-button')?.addEventListener('click', () => {
@@ -346,15 +344,9 @@ export class CrewSelectScreen {
     this.selectedHeroGroup.scale.setScalar(this.selectionScale);
   }
 
-  private continue(): void {
+  private launch(): void {
     const hero = HERO_LIST[this.selectedIndex]!;
-    this.handlers.onContinue(hero.id);
-  }
-
-  private launchSurvivor(): void {
-    const hero = HERO_LIST[this.selectedIndex]!;
-    if (this.handlers.onSurvivor) this.handlers.onSurvivor(hero.id);
-    else this.handlers.onContinue(hero.id);
+    this.handlers.onLaunch(hero.id);
   }
 
   private resize(): void {

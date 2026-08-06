@@ -1,5 +1,11 @@
 import { HEROES } from '../../content/heroes';
-import { PASSIVES, SURVIVOR, WEAPONS } from './survivorContent';
+import {
+  PASSIVES,
+  SURVIVOR,
+  WEAPONS,
+  formatOverclockLabel,
+  overclockLevel,
+} from './survivorContent';
 import type { SurvivorState } from './survivorState';
 import {
   ACTION_LABELS,
@@ -469,7 +475,7 @@ export class SurvivorHud {
       const toast = this.root.querySelector('#sv-mech-toast');
       if (toast) {
         toast.classList.remove('hidden');
-        window.setTimeout(() => toast.classList.add('hidden'), 1400);
+        window.setTimeout(() => toast.classList.add('hidden'), 2000);
       }
       this.root.querySelector('#sv-ab-r')?.classList.add('mech-flourish');
       window.setTimeout(() => this.root.querySelector('#sv-ab-r')?.classList.remove('mech-flourish'), 900);
@@ -594,13 +600,20 @@ export class SurvivorHud {
     const weps = state.weapons
       .map((w) => {
         const fam = WEAPONS[w.weaponId];
-        return `<div class="sv-build-item" style="--wep:${fam.color}"><span>${fam.name}</span><strong>L${w.level}</strong></div>`;
+        const oc = overclockLevel(w.level);
+        const ocBit =
+          oc > 0
+            ? `<small class="sv-build-oc">${formatOverclockLabel(oc)} · Dmg +${Math.round(oc * 8)}%</small>`
+            : '';
+        return `<div class="sv-build-item" style="--wep:${fam.color}"><span>${fam.name}${ocBit}</span><strong>L${w.level}</strong></div>`;
       })
       .join('');
     const pass = Object.entries(state.passives)
       .map(([id, lv]) => {
         const def = PASSIVES.find((p) => p.id === id);
-        return `<div class="sv-build-item passive"><span>${def?.name ?? id}</span><strong>L${lv}</strong></div>`;
+        const capped =
+          def && Number.isFinite(def.maxLevel) && (lv ?? 0) >= def.maxLevel ? ' MAX' : '';
+        return `<div class="sv-build-item passive"><span>${def?.name ?? id}</span><strong>L${lv}${capped}</strong></div>`;
       })
       .join('');
     const temps = state.tempBuffs
@@ -636,19 +649,23 @@ export class SurvivorHud {
             formatKeyCode(binds.choice2),
             formatKeyCode(binds.choice3),
           ];
-          const kindLabel = (kind: string) => {
-            if (kind === 'passive') return 'PASSIVE';
-            if (kind === 'new-weapon') return 'NEW WEAPON';
-            if (kind === 'temp') return 'CONSUMABLE';
+          const kindLabel = (c: (typeof state.choices)[0]) => {
+            if (c.kind === 'passive') return 'PASSIVE';
+            if (c.kind === 'new-weapon') return 'NEW WEAPON';
+            if (c.kind === 'temp') return 'CONSUMABLE';
+            if (c.kind === 'weapon' && c.weaponId) {
+              const slot = state.weapons.find((w) => w.weaponId === c.weaponId);
+              if (slot && slot.level >= 5) return 'WEAPON OVERCLOCK';
+            }
             return 'WEAPON';
           };
           box.innerHTML = state.choices
             .map(
               (c, i) =>
                 `<button type="button" class="sv-choice" data-i="${i}">
-                  <span class="eyebrow">${kindLabel(c.kind)} · ${labels[i] ?? i + 1}</span>
+                  <span class="eyebrow">${kindLabel(c)} · ${labels[i] ?? i + 1}</span>
                   <strong>${c.title}</strong>
-                  <small>${c.body}</small>
+                  <small>${c.body.replace(/\n/g, '<br/>')}</small>
                 </button>`,
             )
             .join('');

@@ -295,25 +295,39 @@ export class SurvivorRenderer {
   private makeBossAura(radius: number, color: string): THREE.Group {
     const g = new THREE.Group();
     g.name = 'boss-aura';
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(radius * 0.55, radius * 1.15, 40),
+    // Considerably stronger red hostile aura (readable in dense hordes)
+    const outerRing = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.7, radius * 1.55, 56),
       new THREE.MeshBasicMaterial({
-        color: '#ff2244',
+        color: '#ff1122',
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.72,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.y = 0.06;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.45, radius * 1.05, 48),
+      new THREE.MeshBasicMaterial({
+        color: '#ff3344',
+        transparent: true,
+        opacity: 0.55,
         side: THREE.DoubleSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }),
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.06;
+    ring.position.y = 0.08;
     const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(radius * 0.9, 32),
+      new THREE.CircleGeometry(radius * 1.15, 40),
       new THREE.MeshBasicMaterial({
-        color: color || '#ff3344',
+        color: color || '#ff2244',
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.32,
         side: THREE.DoubleSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
@@ -321,28 +335,27 @@ export class SurvivorRenderer {
     );
     glow.rotation.x = -Math.PI / 2;
     glow.position.y = 0.04;
-    const light = new THREE.PointLight('#ff3344', 1.4, radius * 4, 2);
-    light.position.y = 1.4;
-    // Rising red particle sparks (reused meshes, no per-frame material alloc)
+    const light = new THREE.PointLight('#ff2233', 2.8, radius * 7, 1.6);
+    light.position.y = 1.8;
     const particles = new THREE.Group();
     particles.name = 'boss-aura-particles';
     const pMat = new THREE.MeshBasicMaterial({
-      color: '#ff4466',
+      color: '#ff3355',
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.85,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    const pGeo = new THREE.SphereGeometry(0.08, 6, 6);
-    for (let i = 0; i < 10; i += 1) {
+    const pGeo = new THREE.SphereGeometry(0.14, 6, 6);
+    for (let i = 0; i < 16; i += 1) {
       const p = new THREE.Mesh(pGeo, pMat);
-      p.userData.baseY = 0.2 + (i % 5) * 0.18;
-      p.userData.speed = 0.6 + (i % 4) * 0.15;
-      p.userData.angle = (i / 10) * Math.PI * 2;
-      p.userData.orbit = radius * (0.35 + (i % 3) * 0.12);
+      p.userData.baseY = 0.25 + (i % 6) * 0.22;
+      p.userData.speed = 0.7 + (i % 4) * 0.18;
+      p.userData.angle = (i / 16) * Math.PI * 2;
+      p.userData.orbit = radius * (0.45 + (i % 4) * 0.14);
       particles.add(p);
     }
-    g.add(ring, glow, light, particles);
+    g.add(glow, ring, outerRing, light, particles);
     return g;
   }
 
@@ -407,7 +420,8 @@ export class SurvivorRenderer {
       }
       let aura = this.bossAuras.get(b.id);
       if (!aura && b.active && b.state !== 'dead') {
-        aura = this.makeBossAura(def.colliderRadius * 2.2, def.accent);
+        // Aura radius tracks doubled boss visual footprint
+        aura = this.makeBossAura(def.colliderRadius * 3.6 * (def.visualScale / 1.85), def.accent);
         this.bossAuras.set(b.id, aura);
         this.root.add(aura);
       }
@@ -606,6 +620,11 @@ export class SurvivorRenderer {
     return m;
   }
 
+  /** Clone cached materials so per-frame opacity fade never poisons shared mats. */
+  private effectMat(color: string, opacity: number, additive = false): THREE.MeshBasicMaterial {
+    return this.basic(color, opacity, additive).clone();
+  }
+
   private createEffect(e: SurvivorState['effects'][0]): THREE.Object3D {
     const g = new THREE.Group();
     const color = e.color;
@@ -613,8 +632,9 @@ export class SurvivorRenderer {
       const len = e.length ?? 10;
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(e.width ?? 0.4, 0.15, len),
-        this.basic(color, 0.85),
+        this.effectMat(color, 0.85),
       );
+      mesh.userData.baseOpacity = 0.85;
       mesh.position.set((e.facingX ?? 0) * len * 0.5, 1.1, (e.facingZ ?? 1) * len * 0.5);
       mesh.rotation.y = Math.atan2(e.facingX ?? 0, e.facingZ ?? 1);
       g.add(mesh);
@@ -624,38 +644,45 @@ export class SurvivorRenderer {
     const r = e.radius ?? e.scale ?? 1;
     if (e.kind === 'repulsor') {
       // Strong multi-layer expanding shockwave matching gameplay radius
+      // Unique materials per effect so repeated uses never inherit faded opacity
       const outer = new THREE.Mesh(
         new THREE.RingGeometry(r * 0.88, r, 72),
-        this.basic(color, 0.95, true),
+        this.effectMat(color, 0.95, true),
       );
+      outer.userData.baseOpacity = 0.95;
       outer.rotation.x = -Math.PI / 2;
       const mid = new THREE.Mesh(
         new THREE.RingGeometry(r * 0.55, r * 0.82, 56),
-        this.basic('#ffffff', 0.5, true),
+        this.effectMat('#ffffff', 0.55, true),
       );
+      mid.userData.baseOpacity = 0.55;
       mid.rotation.x = -Math.PI / 2;
       mid.position.y = 0.03;
       const inner = new THREE.Mesh(
         new THREE.RingGeometry(r * 0.2, r * 0.5, 48),
-        this.basic(color, 0.4, true),
+        this.effectMat(color, 0.45, true),
       );
+      inner.userData.baseOpacity = 0.45;
       inner.rotation.x = -Math.PI / 2;
       inner.position.y = 0.05;
       const floor = new THREE.Mesh(
         new THREE.CircleGeometry(r * 0.98, 56),
-        this.basic(color, 0.2, true),
+        this.effectMat(color, 0.25, true),
       );
+      floor.userData.baseOpacity = 0.25;
       floor.rotation.x = -Math.PI / 2;
       floor.position.y = -0.02;
       const shell = new THREE.Mesh(
         new THREE.CylinderGeometry(r * 0.95, r * 1.02, 1.1, 48, 1, true),
-        this.basic(color, 0.28, true),
+        this.effectMat(color, 0.32, true),
       );
+      shell.userData.baseOpacity = 0.32;
       shell.position.y = 0.55;
       const shell2 = new THREE.Mesh(
         new THREE.CylinderGeometry(r * 0.7, r * 0.85, 0.7, 40, 1, true),
-        this.basic('#ffffff', 0.15, true),
+        this.effectMat('#ffffff', 0.18, true),
       );
+      shell2.userData.baseOpacity = 0.18;
       shell2.position.y = 0.4;
       g.add(floor, mid, inner, outer, shell, shell2);
       g.position.set(e.x, 0.08, e.z);
@@ -663,8 +690,9 @@ export class SurvivorRenderer {
     }
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(r * 0.2, r, 28),
-      this.basic(color, 0.65),
+      this.effectMat(color, 0.65),
     );
+    ring.userData.baseOpacity = 0.65;
     ring.rotation.x = -Math.PI / 2;
     g.add(ring);
     g.position.set(e.x, 0.08, e.z);

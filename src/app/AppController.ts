@@ -1,18 +1,13 @@
 import type { HeroId } from '../game/content/heroes';
 import { isHeroId } from '../game/content/heroes';
-import { GystRuntime } from '../game/GystRuntime';
 import { SurvivorMode } from '../game/modes/survivor/SurvivorMode';
 import type { SurvivorFixture } from '../game/modes/survivor/survivorContent';
 import { CrewSelectScreen } from '../screens/CrewSelectScreen';
 
-export type CampaignFixture = 'combat' | 'boss' | 'mech' | null;
-export type ModeId = 'campaign' | 'survivor';
-
 function parseLaunch(): {
   heroId: HeroId | null;
-  mode: ModeId | null;
-  campaignFixture: CampaignFixture;
-  survivorFixture: SurvivorFixture;
+  launchGame: boolean;
+  fixture: SurvivorFixture;
 } {
   const params = new URLSearchParams(window.location.search);
   const fixtureParam = params.get('fixture');
@@ -29,37 +24,37 @@ function parseLaunch(): {
     'survivor-damage',
     'survivor-miniboss',
   ];
-  const survivorFixture =
+
+  const knownFixture =
     fixtureParam && (survivorFixtures as string[]).includes(fixtureParam)
       ? (fixtureParam as SurvivorFixture)
-      : modeParam === 'survivor'
-        ? 'survivor-start'
-        : null;
-
-  const campaignFixture: CampaignFixture =
-    fixtureParam === 'combat' || fixtureParam === 'boss' || fixtureParam === 'mech'
-      ? fixtureParam
       : null;
 
-  let mode: ModeId | null = null;
-  if (modeParam === 'survivor' || survivorFixture) mode = 'survivor';
-  else if (modeParam === 'campaign' || campaignFixture) mode = 'campaign';
+  // Retired campaign modes never launch a campaign runtime.
+  const wantsGame =
+    modeParam === 'survivor' ||
+    modeParam === 'containment' ||
+    !!knownFixture ||
+    // Treat bare mode=campaign as crew select (no campaign runtime).
+    false;
 
   const heroParam = params.get('hero');
-  const heroId =
-    heroParam && isHeroId(heroParam) ? heroParam : mode || campaignFixture || survivorFixture ? 'bee' : null;
+  const heroId = heroParam && isHeroId(heroParam) ? heroParam : wantsGame ? 'bee' : null;
 
-  return { heroId, mode, campaignFixture, survivorFixture };
+  return {
+    heroId,
+    launchGame: wantsGame,
+    fixture: knownFixture ?? (wantsGame ? 'survivor-start' : null),
+  };
 }
 
 /**
- * Application shell: exclusive ownership of selection, campaign, or survivor.
+ * Application shell: crew selection + Containment Protocol only.
  */
 export class AppController {
   private readonly host: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private selection: CrewSelectScreen | null = null;
-  private campaign: GystRuntime | null = null;
   private survivor: SurvivorMode | null = null;
   private transitioning = false;
 
@@ -70,20 +65,14 @@ export class AppController {
 
   async start(): Promise<void> {
     const launch = parseLaunch();
-    if (launch.heroId && launch.mode === 'survivor') {
-      await this.mountSurvivor(launch.heroId, launch.survivorFixture);
-      return;
-    }
-    if (launch.heroId && (launch.mode === 'campaign' || launch.campaignFixture)) {
-      await this.mountCampaign(launch.heroId, launch.campaignFixture);
+    if (launch.launchGame) {
+      await this.mountSurvivor(launch.heroId ?? 'bee', launch.fixture);
       return;
     }
     await this.mountSelection();
   }
 
   private disposeAllModes(): void {
-    this.campaign?.dispose();
-    this.campaign = null;
     this.survivor?.dispose();
     this.survivor = null;
     this.selection?.dispose();
@@ -95,42 +84,11 @@ export class AppController {
     this.transitioning = true;
     this.disposeAllModes();
     this.selection = new CrewSelectScreen(this.host, this.canvas, {
-      onContinue: (id) => {
-        void this.mountCampaign(id, null);
-      },
-      onSurvivor: (id) => {
+      onLaunch: (id) => {
         void this.mountSurvivor(id, null);
       },
     });
     await this.selection.mount();
-    this.transitioning = false;
-  }
-
-  private async mountCampaign(heroId: HeroId, fixture: CampaignFixture): Promise<void> {
-    if (this.transitioning) return;
-    this.transitioning = true;
-    this.disposeAllModes();
-    this.campaign = new GystRuntime({
-      heroId,
-      host: this.host,
-      canvas: this.canvas,
-      fixture,
-      handlers: {
-        onReturnToCrew: () => {
-          void this.mountSelection();
-        },
-      },
-    });
-    try {
-      await this.campaign.start();
-    } catch (err) {
-      console.error('Failed to start campaign', err);
-      this.campaign.dispose();
-      this.campaign = null;
-      this.transitioning = false;
-      await this.mountSelection();
-      return;
-    }
     this.transitioning = false;
   }
 
@@ -152,7 +110,7 @@ export class AppController {
     try {
       await this.survivor.start();
     } catch (err) {
-      console.error('Failed to start survivor mode', err);
+      console.error('Failed to start Containment Protocol', err);
       this.survivor.dispose();
       this.survivor = null;
       this.transitioning = false;

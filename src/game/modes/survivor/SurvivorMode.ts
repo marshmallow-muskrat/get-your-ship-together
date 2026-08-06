@@ -33,8 +33,7 @@ export type SurvivorHandlers = {
 };
 
 /**
- * Isolated survivor runtime — own loop, state, camera, HUD.
- * Does not share campaign GameState or GystRuntime simulation.
+ * Containment Protocol runtime — own loop, state, camera, HUD.
  */
 export class SurvivorMode {
   private readonly host: HTMLElement;
