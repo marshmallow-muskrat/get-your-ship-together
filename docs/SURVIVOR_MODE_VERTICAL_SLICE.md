@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Answer whether a Vampire Survivors–style horde mode is more appealing for GYST than (or as a peer to) the campaign direction—using GYST heroes, mechs, Modular Sci-Fi, and Ultimate Monsters only.
+Answer whether a Vampire Survivors–style horde mode is more appealing for GYST than (or as a peer to) the campaign direction—using GYST heroes, mechs, ships, Modular Sci-Fi, and Ultimate Monsters only.
 
 This experiment may become the preferred primary mode. It must coexist with campaign without corrupting campaign architecture.
 
@@ -14,26 +14,33 @@ This experiment may become the preferred primary mode. It must coexist with camp
 
 1. Select a hero on crew selection.
 2. Choose **CAMPAIGN** or **CONTAINMENT PROTOCOL**.
-3. Survive 8 minutes, level up, mech transform, defeat the boss.
+3. Survive 8 minutes, level up, use active abilities, defeat the midpoint warden and final boss.
 
-Dev fixtures (examples):
+### Dev fixtures
 
-- `?mode=survivor&fixture=survivor-start&hero=bee`
-- `?mode=survivor&fixture=survivor-horde&hero=bee`
-- `?mode=survivor&fixture=survivor-boss&hero=frog`
-- `?mode=survivor&fixture=survivor-mech&hero=flamingo`
-- `?mode=survivor&fixture=survivor-levelup&hero=red-panda`
+| Fixture | URL example |
+|---|---|
+| Start | `?mode=survivor&fixture=survivor-start&hero=bee` |
+| Level-up | `?mode=survivor&fixture=survivor-levelup&hero=red-panda` |
+| Dense horde | `?mode=survivor&fixture=survivor-horde&hero=bee` |
+| Mech ready | `?mode=survivor&fixture=survivor-mech&hero=flamingo` |
+| Late-run boss | `?mode=survivor&fixture=survivor-boss&hero=frog` |
+| Repulsor QA | `?mode=survivor&fixture=survivor-repulsor&hero=bee` |
+| Ship QA | `?mode=survivor&fixture=survivor-ship&hero=flamingo` |
+| Damage numbers | `?mode=survivor&fixture=survivor-damage&hero=frog` |
+| Miniboss @ 4:00 | `?mode=survivor&fixture=survivor-miniboss&hero=bee` |
 
 ## Design summary
 
 | Pillar | Choice |
 |---|---|
-| Camera | Fixed orthographic, no follow/pan/zoom |
-| Combat | Automatic weapons only |
-| Arena | Reactor Platform 7 (~32 unit square) |
-| Run | 8 minutes → boss |
-| Progression | XP drops → 3-choice level-ups (run-only) |
-| Mech | Kill-charged meter, R when full |
+| Camera | Isometric orthographic follow (not top-down) |
+| Combat | Automatic weapons + active Q / E / R |
+| Arena | Reactor Platform 7 — single map, 64×64 |
+| Run | 8 minutes → multi-phase boss |
+| Midpoint | Containment Warden miniboss ~4:00 |
+| Progression | XP drops → 3-choice level-ups (run-only). Energy bar = XP |
+| Mech | Kill-charged meter, R when full (ultimate) |
 | Architecture | Isolated `SurvivorMode` — no campaign state bleed |
 
 ## Controls
@@ -41,11 +48,36 @@ Dev fixtures (examples):
 | Action | Binding |
 |---|---|
 | Move | WASD / arrows (screen-relative) |
-| Mech | R (when charged) |
+| Repulsor Burst | **Q** (edge-triggered, 8s CD) |
+| Afterburner (ship) | **E** (edge-triggered, 2.5s form / 16s CD after) |
+| Mech Overdrive | **R** (when Mech Core full) |
+| Level-up choices | 1 / 2 / 3 or click |
 | Pause | Esc |
-| Mute | M |
+| Mute | M (wired; audio bus intentionally disabled) |
 
-No manual fire, aim, dodge, ability, or repair inputs.
+## Active abilities
+
+### Q — Repulsor Burst
+Radial knockback + light damage. Clears breathing room. Mech form strengthens radius/damage/push. Does not throw the final boss (brief stagger + internal boss CD).
+
+### E — Afterburner
+Temporary ship form using the selected hero’s real ship model. Fast steering, damage reduction, weapons offline, thruster wake damages enemies. Mutually exclusive with mech.
+
+### R — Mech Overdrive
+Kill-charged ultimate. HUD shows charge %, READY glow, then remaining duration while active.
+
+## Weapons
+
+Five families remain (Pulse, Microdrone, Rail, Gravity, Rocket). Frog’s starter is **Bio-Plasma Glob** (ranged toxic globs + splash + corrosive puddles). Gravity Pulse remains available in the upgrade pool.
+
+## Difficulty director
+
+Time-based `difficultyAt(t)` applies health/damage/speed multipliers **at spawn** and drives population targets + spawn rate. No rubber-banding off player DPS. Speed scaling caps ~1.10×.
+
+## Bosses
+
+- **Containment Warden** (~4:00): one-shot miniboss, telegraphed slam, large XP + repair/supply on death.
+- **Final breach** (~8:00): ~7600 HP, three phases (100–65 / 65–35 / &lt;35) with tighter recovery, more projectiles/summons, visual phase transitions. Victory on death.
 
 ## Architecture
 
@@ -55,10 +87,8 @@ Campaign: GystRuntime + campaign simulation (unchanged ownership)
 Survivor: src/game/modes/survivor/* — own state, sim, render, HUD
 ```
 
-## Performance
-
-Horde density is measured with fixtures. Target: playable density at 100–200 active enemies with skeletal animation + throttled mixers; cap from evidence.
+Survivor player form is local: `astronaut | ship | mech` (does not alter campaign `PlayerForm`).
 
 ## Deferred
 
-Permanent meta-progression, shops, rarity, inventory, gamepad, campaign narrative in this mode.
+Audio/music, permanent meta-progression, shops, rarity, inventory, gamepad, mobile controls, additional maps, co-op.

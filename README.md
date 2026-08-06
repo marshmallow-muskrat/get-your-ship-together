@@ -26,6 +26,22 @@ npm run preview
 2. **CONTINUE** → Campaign  
 3. **CONTAINMENT PROTOCOL** → Survivor experiment  
 
+## Containment Protocol controls
+
+| Action | Key |
+|---|---|
+| Move | WASD / arrows |
+| Repulsor Burst | **Q** |
+| Afterburner (ship form) | **E** |
+| Mech Overdrive | **R** (when charged) |
+| Level-up choices | **1** / **2** / **3** or click |
+| Pause | Esc |
+| Mute | M (audio disabled in this slice) |
+
+**Energy** on the HUD is XP progress toward the next level (not a mana cost).
+
+Single arena for this experiment. Audio and permanent meta-progression are deferred.
+
 ## Dev fixtures
 
 ### Campaign
@@ -37,10 +53,14 @@ npm run preview
 ### Survivor
 
 - `/?mode=survivor&fixture=survivor-start&hero=bee`
-- `/?mode=survivor&fixture=survivor-horde&hero=bee`
-- `/?mode=survivor&fixture=survivor-boss&hero=frog`
-- `/?mode=survivor&fixture=survivor-mech&hero=flamingo`
 - `/?mode=survivor&fixture=survivor-levelup&hero=red-panda`
+- `/?mode=survivor&fixture=survivor-horde&hero=bee`
+- `/?mode=survivor&fixture=survivor-mech&hero=flamingo`
+- `/?mode=survivor&fixture=survivor-boss&hero=frog` (representative late-run build)
+- `/?mode=survivor&fixture=survivor-repulsor&hero=bee`
+- `/?mode=survivor&fixture=survivor-ship&hero=flamingo`
+- `/?mode=survivor&fixture=survivor-damage&hero=frog`
+- `/?mode=survivor&fixture=survivor-miniboss&hero=bee`
 
 ## Docs
 

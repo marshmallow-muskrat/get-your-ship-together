@@ -20,7 +20,7 @@
 
 - Keep Vite + TypeScript + Three.js `0.180.0`.
 - Do not copy Gloamreach’s full `src/game` tree.
-- Keep `heroId` separate from `form` (`astronaut` | `mech`).
+- Keep `heroId` separate from form. Campaign form: `astronaut` | `mech`. Survivor-local form may include `ship`.
 - Simulation owns combat; rendering presents only.
 - **Do not** scatter `if (mode === 'survivor')` through campaign systems. Isolate survivor under `src/game/modes/survivor/`.
 - Campaign and survivor state must not share one bloated state bag.

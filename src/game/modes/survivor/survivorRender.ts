@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { HEROES } from '../../content/heroes';
 import { BOSS_DEMON, ENEMY_BY_ID, MELEE_BLOB } from '../../content/enemies';
 import { AssetLibrary, createAnimator } from '../../assets/AssetLibrary';
-import { HORDE, SURVIVOR_BOSS } from './survivorContent';
+import { HORDE, SURVIVOR, SURVIVOR_BOSS } from './survivorContent';
 import type { SurvivorState } from './survivorState';
 
 type Animator = ReturnType<typeof createAnimator>;
@@ -23,10 +23,12 @@ export class SurvivorRenderer {
   private assets: AssetLibrary;
   private playerAstro: ActorVis | null = null;
   private playerMech: ActorVis | null = null;
+  private playerShip: THREE.Object3D | null = null;
   private enemies = new Map<number, ActorVis>();
   private boss: ActorVis | null = null;
   private projectiles = new Map<number, THREE.Mesh>();
   private pickups = new Map<number, THREE.Object3D>();
+  private hazards = new Map<number, THREE.Object3D>();
   private effects = new Map<number, THREE.Object3D>();
   private rails: THREE.Object3D[] = [];
   private boltGeo = new THREE.SphereGeometry(0.14, 8, 8);
@@ -42,6 +44,18 @@ export class SurvivorRenderer {
     const hero = HEROES[heroId];
     this.playerAstro = this.makeFromUrl(hero.astronaut.url, hero.astronaut.anim, 'astro');
     this.playerMech = this.makeFromUrl(hero.mech.url, hero.mech.anim, 'mech');
+    const shipClone = this.assets.clone(hero.shipUrl);
+    if (shipClone) {
+      this.playerShip = shipClone.root;
+      this.playerShip.visible = false;
+      this.playerShip.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          c.castShadow = true;
+          c.receiveShadow = false;
+        }
+      });
+      this.root.add(this.playerShip);
+    }
     if (this.playerMech) this.playerMech.root.visible = false;
     if (this.playerAstro) this.root.add(this.playerAstro.root);
     if (this.playerMech) this.root.add(this.playerMech.root);
@@ -72,7 +86,6 @@ export class SurvivorRenderer {
     const flashMats: THREE.MeshStandardMaterial[] = [];
     cloned.root.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        // Horde shadows off for performance
         child.castShadow = defId === 'astro' || defId === 'mech' || defId === 'boss';
         child.receiveShadow = false;
         const sources = Array.isArray(child.material) ? child.material : [child.material];
@@ -95,6 +108,7 @@ export class SurvivorRenderer {
     this.syncEnemies(state, dt);
     this.syncBoss(state, dt);
     this.syncProjectiles(state);
+    this.syncHazards(state);
     this.syncPickups(state);
     this.syncEffects(state);
     this.syncRails(state);
@@ -102,18 +116,31 @@ export class SurvivorRenderer {
 
   private syncPlayer(state: SurvivorState, dt: number): void {
     const p = state.player;
-    const mech = p.form === 'mech';
+    const form = p.form;
+    const scale = SURVIVOR.actorScale.player;
     if (this.playerAstro) {
-      this.playerAstro.root.visible = !mech;
-      this.place(this.playerAstro, p.x, p.z, p.facingX, p.facingZ);
-      this.animPlayer(this.playerAstro, p, dt);
-      this.flash(this.playerAstro, p.hitFlash, p.invuln > 0);
+      this.playerAstro.root.visible = form === 'astronaut';
+      if (form === 'astronaut') {
+        this.place(this.playerAstro, p.x, p.z, p.facingX, p.facingZ, scale);
+        this.animPlayer(this.playerAstro, p, dt);
+        this.flash(this.playerAstro, p.hitFlash, p.invuln > 0);
+      }
     }
     if (this.playerMech) {
-      this.playerMech.root.visible = mech;
-      this.place(this.playerMech, p.x, p.z, p.facingX, p.facingZ);
-      this.animPlayer(this.playerMech, p, dt);
-      this.flash(this.playerMech, p.hitFlash, false);
+      this.playerMech.root.visible = form === 'mech';
+      if (form === 'mech') {
+        this.place(this.playerMech, p.x, p.z, p.facingX, p.facingZ, scale);
+        this.animPlayer(this.playerMech, p, dt);
+        this.flash(this.playerMech, p.hitFlash, false);
+      }
+    }
+    if (this.playerShip) {
+      this.playerShip.visible = form === 'ship';
+      if (form === 'ship') {
+        this.playerShip.position.set(p.x, 0.35, p.z);
+        this.playerShip.rotation.y = Math.atan2(p.facingX, p.facingZ);
+        this.playerShip.scale.setScalar(SURVIVOR.actorScale.ship);
+      }
     }
   }
 
@@ -121,10 +148,7 @@ export class SurvivorRenderer {
     if (!vis.animator) return;
     if (!p.alive) vis.animator.play('death', 0.05);
     else if (p.hitFlash > 0.08) vis.animator.play('hit', 0.05);
-    else {
-      // approximate move from facing commitment
-      vis.animator.play('run');
-    }
+    else vis.animator.play('run');
     vis.animator.update(dt);
   }
 
@@ -160,26 +184,29 @@ export class SurvivorRenderer {
         );
         if (!created) continue;
         vis = created;
-        // disable shadows on horde
         vis.root.traverse((c) => {
           if (c instanceof THREE.Mesh) {
-            c.castShadow = e.isElite;
+            c.castShadow = e.isElite || e.isMiniboss;
             c.receiveShadow = false;
           }
         });
         this.enemies.set(e.id, vis);
         this.root.add(vis.root);
       }
-      this.place(vis, e.x, e.z, e.facingX, e.facingZ);
-      if (e.isElite) vis.root.scale.setScalar(1.25);
-      // Throttle animation: every other frame for normal, always for elite
-      const shouldAnim = e.isElite || this.animFrame % 2 === i % 2;
+      const scale = e.isMiniboss
+        ? SURVIVOR.actorScale.miniboss
+        : e.isElite
+          ? SURVIVOR.actorScale.elite
+          : SURVIVOR.actorScale.enemy;
+      this.place(vis, e.x, e.z, e.facingX, e.facingZ, scale);
+      const shouldAnim = e.isElite || e.isMiniboss || this.animFrame % 2 === i % 2;
       if (vis.animator && shouldAnim) {
-        if (e.hitFlash > 0.05) vis.animator.play('hit', 0.04);
+        if (e.specialWindup > 0) vis.animator.play('shoot', 0.05);
+        else if (e.hitFlash > 0.05) vis.animator.play('hit', 0.04);
         else vis.animator.play('walk');
-        vis.animator.update(dt * (e.isElite ? 1 : 1.15));
+        vis.animator.update(dt * (e.isElite || e.isMiniboss ? 1 : 1.15));
       }
-      this.flash(vis, e.hitFlash, false);
+      this.flash(vis, e.hitFlash, e.specialWindup > 0);
     }
   }
 
@@ -207,20 +234,18 @@ export class SurvivorRenderer {
         },
         'boss',
       );
-      if (this.boss) {
-        this.boss.root.scale.setScalar(1.15);
-        this.root.add(this.boss.root);
-      }
+      if (this.boss) this.root.add(this.boss.root);
     }
     if (!this.boss) return;
-    this.place(this.boss, b.x, b.z, b.facingX, b.facingZ);
+    const scale = SURVIVOR.actorScale.boss * (b.phase >= 3 ? 1.08 : 1);
+    this.place(this.boss, b.x, b.z, b.facingX, b.facingZ, scale);
     if (this.boss.animator) {
       if (b.state === 'dead') this.boss.animator.play('death', 0.08);
       else if (b.state === 'windup' || b.state === 'active') this.boss.animator.play('shoot', 0.06);
       else this.boss.animator.play('idle');
       this.boss.animator.update(dt);
     }
-    this.flash(this.boss, b.hitFlash, b.state === 'windup');
+    this.flash(this.boss, b.hitFlash, b.state === 'windup' || b.phase >= 3);
   }
 
   private syncProjectiles(state: SurvivorState): void {
@@ -239,15 +264,54 @@ export class SurvivorRenderer {
         this.projectiles.set(p.id, mesh);
         this.root.add(mesh);
       }
-      const s = p.kind === 'drone' ? 0.75 : p.kind === 'rocket' ? 1.3 : 1;
+      let s = p.kind === 'drone' ? 0.75 : p.kind === 'rocket' ? 1.3 : p.kind === 'bioplasma' ? 1.45 : 1;
       mesh.scale.setScalar(s);
-      mesh.position.set(p.x, p.kind === 'rocket' && p.armTimer > 0 ? 0.1 : 1.0, p.z);
+      mesh.position.set(p.x, p.kind === 'rocket' && p.armTimer > 0 ? 0.1 : p.kind === 'bioplasma' ? 0.85 : 1.0, p.z);
       if (p.kind === 'rocket' && p.armTimer > 0) {
         mesh.scale.setScalar(p.explodeRadius * 1.4);
         (mesh.material as THREE.MeshStandardMaterial).opacity = 0.35;
       } else {
         (mesh.material as THREE.MeshStandardMaterial).opacity = 0.95;
+        (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = p.kind === 'bioplasma' ? 2.2 : 1.3;
       }
+    }
+  }
+
+  private syncHazards(state: SurvivorState): void {
+    const alive = new Set(state.hazards.filter((h) => h.active).map((h) => h.id));
+    for (const [id, obj] of this.hazards) {
+      if (!alive.has(id)) {
+        this.root.remove(obj);
+        this.hazards.delete(id);
+      }
+    }
+    for (const h of state.hazards) {
+      if (!h.active) continue;
+      let obj = this.hazards.get(h.id);
+      if (!obj) {
+        const ring = new THREE.Mesh(
+          new THREE.CircleGeometry(1, 20),
+          new THREE.MeshBasicMaterial({
+            color: h.color,
+            transparent: true,
+            opacity: h.kind === 'wake' ? 0.45 : 0.4,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          }),
+        );
+        ring.rotation.x = -Math.PI / 2;
+        obj = ring;
+        this.hazards.set(h.id, obj);
+        this.root.add(obj);
+      }
+      const t = h.life / h.maxLife;
+      obj.position.set(h.x, h.kind === 'wake' ? 0.06 : 0.04, h.z);
+      obj.scale.setScalar(h.radius * (0.85 + (1 - t) * 0.2));
+      obj.traverse((c) => {
+        if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
+          c.material.opacity = Math.max(0.08, t * (h.kind === 'wake' ? 0.5 : 0.42));
+        }
+      });
     }
   }
 
@@ -293,10 +357,11 @@ export class SurvivorRenderer {
         this.root.add(obj);
       }
       const t = 1 - e.life / e.maxLife;
-      obj.scale.setScalar(0.5 + t * 1.4);
+      const grow = e.kind === 'repulsor' ? 0.4 + t * 1.8 : 0.5 + t * 1.4;
+      obj.scale.setScalar(grow);
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
-          c.material.opacity = Math.max(0, 0.7 * (1 - t));
+          c.material.opacity = Math.max(0, 0.75 * (1 - t));
         }
       });
     }
@@ -319,17 +384,31 @@ export class SurvivorRenderer {
     }
     const r = e.radius ?? e.scale ?? 1;
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(r * 0.2, r, 28),
+      new THREE.RingGeometry(e.kind === 'repulsor' ? r * 0.15 : r * 0.2, r, e.kind === 'repulsor' ? 40 : 28),
       new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.65,
+        opacity: e.kind === 'repulsor' ? 0.8 : 0.65,
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
     );
     ring.rotation.x = -Math.PI / 2;
     g.add(ring);
+    if (e.kind === 'repulsor') {
+      const disc = new THREE.Mesh(
+        new THREE.CircleGeometry(r * 0.55, 32),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.22,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      disc.rotation.x = -Math.PI / 2;
+      g.add(disc);
+    }
     g.position.set(e.x, 0.08, e.z);
     return g;
   }
@@ -352,9 +431,10 @@ export class SurvivorRenderer {
     }
   }
 
-  private place(vis: ActorVis, x: number, z: number, fx: number, fz: number): void {
+  private place(vis: ActorVis, x: number, z: number, fx: number, fz: number, scale = 1): void {
     vis.root.position.set(x, 0, z);
     vis.root.rotation.y = Math.atan2(fx, fz);
+    vis.root.scale.setScalar(scale);
   }
 
   private flash(vis: ActorVis, hit: number, invuln: boolean): void {
@@ -369,6 +449,7 @@ export class SurvivorRenderer {
     this.enemies.clear();
     this.projectiles.clear();
     this.pickups.clear();
+    this.hazards.clear();
     this.effects.clear();
     this.rails = [];
     this.boltGeo.dispose();
@@ -376,6 +457,7 @@ export class SurvivorRenderer {
     this.mats.clear();
     this.playerAstro = null;
     this.playerMech = null;
+    this.playerShip = null;
     this.boss = null;
   }
 }

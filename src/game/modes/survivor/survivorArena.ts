@@ -175,46 +175,60 @@ export class SurvivorArena {
     key.position.set(-10, 22, 12);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
-    key.shadow.camera.left = -20;
-    key.shadow.camera.right = 20;
-    key.shadow.camera.top = 20;
-    key.shadow.camera.bottom = -20;
+    const sh = Math.min(28, SURVIVOR.cameraHalf * 2.2);
+    key.shadow.camera.left = -sh;
+    key.shadow.camera.right = sh;
+    key.shadow.camera.top = sh;
+    key.shadow.camera.bottom = -sh;
     const fill = new THREE.DirectionalLight('#4a6088', 0.3);
     fill.position.set(12, 8, -10);
     this.lights.push(hemi, key, fill);
     this.root.add(hemi, key, fill);
   }
 
-  /** Fixed orthographic camera framing the full arena. */
+  /**
+   * Orthographic isometric follow camera — tight frustum so the hero reads large,
+   * while the arena is big enough to feel like a real roam space.
+   */
   static createFixedCamera(aspect: number): THREE.OrthographicCamera {
-    const half = SURVIVOR.arenaHalf + 2.5;
-    const viewH = half * 2 * 1.05;
-    const viewW = viewH * aspect;
-    // Ensure width also fits arena diagonal-ish
-    const needW = half * 2 * 1.15;
-    const w = Math.max(viewW, needW);
-    const h = w / aspect;
-    const cam = new THREE.OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 120);
-    cam.position.set(22, 26, 22);
-    cam.lookAt(0, 0, 0);
-    cam.updateProjectionMatrix();
+    const { viewW, viewH } = SurvivorArena.viewSize(aspect);
+    const cam = new THREE.OrthographicCamera(-viewW / 2, viewW / 2, viewH / 2, -viewH / 2, 0.1, 160);
+    cam.up.set(0, 1, 0);
+    SurvivorArena.followPlayer(cam, 0, 0);
     return cam;
   }
 
   static resizeFixedCamera(cam: THREE.OrthographicCamera, width: number, height: number): void {
     const aspect = width / Math.max(1, height);
-    const half = SURVIVOR.arenaHalf + 2.5;
-    let viewH = half * 2 * 1.08;
-    let viewW = viewH * aspect;
-    const minW = half * 2 * 1.2;
-    if (viewW < minW) {
-      viewW = minW;
-      viewH = viewW / aspect;
-    }
+    const { viewW, viewH } = SurvivorArena.viewSize(aspect);
     cam.left = -viewW / 2;
     cam.right = viewW / 2;
     cam.top = viewH / 2;
     cam.bottom = -viewH / 2;
+    cam.updateProjectionMatrix();
+  }
+
+  /** World units visible on the short axis (height). Wider screens see more width. */
+  private static viewSize(aspect: number): { viewW: number; viewH: number } {
+    const half = SURVIVOR.cameraHalf;
+    let viewH = half * 2;
+    let viewW = viewH * aspect;
+    const minW = half * 2 * 1.05;
+    if (viewW < minW) {
+      viewW = minW;
+      viewH = viewW / aspect;
+    }
+    return { viewW, viewH };
+  }
+
+  /** Track player with a fixed isometric offset (camera position = lookAt + offset). */
+  static followPlayer(cam: THREE.OrthographicCamera, x: number, z: number): void {
+    const ox = 18;
+    const oy = 22;
+    const oz = 18;
+    cam.up.set(0, 1, 0);
+    cam.position.set(x + ox, oy, z + oz);
+    cam.lookAt(x, 0.6, z);
     cam.updateProjectionMatrix();
   }
 

@@ -24,6 +24,10 @@ function parseLaunch(): {
     'survivor-horde',
     'survivor-mech',
     'survivor-boss',
+    'survivor-repulsor',
+    'survivor-ship',
+    'survivor-damage',
+    'survivor-miniboss',
   ];
   const survivorFixture =
     fixtureParam && (survivorFixtures as string[]).includes(fixtureParam)

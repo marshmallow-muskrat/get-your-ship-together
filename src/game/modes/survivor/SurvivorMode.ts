@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { HeroId } from '../../content/heroes';
+import { HEROES } from '../../content/heroes';
 import { AssetLibrary } from '../../assets/AssetLibrary';
 import { AudioBus } from '../../audio/AudioBus';
 import { SURVIVOR, type SurvivorFixture } from './survivorContent';
 import { createSurvivorState, type SurvivorState } from './survivorState';
-import { EMPTY_SURVIVOR_INPUT, stepSurvivor, type SurvivorInput } from './survivorSim';
+import { EMPTY_SURVIVOR_INPUT, stepSurvivor, surroundPlayer, type SurvivorInput } from './survivorSim';
 import { SurvivorArena } from './survivorArena';
 import { SurvivorRenderer } from './survivorRender';
 import { SurvivorHud } from './survivorHud';
@@ -40,7 +41,7 @@ export class SurvivorMode {
   private raf = 0;
   private disposed = false;
   private keys = new Set<string>();
-  private edge = { mech: false, pause: false, mute: false };
+  private edge = { mech: false, ship: false, repulsor: false, pause: false, mute: false };
   private choiceIndex: number | null = null;
   private frameSamples: number[] = [];
   private showMetrics = false;
@@ -51,6 +52,8 @@ export class SurvivorMode {
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'escape'].includes(k)) e.preventDefault();
     if (!e.repeat) {
       if (k === 'r') this.edge.mech = true;
+      if (k === 'e') this.edge.ship = true;
+      if (k === 'q') this.edge.repulsor = true;
       if (k === 'escape') this.edge.pause = true;
       if (k === 'm') this.edge.mute = true;
       if (k === '1' || k === '2' || k === '3') this.choiceIndex = Number(k) - 1;
@@ -105,9 +108,11 @@ export class SurvivorMode {
     this.arena = new SurvivorArena();
     this.actors = new SurvivorRenderer(this.assets);
 
+    const shipUrl = HEROES[this.heroId].shipUrl;
     await Promise.all([
       this.assets.preloadHero(this.heroId),
       this.assets.preloadCombat(),
+      this.assets.loadUrl(shipUrl, 1.4),
       this.arena.build().then((g) => this.scene?.add(g)),
     ]);
     if (this.disposed) return;
@@ -116,14 +121,7 @@ export class SurvivorMode {
     await this.actors.setupPlayer(this.heroId);
 
     this.state = createSurvivorState(this.heroId, this.fixture);
-    // Horde fixture: prefill
-    if (this.fixture === 'survivor-horde' && this.state) {
-      // spawns will fill via sim; boost cap already set
-    }
-    if (this.fixture === 'survivor-levelup' && this.state) {
-      // force level-up on first frame after start
-      this.state.xp = this.state.xpNext;
-    }
+    this.applyFixtureSpawn(this.state);
 
     this.hud = new SurvivorHud(this.host, {
       onRestart: () => this.restart(),
@@ -131,6 +129,7 @@ export class SurvivorMode {
       onChoice: (i) => {
         this.choiceIndex = i;
       },
+      projectWorld: (x, z) => this.projectToScreen(x, z),
     });
 
     window.addEventListener('keydown', this.onKeyDown);
@@ -143,9 +142,40 @@ export class SurvivorMode {
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
+  private applyFixtureSpawn(state: SurvivorState): void {
+    if (this.fixture === 'survivor-levelup') {
+      state.xp = state.xpNext;
+    } else if (this.fixture === 'survivor-repulsor') {
+      state.player.repulsorCd = 0;
+      surroundPlayer(state, 14, 3.4);
+    } else if (this.fixture === 'survivor-ship') {
+      state.player.shipCd = 0;
+      surroundPlayer(state, 10, 4.5);
+    } else if (this.fixture === 'survivor-damage') {
+      surroundPlayer(state, 12, 3.8);
+    } else if (this.fixture === 'survivor-mech') {
+      state.player.mechCharge = 1;
+    }
+  }
+
+  private projectToScreen(x: number, z: number): { x: number; y: number } | null {
+    if (!this.camera || !this.renderer) return null;
+    const v = new THREE.Vector3(x, 1.1, z);
+    v.project(this.camera);
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    return {
+      x: (v.x * 0.5 + 0.5) * w,
+      y: (-v.y * 0.5 + 0.5) * h,
+    };
+  }
+
   private restart(): void {
     this.state = createSurvivorState(this.heroId, this.fixture);
+    this.applyFixtureSpawn(this.state);
     this.accumulator = 0;
+    this.choiceIndex = null;
+    this.edge = { mech: false, ship: false, repulsor: false, pause: false, mute: false };
   }
 
   private resize(): void {
@@ -171,14 +201,17 @@ export class SurvivorMode {
       moveX: sx,
       moveY: sy,
       mechPressed: this.edge.mech,
+      shipPressed: this.edge.ship,
+      repulsorPressed: this.edge.repulsor,
       pausePressed: this.edge.pause,
       mutePressed: this.edge.mute,
       choiceIndex: this.choiceIndex,
     };
     this.edge.mech = false;
+    this.edge.ship = false;
+    this.edge.repulsor = false;
     this.edge.pause = false;
     this.edge.mute = false;
-    this.choiceIndex = null;
     return frame;
   }
 
@@ -195,26 +228,36 @@ export class SurvivorMode {
     this.state.metrics.fps = avg > 0 ? 1 / avg : 60;
 
     const input = this.sampleInput();
-    // Time acceleration for fixtures (hold Shift+T in dev): not required
+    // While level-up modal is open, do not consume Q/E/R edges into the sim
+    if (this.state.phase === 'levelup') {
+      input.mechPressed = false;
+      input.shipPressed = false;
+      input.repulsorPressed = false;
+    }
+
     this.accumulator += rawDt;
     let steps = 0;
     while (this.accumulator >= SURVIVOR.fixedDt && steps < 5) {
       stepSurvivor(this.state, input, SURVIVOR.fixedDt);
-      // only apply edge inputs once
       input.mechPressed = false;
+      input.shipPressed = false;
+      input.repulsorPressed = false;
       input.pausePressed = false;
       input.mutePressed = false;
       input.choiceIndex = null;
       this.accumulator -= SURVIVOR.fixedDt;
       steps += 1;
     }
+    if (this.choiceIndex != null && this.state.phase !== 'levelup') {
+      this.choiceIndex = null;
+    }
 
-    // Trigger levelup check for fixture
     if (this.fixture === 'survivor-levelup' && this.state.phase === 'playing' && this.state.level === 1) {
       this.state.xp = this.state.xpNext;
     }
 
     this.actors?.sync(this.state, rawDt);
+    SurvivorArena.followPlayer(this.camera, this.state.player.x, this.state.player.z);
     this.hud?.publish(this.state, this.showMetrics || this.fixture === 'survivor-horde');
     this.renderer.render(this.scene, this.camera);
   }
@@ -239,4 +282,3 @@ export class SurvivorMode {
     this.state = null;
   }
 }
-
