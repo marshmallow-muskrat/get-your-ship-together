@@ -1096,6 +1096,18 @@ button {
   box-shadow: 0 0 14px color-mix(in srgb, var(--hud-accent) 35%, transparent);
   opacity: 1;
 }
+.survivor-hud .sv-ability.pulse-ready {
+  animation: sv-ready-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sv-ready-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px color-mix(in srgb, var(--hud-accent) 28%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 20px color-mix(in srgb, var(--hud-accent) 55%, transparent);
+  }
+}
 .survivor-hud .sv-ability.ultimate.ready,
 .survivor-hud .sv-ability.ultimate.charged {
   border-color: color-mix(in srgb, var(--hud-accent) 80%, #c9f 20%);
@@ -1193,24 +1205,111 @@ button {
   left: 0;
   top: 0;
   font-family: 'Space Mono', monospace;
-  font-weight: 700;
-  font-size: 0.85rem;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
-  color: #f4f8ff;
+  font-weight: 800;
+  font-size: 1.22rem;
+  letter-spacing: 0.02em;
+  color: #f7fbff;
+  -webkit-text-stroke: 1px rgba(0, 0, 0, 0.75);
+  text-shadow:
+    0 0 2px #000,
+    0 1px 0 #000,
+    0 2px 6px rgba(0, 0, 0, 0.9),
+    0 0 10px color-mix(in srgb, var(--hud-accent) 35%, transparent);
   pointer-events: none;
   will-change: transform, opacity;
 }
 .survivor-hud .sv-dmg-player {
-  color: #ff5a5a;
-  font-size: 0.95rem;
+  color: #ff4a4a;
+  font-size: 1.35rem;
+  -webkit-text-stroke: 1.2px rgba(40, 0, 0, 0.85);
+  text-shadow:
+    0 0 2px #000,
+    0 2px 8px rgba(255, 40, 40, 0.55);
 }
 .survivor-hud .sv-dmg-large {
-  color: #ffe066;
-  font-size: 1.15rem;
+  color: #ffe566;
+  font-size: 1.55rem;
+  text-shadow:
+    0 0 2px #000,
+    0 0 12px rgba(255, 220, 80, 0.65),
+    0 2px 6px #000;
 }
 .survivor-hud .sv-dmg-boss {
   color: #ffd4a0;
-  font-size: 1.05rem;
+  font-size: 1.4rem;
+}
+.survivor-hud .sv-dmg-ability {
+  color: #9dffe8;
+  font-size: 1.4rem;
+  text-shadow:
+    0 0 2px #000,
+    0 0 14px color-mix(in srgb, var(--hud-accent) 70%, transparent),
+    0 2px 6px #000;
+}
+.survivor-hud .sv-dmg-kill {
+  color: #fff2a8;
+  font-size: 1.48rem;
+  text-shadow:
+    0 0 2px #000,
+    0 0 14px rgba(255, 200, 60, 0.7),
+    0 2px 8px #000;
+}
+.survivor-hud .sv-pause-actions {
+  flex-direction: column;
+  align-items: stretch;
+  width: min(280px, 80vw);
+}
+.survivor-hud .sv-settings {
+  justify-content: flex-start;
+  padding-top: 4vh;
+}
+.survivor-hud .sv-settings-hint {
+  color: rgba(190, 210, 240, 0.75);
+  font-size: 0.78rem;
+  max-width: 420px;
+  margin: 0 0 0.6rem;
+}
+.survivor-hud .sv-bind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: min(420px, 92vw);
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  margin-bottom: 0.8rem;
+  text-align: left;
+}
+.survivor-hud .sv-bind-row {
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(140, 180, 255, 0.22);
+  background: rgba(8, 14, 28, 0.88);
+  color: #eef4ff;
+  font-family: inherit;
+}
+.survivor-hud .sv-bind-row:hover {
+  border-color: color-mix(in srgb, var(--hud-accent) 55%, white 10%);
+}
+.survivor-hud .sv-bind-row.capturing {
+  border-color: var(--hud-accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--hud-accent) 40%, transparent);
+  animation: sv-ready-pulse 1s ease-in-out infinite;
+}
+.survivor-hud .sv-bind-label {
+  font-size: 0.82rem;
+}
+.survivor-hud .sv-bind-key {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--hud-accent);
+  min-width: 3.2rem;
+  text-align: right;
 }
 .survivor-hud .sv-modal {
   pointer-events: auto;

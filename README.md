@@ -28,19 +28,25 @@ npm run preview
 
 ## Containment Protocol controls
 
-| Action | Key |
+Defaults (fully remappable in **Pause → Settings**):
+
+| Action | Default |
 |---|---|
-| Move | WASD / arrows |
-| Repulsor Burst | **Q** |
-| Afterburner (ship form) | **E** |
+| Move | WASD |
+| Repulsor Burst | **Q** (30s CD, large shockwave) |
+| Afterburner (ship form) | **E** — dual thruster exhaust damages enemies **behind** the ship |
 | Mech Overdrive | **R** (when charged) |
 | Level-up choices | **1** / **2** / **3** or click |
-| Pause | Esc |
+| Pause | Esc → Resume / Settings / Restart / Crew Select |
 | Mute | M (audio disabled in this slice) |
+
+Bindings persist in `localStorage` under `gyst.settings.v1` (KeyboardEvent.code). Duplicate keys swap. HUD ability labels and help text follow custom binds.
 
 **Energy** on the HUD is XP progress toward the next level (not a mana cost).
 
-Single arena for this experiment. Audio and permanent meta-progression are deferred.
+Repulsor is a major panic tool (~13.5 unit radius, strong knockback). Damage numbers are larger with pop/aggregation.
+
+Single arena for this experiment. Audio, extra maps, and permanent meta-progression are deferred.
 
 ## Dev fixtures
 

@@ -24,6 +24,11 @@ export class SurvivorRenderer {
   private playerAstro: ActorVis | null = null;
   private playerMech: ActorVis | null = null;
   private playerShip: THREE.Object3D | null = null;
+  private shipExhaust: THREE.Group | null = null;
+  private exhaustL: THREE.Group | null = null;
+  private exhaustR: THREE.Group | null = null;
+  private exhaustMats: THREE.MeshBasicMaterial[] = [];
+  private heroAccent = '#88e0ff';
   private enemies = new Map<number, ActorVis>();
   private boss: ActorVis | null = null;
   private projectiles = new Map<number, THREE.Mesh>();
@@ -34,6 +39,7 @@ export class SurvivorRenderer {
   private boltGeo = new THREE.SphereGeometry(0.14, 8, 8);
   private animFrame = 0;
   private readonly mats = new Map<string, THREE.MeshStandardMaterial>();
+  private readonly basicMats = new Map<string, THREE.MeshBasicMaterial>();
 
   constructor(assets: AssetLibrary) {
     this.assets = assets;
@@ -42,6 +48,7 @@ export class SurvivorRenderer {
 
   async setupPlayer(heroId: keyof typeof HEROES): Promise<void> {
     const hero = HEROES[heroId];
+    this.heroAccent = hero.accent;
     this.playerAstro = this.makeFromUrl(hero.astronaut.url, hero.astronaut.anim, 'astro');
     this.playerMech = this.makeFromUrl(hero.mech.url, hero.mech.anim, 'mech');
     const shipClone = this.assets.clone(hero.shipUrl);
@@ -55,10 +62,67 @@ export class SurvivorRenderer {
         }
       });
       this.root.add(this.playerShip);
+      this.buildShipExhaust(this.playerShip);
     }
     if (this.playerMech) this.playerMech.root.visible = false;
     if (this.playerAstro) this.root.add(this.playerAstro.root);
     if (this.playerMech) this.root.add(this.playerMech.root);
+  }
+
+  /** Dual-engine thruster flames attached behind the ship. */
+  private buildShipExhaust(ship: THREE.Object3D): void {
+    // Dispose previous
+    if (this.shipExhaust) {
+      ship.remove(this.shipExhaust);
+      this.shipExhaust = null;
+    }
+    const group = new THREE.Group();
+    group.name = 'ship-exhaust';
+    group.visible = false;
+
+    const makeEngine = (x: number): THREE.Group => {
+      const eng = new THREE.Group();
+      eng.position.set(x, 0.25, -0.55);
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: '#fff6d0',
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const midMat = new THREE.MeshBasicMaterial({
+        color: '#ff9a3c',
+        transparent: true,
+        opacity: 0.75,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const outerMat = new THREE.MeshBasicMaterial({
+        color: this.heroAccent,
+        transparent: true,
+        opacity: 0.45,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      this.exhaustMats.push(coreMat, midMat, outerMat);
+      const core = new THREE.Mesh(new THREE.ConeGeometry(0.12, 1.1, 8, 1, true), coreMat);
+      core.rotation.x = Math.PI / 2;
+      core.position.z = -0.55;
+      const mid = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.6, 10, 1, true), midMat);
+      mid.rotation.x = Math.PI / 2;
+      mid.position.z = -0.75;
+      const outer = new THREE.Mesh(new THREE.ConeGeometry(0.34, 2.2, 12, 1, true), outerMat);
+      outer.rotation.x = Math.PI / 2;
+      outer.position.z = -1.0;
+      eng.add(outer, mid, core);
+      return eng;
+    };
+
+    this.exhaustL = makeEngine(-0.28);
+    this.exhaustR = makeEngine(0.28);
+    group.add(this.exhaustL, this.exhaustR);
+    ship.add(group);
+    this.shipExhaust = group;
   }
 
   private mat(color: string): THREE.MeshStandardMaterial {
@@ -140,6 +204,21 @@ export class SurvivorRenderer {
         this.playerShip.position.set(p.x, 0.35, p.z);
         this.playerShip.rotation.y = Math.atan2(p.facingX, p.facingZ);
         this.playerShip.scale.setScalar(SURVIVOR.actorScale.ship);
+        if (this.shipExhaust) {
+          this.shipExhaust.visible = true;
+          const flicker = 0.85 + Math.sin(performance.now() * 0.045) * 0.15;
+          const pulse = 0.9 + Math.sin(performance.now() * 0.09 + 1.2) * 0.12;
+          for (const eng of [this.exhaustL, this.exhaustR]) {
+            if (!eng) continue;
+            eng.scale.set(1, 1, 0.95 + flicker * 0.35);
+            eng.position.y = 0.22 + Math.sin(performance.now() * 0.05) * 0.03;
+          }
+          for (const m of this.exhaustMats) {
+            m.opacity = Math.min(1, (m.opacity > 0.7 ? 0.9 : 0.5) * pulse);
+          }
+        }
+      } else if (this.shipExhaust) {
+        this.shipExhaust.visible = false;
       }
     }
   }
@@ -357,14 +436,40 @@ export class SurvivorRenderer {
         this.root.add(obj);
       }
       const t = 1 - e.life / e.maxLife;
-      const grow = e.kind === 'repulsor' ? 0.4 + t * 1.8 : 0.5 + t * 1.4;
-      obj.scale.setScalar(grow);
+      // Repulsor: expand from ~0.15 → 1.0 of true radius so ring matches gameplay edge
+      if (e.kind === 'repulsor') {
+        const grow = 0.12 + t * 0.95;
+        obj.scale.setScalar(grow);
+      } else {
+        obj.scale.setScalar(0.5 + t * 1.4);
+      }
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
-          c.material.opacity = Math.max(0, 0.75 * (1 - t));
+          // Don't mutate shared materials' base opacity destructively every frame —
+          // use a per-mesh userData factor via material opacity clone when needed
+          if (!c.userData.baseOpacity) c.userData.baseOpacity = c.material.opacity;
+          const base = c.userData.baseOpacity as number;
+          c.material.opacity = Math.max(0, base * (1 - t * 0.95));
         }
       });
     }
+  }
+
+  private basic(color: string, opacity: number, additive = false): THREE.MeshBasicMaterial {
+    const key = `${color}:${opacity}:${additive ? 1 : 0}`;
+    let m = this.basicMats.get(key);
+    if (!m) {
+      m = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      });
+      this.basicMats.set(key, m);
+    }
+    return m;
   }
 
   private createEffect(e: SurvivorState['effects'][0]): THREE.Object3D {
@@ -374,7 +479,7 @@ export class SurvivorRenderer {
       const len = e.length ?? 10;
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(e.width ?? 0.4, 0.15, len),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }),
+        this.basic(color, 0.85),
       );
       mesh.position.set((e.facingX ?? 0) * len * 0.5, 1.1, (e.facingZ ?? 1) * len * 0.5);
       mesh.rotation.y = Math.atan2(e.facingX ?? 0, e.facingZ ?? 1);
@@ -383,32 +488,41 @@ export class SurvivorRenderer {
       return g;
     }
     const r = e.radius ?? e.scale ?? 1;
+    if (e.kind === 'repulsor') {
+      // Expanding multi-ring shockwave sized to true radius
+      const outer = new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.82, r, 64),
+        this.basic(color, 0.85, true),
+      );
+      outer.rotation.x = -Math.PI / 2;
+      const mid = new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.45, r * 0.72, 48),
+        this.basic('#ffffff', 0.35, true),
+      );
+      mid.rotation.x = -Math.PI / 2;
+      mid.position.y = 0.02;
+      const floor = new THREE.Mesh(
+        new THREE.CircleGeometry(r * 0.95, 48),
+        this.basic(color, 0.14, true),
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = -0.02;
+      // Vertical cylindrical shock suggestion
+      const shell = new THREE.Mesh(
+        new THREE.CylinderGeometry(r * 0.92, r, 0.55, 40, 1, true),
+        this.basic(color, 0.18, true),
+      );
+      shell.position.y = 0.3;
+      g.add(floor, mid, outer, shell);
+      g.position.set(e.x, 0.08, e.z);
+      return g;
+    }
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(e.kind === 'repulsor' ? r * 0.15 : r * 0.2, r, e.kind === 'repulsor' ? 40 : 28),
-      new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: e.kind === 'repulsor' ? 0.8 : 0.65,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
+      new THREE.RingGeometry(r * 0.2, r, 28),
+      this.basic(color, 0.65),
     );
     ring.rotation.x = -Math.PI / 2;
     g.add(ring);
-    if (e.kind === 'repulsor') {
-      const disc = new THREE.Mesh(
-        new THREE.CircleGeometry(r * 0.55, 32),
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.22,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      );
-      disc.rotation.x = -Math.PI / 2;
-      g.add(disc);
-    }
     g.position.set(e.x, 0.08, e.z);
     return g;
   }
@@ -455,9 +569,16 @@ export class SurvivorRenderer {
     this.boltGeo.dispose();
     for (const m of this.mats.values()) m.dispose();
     this.mats.clear();
+    for (const m of this.basicMats.values()) m.dispose();
+    this.basicMats.clear();
+    for (const m of this.exhaustMats) m.dispose();
+    this.exhaustMats = [];
     this.playerAstro = null;
     this.playerMech = null;
     this.playerShip = null;
+    this.shipExhaust = null;
+    this.exhaustL = null;
+    this.exhaustR = null;
     this.boss = null;
   }
 }

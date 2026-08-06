@@ -172,16 +172,20 @@ export interface SurvivorMiniboss {
 }
 
 /** Presentation-only damage event (does not affect sim authority). */
+export type DamageNumberKind = 'enemy' | 'player' | 'boss' | 'large' | 'ability' | 'kill';
+
 export interface DamageEvent {
   id: number;
   x: number;
   z: number;
   amount: number;
-  kind: 'enemy' | 'player' | 'boss' | 'large';
+  kind: DamageNumberKind;
   life: number;
   maxLife: number;
   /** Aggregate key while buffering. */
   targetKey: string;
+  /** Presentation scale pop intensity 0–1 */
+  pop: number;
 }
 
 export interface SurvivorState {
@@ -207,6 +211,7 @@ export interface SurvivorState {
     shipCd: number;
     wakeTimer: number;
     bodyHitCd: number;
+    exhaustTickCd: number;
     invuln: number;
     hitFlash: number;
     alive: boolean;
@@ -223,7 +228,10 @@ export interface SurvivorState {
   miniboss: SurvivorMiniboss;
   damageEvents: DamageEvent[];
   /** Pending damage aggregation buffer. */
-  damageAgg: Map<string, { amount: number; x: number; z: number; kind: DamageEvent['kind']; timer: number }>;
+  damageAgg: Map<
+    string,
+    { amount: number; x: number; z: number; kind: DamageEvent['kind']; timer: number; pop: number }
+  >;
   level: number;
   xp: number;
   xpNext: number;
@@ -316,6 +324,7 @@ export function createSurvivorState(
       shipCd: 0,
       wakeTimer: 0,
       bodyHitCd: 0,
+      exhaustTickCd: 0,
       invuln: 1.2,
       hitFlash: 0,
       alive: true,

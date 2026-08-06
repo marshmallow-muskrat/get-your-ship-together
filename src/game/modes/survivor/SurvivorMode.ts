@@ -6,10 +6,26 @@ import { AssetLibrary } from '../../assets/AssetLibrary';
 import { AudioBus } from '../../audio/AudioBus';
 import { SURVIVOR, type SurvivorFixture } from './survivorContent';
 import { createSurvivorState, type SurvivorState } from './survivorState';
-import { EMPTY_SURVIVOR_INPUT, stepSurvivor, surroundPlayer, type SurvivorInput } from './survivorSim';
+import {
+  EMPTY_SURVIVOR_INPUT,
+  clearShipHazards,
+  stepSurvivor,
+  surroundPlayer,
+  type SurvivorInput,
+} from './survivorSim';
 import { SurvivorArena } from './survivorArena';
 import { SurvivorRenderer } from './survivorRender';
 import { SurvivorHud } from './survivorHud';
+import {
+  assignKeybind,
+  findActionForCode,
+  formatKeyCode,
+  loadSettings,
+  resetKeybinds,
+  saveSettings,
+  type ActionId,
+  type KeybindMap,
+} from './survivorKeybinds';
 
 export type SurvivorHandlers = {
   onReturnToCrew: () => void;
@@ -40,29 +56,87 @@ export class SurvivorMode {
   private lastTime = 0;
   private raf = 0;
   private disposed = false;
-  private keys = new Set<string>();
+  /** Physical key codes currently held */
+  private codesDown = new Set<string>();
   private edge = { mech: false, ship: false, repulsor: false, pause: false, mute: false };
   private choiceIndex: number | null = null;
   private frameSamples: number[] = [];
   private showMetrics = false;
 
+  private keybinds: KeybindMap = loadSettings().keybinds;
+  private settingsOpen = false;
+  private rebindingAction: ActionId | null = null;
+  /** Block gameplay input while rebinding or settings open */
+  private inputBlocked = false;
+
   private onResize = (): void => this.resize();
+  private resolveCode(e: KeyboardEvent): string {
+    if (e.code && e.code !== 'Unidentified') return e.code;
+    const k = e.key;
+    if (k === 'Escape') return 'Escape';
+    if (k === ' ') return 'Space';
+    if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') return k;
+    if (k.length === 1 && /[a-zA-Z]/.test(k)) return `Key${k.toUpperCase()}`;
+    if (k.length === 1 && /[0-9]/.test(k)) return `Digit${k}`;
+    return e.code || k;
+  }
+
   private onKeyDown = (e: KeyboardEvent): void => {
-    const k = e.key.toLowerCase();
-    if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'escape'].includes(k)) e.preventDefault();
-    if (!e.repeat) {
-      if (k === 'r') this.edge.mech = true;
-      if (k === 'e') this.edge.ship = true;
-      if (k === 'q') this.edge.repulsor = true;
-      if (k === 'escape') this.edge.pause = true;
-      if (k === 'm') this.edge.mute = true;
-      if (k === '1' || k === '2' || k === '3') this.choiceIndex = Number(k) - 1;
-      if (k === 'f3') this.showMetrics = !this.showMetrics;
+    const code = this.resolveCode(e);
+    if (this.rebindingAction) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (code === 'Escape' && this.rebindingAction !== 'pause') {
+        this.rebindingAction = null;
+        this.hud?.setRebinding(null);
+        return;
+      }
+      // Capture new bind (swap on conflict)
+      this.keybinds = assignKeybind(this.keybinds, this.rebindingAction, code);
+      saveSettings({ version: 1, keybinds: this.keybinds });
+      this.rebindingAction = null;
+      this.hud?.setRebinding(null);
+      this.hud?.refreshKeybindLabels(this.keybinds);
+      return;
     }
-    this.keys.add(k);
+
+    if (this.settingsOpen) {
+      // Escape closes settings → stay paused
+      if (code === this.keybinds.pause || code === 'Escape') {
+        e.preventDefault();
+        this.closeSettings();
+      }
+      return;
+    }
+
+    // Prevent default for movement / pause
+    if (
+      code === this.keybinds.moveUp ||
+      code === this.keybinds.moveDown ||
+      code === this.keybinds.moveLeft ||
+      code === this.keybinds.moveRight ||
+      code === this.keybinds.pause ||
+      code === 'Space'
+    ) {
+      e.preventDefault();
+    }
+
+    if (!e.repeat) {
+      const action = findActionForCode(this.keybinds, code);
+      if (action === 'repulsor') this.edge.repulsor = true;
+      if (action === 'ship') this.edge.ship = true;
+      if (action === 'mech') this.edge.mech = true;
+      if (action === 'pause') this.edge.pause = true;
+      if (action === 'mute') this.edge.mute = true;
+      if (action === 'choice1') this.choiceIndex = 0;
+      if (action === 'choice2') this.choiceIndex = 1;
+      if (action === 'choice3') this.choiceIndex = 2;
+      if (code === 'F3') this.showMetrics = !this.showMetrics;
+    }
+    this.codesDown.add(code);
   };
   private onKeyUp = (e: KeyboardEvent): void => {
-    this.keys.delete(e.key.toLowerCase());
+    this.codesDown.delete(this.resolveCode(e));
   };
 
   constructor(opts: {
@@ -81,6 +155,7 @@ export class SurvivorMode {
 
   async start(): Promise<void> {
     if (this.disposed) return;
+    this.keybinds = loadSettings().keybinds;
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -124,13 +199,27 @@ export class SurvivorMode {
     this.applyFixtureSpawn(this.state);
 
     this.hud = new SurvivorHud(this.host, {
-      onRestart: () => this.restart(),
-      onCrew: () => this.handlers.onReturnToCrew(),
+      onRestart: () => this.confirmRestart(),
+      onCrew: () => this.confirmCrew(),
       onChoice: (i) => {
         this.choiceIndex = i;
       },
+      onResume: () => this.resumeFromPause(),
+      onOpenSettings: () => this.openSettings(),
+      onCloseSettings: () => this.closeSettings(),
+      onStartRebind: (action) => {
+        this.rebindingAction = action;
+        this.hud?.setRebinding(action);
+      },
+      onResetKeybinds: () => {
+        this.keybinds = resetKeybinds();
+        saveSettings({ version: 1, keybinds: this.keybinds });
+        this.hud?.refreshKeybindLabels(this.keybinds);
+      },
+      getKeybinds: () => this.keybinds,
       projectWorld: (x, z) => this.projectToScreen(x, z),
     });
+    this.hud.refreshKeybindLabels(this.keybinds);
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
@@ -142,12 +231,60 @@ export class SurvivorMode {
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
+  private confirmRestart(): void {
+    if (!this.state) return;
+    if (this.state.phase === 'playing' || this.state.phase === 'paused' || this.state.phase === 'levelup') {
+      if (!window.confirm('Restart this run? Progress will be lost.')) return;
+    }
+    this.restart();
+  }
+
+  private confirmCrew(): void {
+    if (this.state && (this.state.phase === 'playing' || this.state.phase === 'paused' || this.state.phase === 'levelup')) {
+      if (!window.confirm('Return to crew select? Progress will be lost.')) return;
+    }
+    this.handlers.onReturnToCrew();
+  }
+
+  private openSettings(): void {
+    if (!this.state) return;
+    if (this.state.phase === 'levelup') return; // don't cover level-up
+    if (this.state.phase === 'playing') {
+      this.state.phase = 'paused';
+    }
+    this.settingsOpen = true;
+    this.inputBlocked = true;
+    this.rebindingAction = null;
+    this.hud?.setSettingsOpen(true);
+    this.hud?.refreshKeybindLabels(this.keybinds);
+  }
+
+  private closeSettings(): void {
+    this.settingsOpen = false;
+    this.rebindingAction = null;
+    this.inputBlocked = false;
+    this.hud?.setSettingsOpen(false);
+    this.hud?.setRebinding(null);
+    // remain paused
+  }
+
+  private resumeFromPause(): void {
+    if (!this.state) return;
+    this.settingsOpen = false;
+    this.rebindingAction = null;
+    this.inputBlocked = false;
+    this.hud?.setSettingsOpen(false);
+    if (this.state.phase === 'paused') this.state.phase = 'playing';
+  }
+
   private applyFixtureSpawn(state: SurvivorState): void {
     if (this.fixture === 'survivor-levelup') {
       state.xp = state.xpNext;
     } else if (this.fixture === 'survivor-repulsor') {
       state.player.repulsorCd = 0;
-      surroundPlayer(state, 14, 3.4);
+      // Place enemies across new large radius
+      surroundPlayer(state, 10, 5);
+      surroundPlayer(state, 8, 11);
     } else if (this.fixture === 'survivor-ship') {
       state.player.shipCd = 0;
       surroundPlayer(state, 10, 4.5);
@@ -171,11 +308,16 @@ export class SurvivorMode {
   }
 
   private restart(): void {
+    if (this.state) clearShipHazards(this.state);
     this.state = createSurvivorState(this.heroId, this.fixture);
     this.applyFixtureSpawn(this.state);
     this.accumulator = 0;
     this.choiceIndex = null;
     this.edge = { mech: false, ship: false, repulsor: false, pause: false, mute: false };
+    this.settingsOpen = false;
+    this.rebindingAction = null;
+    this.inputBlocked = false;
+    this.hud?.setSettingsOpen(false);
   }
 
   private resize(): void {
@@ -189,12 +331,16 @@ export class SurvivorMode {
   }
 
   private sampleInput(): SurvivorInput {
+    if (this.inputBlocked || this.settingsOpen) {
+      return { ...EMPTY_SURVIVOR_INPUT };
+    }
+
     let sx = 0;
     let sy = 0;
-    if (this.keys.has('a') || this.keys.has('arrowleft')) sx -= 1;
-    if (this.keys.has('d') || this.keys.has('arrowright')) sx += 1;
-    if (this.keys.has('w') || this.keys.has('arrowup')) sy += 1;
-    if (this.keys.has('s') || this.keys.has('arrowdown')) sy -= 1;
+    if (this.codesDown.has(this.keybinds.moveLeft)) sx -= 1;
+    if (this.codesDown.has(this.keybinds.moveRight)) sx += 1;
+    if (this.codesDown.has(this.keybinds.moveUp)) sy += 1;
+    if (this.codesDown.has(this.keybinds.moveDown)) sy -= 1;
 
     const frame: SurvivorInput = {
       ...EMPTY_SURVIVOR_INPUT,
@@ -228,11 +374,22 @@ export class SurvivorMode {
     this.state.metrics.fps = avg > 0 ? 1 / avg : 60;
 
     const input = this.sampleInput();
-    // While level-up modal is open, do not consume Q/E/R edges into the sim
+    // While level-up modal is open, block abilities/pause so edges don't leak
     if (this.state.phase === 'levelup') {
       input.mechPressed = false;
       input.shipPressed = false;
       input.repulsorPressed = false;
+      input.pausePressed = false;
+      // keep choiceIndex
+    }
+    // While settings open, never step abilities
+    if (this.settingsOpen) {
+      input.mechPressed = false;
+      input.shipPressed = false;
+      input.repulsorPressed = false;
+      input.pausePressed = false;
+      input.moveX = 0;
+      input.moveY = 0;
     }
 
     this.accumulator += rawDt;
@@ -258,7 +415,11 @@ export class SurvivorMode {
 
     this.actors?.sync(this.state, rawDt);
     SurvivorArena.followPlayer(this.camera, this.state.player.x, this.state.player.z);
-    this.hud?.publish(this.state, this.showMetrics || this.fixture === 'survivor-horde');
+    this.hud?.publish(this.state, this.showMetrics || this.fixture === 'survivor-horde', {
+      settingsOpen: this.settingsOpen,
+      rebinding: this.rebindingAction,
+      keybinds: this.keybinds,
+    });
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -282,3 +443,6 @@ export class SurvivorMode {
     this.state = null;
   }
 }
+
+// re-export for tests/docs
+export { formatKeyCode };

@@ -1,6 +1,19 @@
 import { HEROES } from '../../content/heroes';
 import { SURVIVOR, WEAPONS } from './survivorContent';
 import type { SurvivorState } from './survivorState';
+import {
+  ACTION_LABELS,
+  REBINDABLE_ACTIONS,
+  formatKeyCode,
+  type ActionId,
+  type KeybindMap,
+} from './survivorKeybinds';
+
+export type HudPublishOpts = {
+  settingsOpen: boolean;
+  rebinding: ActionId | null;
+  keybinds: KeybindMap;
+};
 
 export class SurvivorHud {
   private root: HTMLElement;
@@ -8,6 +21,12 @@ export class SurvivorHud {
   private onRestart: () => void;
   private onCrew: () => void;
   private onChoice: (i: number) => void;
+  private onResume: () => void;
+  private onOpenSettings: () => void;
+  private onCloseSettings: () => void;
+  private onStartRebind: (a: ActionId) => void;
+  private onResetKeybinds: () => void;
+  private getKeybinds: () => KeybindMap;
   private projectWorld: (x: number, z: number) => { x: number; y: number } | null;
   private lastChoicesKey = '';
   private helpTimer = 0;
@@ -15,6 +34,9 @@ export class SurvivorHud {
   private startedAt = performance.now();
   private dmgPool: HTMLElement[] = [];
   private lastWeaponsKey = '';
+  private lastBindKey = '';
+  private settingsOpen = false;
+  private rebinding: ActionId | null = null;
 
   constructor(
     host: HTMLElement,
@@ -22,12 +44,24 @@ export class SurvivorHud {
       onRestart: () => void;
       onCrew: () => void;
       onChoice: (i: number) => void;
+      onResume: () => void;
+      onOpenSettings: () => void;
+      onCloseSettings: () => void;
+      onStartRebind: (a: ActionId) => void;
+      onResetKeybinds: () => void;
+      getKeybinds: () => KeybindMap;
       projectWorld: (x: number, z: number) => { x: number; y: number } | null;
     },
   ) {
     this.onRestart = handlers.onRestart;
     this.onCrew = handlers.onCrew;
     this.onChoice = handlers.onChoice;
+    this.onResume = handlers.onResume;
+    this.onOpenSettings = handlers.onOpenSettings;
+    this.onCloseSettings = handlers.onCloseSettings;
+    this.onStartRebind = handlers.onStartRebind;
+    this.onResetKeybinds = handlers.onResetKeybinds;
+    this.getKeybinds = handlers.getKeybinds;
     this.projectWorld = handlers.projectWorld;
     this.root = document.createElement('section');
     this.root.className = 'survivor-hud';
@@ -73,23 +107,20 @@ export class SurvivorHud {
           </div>
         </div>
         <div class="sv-abilities">
-          <button type="button" class="sv-ability" id="sv-ab-q" data-key="Q" disabled tabindex="-1">
-            <span class="sv-ab-key">Q</span>
+          <button type="button" class="sv-ability" id="sv-ab-q" disabled tabindex="-1">
+            <span class="sv-ab-key" id="sv-key-repulsor">Q</span>
             <span class="sv-ab-name">REPULSE</span>
             <span class="sv-ab-state" id="sv-q-state">READY</span>
-            <span class="sv-ab-cd" id="sv-q-cd"></span>
           </button>
-          <button type="button" class="sv-ability" id="sv-ab-e" data-key="E" disabled tabindex="-1">
-            <span class="sv-ab-key">E</span>
+          <button type="button" class="sv-ability" id="sv-ab-e" disabled tabindex="-1">
+            <span class="sv-ab-key" id="sv-key-ship">E</span>
             <span class="sv-ab-name">SHIP</span>
             <span class="sv-ab-state" id="sv-e-state">READY</span>
-            <span class="sv-ab-cd" id="sv-e-cd"></span>
           </button>
-          <button type="button" class="sv-ability ultimate" id="sv-ab-r" data-key="R" disabled tabindex="-1">
-            <span class="sv-ab-key">R</span>
+          <button type="button" class="sv-ability ultimate" id="sv-ab-r" disabled tabindex="-1">
+            <span class="sv-ab-key" id="sv-key-mech">R</span>
             <span class="sv-ab-name">MECH CORE</span>
             <span class="sv-ab-state" id="sv-r-state">0%</span>
-            <span class="sv-ab-cd" id="sv-r-cd"></span>
           </button>
         </div>
         <div id="sv-weapons" class="sv-weapons"></div>
@@ -97,6 +128,29 @@ export class SurvivorHud {
 
       <div id="sv-metrics" class="sv-metrics hidden"></div>
       <div id="sv-dmg" class="sv-dmg-layer"></div>
+
+      <div id="sv-pause" class="sv-modal sv-pause hidden">
+        <p class="eyebrow">SYSTEM HOLD</p>
+        <h2>Paused</h2>
+        <div class="sv-end-actions sv-pause-actions">
+          <button type="button" id="sv-resume" class="sv-btn">RESUME</button>
+          <button type="button" id="sv-settings" class="sv-btn">SETTINGS</button>
+          <button type="button" id="sv-pause-restart" class="sv-btn ghost">RESTART RUN</button>
+          <button type="button" id="sv-pause-crew" class="sv-btn ghost">CREW SELECT</button>
+        </div>
+      </div>
+
+      <div id="sv-settings-modal" class="sv-modal sv-settings hidden">
+        <p class="eyebrow">CONFIGURATION</p>
+        <h2>Controls</h2>
+        <p class="sv-settings-hint" id="sv-rebind-hint">Click a row, then press a key. Escape cancels capture.</p>
+        <div id="sv-bind-list" class="sv-bind-list"></div>
+        <div class="sv-end-actions">
+          <button type="button" id="sv-reset-binds" class="sv-btn ghost">RESET TO DEFAULTS</button>
+          <button type="button" id="sv-close-settings" class="sv-btn">BACK</button>
+        </div>
+      </div>
+
       <div id="sv-levelup" class="sv-modal hidden">
         <p class="eyebrow">SYSTEM UPLINK</p>
         <h2>Choose Upgrade</h2>
@@ -112,18 +166,105 @@ export class SurvivorHud {
         </div>
       </div>
       <div id="sv-help" class="sv-help">
-        <span><kbd>WASD</kbd> move · auto fire</span>
-        <span><kbd>Q</kbd> Repulsor · <kbd>E</kbd> Ship · <kbd>R</kbd> Mech · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> upgrades</span>
-        <span><kbd>Esc</kbd> pause</span>
+        <span id="sv-help-move">WASD move · auto fire</span>
+        <span id="sv-help-abil">abilities</span>
+        <span id="sv-help-pause">pause</span>
       </div>
     `;
     host.appendChild(this.root);
     this.dmgLayer = this.root.querySelector('#sv-dmg') as HTMLElement;
+
     this.root.querySelector('#sv-restart')?.addEventListener('click', this.onRestart);
     this.root.querySelector('#sv-crew')?.addEventListener('click', this.onCrew);
+    this.root.querySelector('#sv-resume')?.addEventListener('click', this.onResume);
+    this.root.querySelector('#sv-settings')?.addEventListener('click', this.onOpenSettings);
+    this.root.querySelector('#sv-pause-restart')?.addEventListener('click', this.onRestart);
+    this.root.querySelector('#sv-pause-crew')?.addEventListener('click', this.onCrew);
+    this.root.querySelector('#sv-close-settings')?.addEventListener('click', this.onCloseSettings);
+    this.root.querySelector('#sv-reset-binds')?.addEventListener('click', this.onResetKeybinds);
+
+    this.buildBindList();
   }
 
-  publish(state: SurvivorState, showMetrics = false): void {
+  setSettingsOpen(open: boolean): void {
+    this.settingsOpen = open;
+    this.root.querySelector('#sv-settings-modal')?.classList.toggle('hidden', !open);
+  }
+
+  setRebinding(action: ActionId | null): void {
+    this.rebinding = action;
+    const hint = this.root.querySelector('#sv-rebind-hint');
+    if (hint) {
+      hint.textContent = action
+        ? `Press a key for ${ACTION_LABELS[action]}… (Esc cancels)`
+        : 'Click a row, then press a key. Escape cancels capture. Conflicts swap.';
+    }
+    this.root.querySelectorAll('.sv-bind-row').forEach((row) => {
+      row.classList.toggle('capturing', row.getAttribute('data-action') === action);
+    });
+  }
+
+  refreshKeybindLabels(binds: KeybindMap): void {
+    const set = (id: string, text: string) => {
+      const el = this.root.querySelector(`#${id}`);
+      if (el) el.textContent = text;
+    };
+    set('sv-key-repulsor', formatKeyCode(binds.repulsor));
+    set('sv-key-ship', formatKeyCode(binds.ship));
+    set('sv-key-mech', formatKeyCode(binds.mech));
+    set(
+      'sv-help-move',
+      `${formatKeyCode(binds.moveUp)}${formatKeyCode(binds.moveLeft)}${formatKeyCode(binds.moveDown)}${formatKeyCode(binds.moveRight)} move · auto fire`,
+    );
+    set(
+      'sv-help-abil',
+      `<${formatKeyCode(binds.repulsor)}> Repulsor · <${formatKeyCode(binds.ship)}> Ship · <${formatKeyCode(binds.mech)}> Mech · ${formatKeyCode(binds.choice1)}/${formatKeyCode(binds.choice2)}/${formatKeyCode(binds.choice3)} upgrades`.replace(
+        /[<>]/g,
+        '',
+      ),
+    );
+    // rebuild help with kbd tags properly
+    const helpAbil = this.root.querySelector('#sv-help-abil');
+    if (helpAbil) {
+      helpAbil.innerHTML = `<kbd>${formatKeyCode(binds.repulsor)}</kbd> Repulsor · <kbd>${formatKeyCode(binds.ship)}</kbd> Ship · <kbd>${formatKeyCode(binds.mech)}</kbd> Mech · <kbd>${formatKeyCode(binds.choice1)}</kbd><kbd>${formatKeyCode(binds.choice2)}</kbd><kbd>${formatKeyCode(binds.choice3)}</kbd> upgrades`;
+    }
+    const helpPause = this.root.querySelector('#sv-help-pause');
+    if (helpPause) {
+      helpPause.innerHTML = `<kbd>${formatKeyCode(binds.pause)}</kbd> pause · Settings in pause menu`;
+    }
+    this.buildBindList();
+    this.lastBindKey = JSON.stringify(binds);
+  }
+
+  private buildBindList(): void {
+    const list = this.root.querySelector('#sv-bind-list');
+    if (!list) return;
+    const binds = this.getKeybinds();
+    list.innerHTML = REBINDABLE_ACTIONS.map(
+      (a) =>
+        `<button type="button" class="sv-bind-row${this.rebinding === a ? ' capturing' : ''}" data-action="${a}">
+          <span class="sv-bind-label">${ACTION_LABELS[a]}</span>
+          <span class="sv-bind-key">${formatKeyCode(binds[a])}</span>
+        </button>`,
+    ).join('');
+    list.querySelectorAll<HTMLButtonElement>('.sv-bind-row').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action as ActionId;
+        this.onStartRebind(action);
+      });
+    });
+  }
+
+  publish(state: SurvivorState, showMetrics = false, opts?: HudPublishOpts): void {
+    if (opts) {
+      this.settingsOpen = opts.settingsOpen;
+      this.rebinding = opts.rebinding;
+      const bk = JSON.stringify(opts.keybinds);
+      if (bk !== this.lastBindKey) {
+        this.refreshKeybindLabels(opts.keybinds);
+      }
+    }
+    const binds = opts?.keybinds ?? this.getKeybinds();
     const hero = HEROES[state.heroId];
     this.root.style.setProperty('--hud-accent', state.accent);
     const set = (id: string, text: string) => {
@@ -157,19 +298,26 @@ export class SurvivorHud {
     this.publishAbilities(state);
     this.publishBossBars(state);
     this.publishWeapons(state);
+    this.publishPause(state);
+    this.root.querySelector('#sv-settings-modal')?.classList.toggle('hidden', !this.settingsOpen);
 
     const metrics = this.root.querySelector('#sv-metrics');
     if (metrics) {
       metrics.classList.toggle('hidden', !showMetrics);
       if (showMetrics) {
-        metrics.textContent = `FPS ${state.metrics.fps.toFixed(0)} · ${state.metrics.frameMs.toFixed(1)}ms · E ${state.metrics.enemies} · P ${state.metrics.projectiles} · X ${state.metrics.pickups}`;
+        metrics.textContent = `FPS ${state.metrics.fps.toFixed(0)} · ${state.metrics.frameMs.toFixed(1)}ms · E ${state.metrics.enemies} · P ${state.metrics.projectiles}`;
       }
     }
 
-    this.publishLevelUp(state);
+    this.publishLevelUp(state, binds);
     this.publishEnd(state);
     this.publishDamage(state);
     this.publishHelp();
+  }
+
+  private formatCd(seconds: number): string {
+    if (seconds > 10) return `${Math.ceil(seconds)}s`;
+    return `${seconds.toFixed(1)}s`;
   }
 
   private publishAbilities(state: SurvivorState): void {
@@ -181,41 +329,41 @@ export class SurvivorHud {
     const eState = this.root.querySelector('#sv-e-state');
     const rState = this.root.querySelector('#sv-r-state');
 
-    // Q Repulsor
     const qReady = p.repulsorCd <= 0 && p.form !== 'ship' && p.alive;
     const qBlocked = p.form === 'ship';
     qEl?.classList.toggle('ready', qReady);
+    qEl?.classList.toggle('pulse-ready', qReady);
     qEl?.classList.toggle('blocked', qBlocked);
     qEl?.classList.toggle('cooling', p.repulsorCd > 0);
     if (qState) {
       if (qBlocked) qState.textContent = 'SHIP';
-      else if (p.repulsorCd > 0) qState.textContent = `${p.repulsorCd.toFixed(1)}s`;
+      else if (p.repulsorCd > 0) qState.textContent = this.formatCd(p.repulsorCd);
       else qState.textContent = 'READY';
     }
     this.setCooldownOverlay(qEl, p.repulsorCd, SURVIVOR.repulsor.cooldown);
 
-    // E Ship
     const eReady = p.shipCd <= 0 && p.form === 'astronaut' && p.alive;
     const eActive = p.form === 'ship';
     const eBlocked = p.form === 'mech';
     eEl?.classList.toggle('ready', eReady);
+    eEl?.classList.toggle('pulse-ready', eReady);
     eEl?.classList.toggle('active', eActive);
     eEl?.classList.toggle('blocked', eBlocked);
     eEl?.classList.toggle('cooling', p.shipCd > 0 && !eActive);
     if (eState) {
       if (eActive) eState.textContent = `${Math.max(0, p.shipDuration).toFixed(1)}s`;
       else if (eBlocked) eState.textContent = 'MECH';
-      else if (p.shipCd > 0) eState.textContent = `${p.shipCd.toFixed(1)}s`;
+      else if (p.shipCd > 0) eState.textContent = this.formatCd(p.shipCd);
       else eState.textContent = 'READY';
     }
     if (eActive) this.setCooldownOverlay(eEl, 0, 1);
     else this.setCooldownOverlay(eEl, p.shipCd, SURVIVOR.ship.cooldown);
 
-    // R Mech ultimate
     const rActive = p.form === 'mech';
     const rReady = p.mechCharge >= 1 && p.form === 'astronaut' && p.alive;
     const rBlocked = p.form === 'ship';
     rEl?.classList.toggle('ready', rReady);
+    rEl?.classList.toggle('pulse-ready', rReady);
     rEl?.classList.toggle('active', rActive);
     rEl?.classList.toggle('blocked', rBlocked);
     if (rState) {
@@ -225,10 +373,8 @@ export class SurvivorHud {
       else rState.textContent = `${Math.floor(p.mechCharge * 100)}%`;
     }
     if (rActive) {
-      const maxDur = SURVIVOR.mech.duration;
-      this.setCooldownOverlay(rEl, maxDur - p.mechDuration, maxDur);
+      this.setCooldownOverlay(rEl, SURVIVOR.mech.duration - p.mechDuration, SURVIVOR.mech.duration);
     } else {
-      // Invert: show unfilled charge as overlay darkening
       this.setChargeOverlay(rEl, p.mechCharge);
     }
   }
@@ -294,22 +440,34 @@ export class SurvivorHud {
       .join('');
   }
 
-  private publishLevelUp(state: SurvivorState): void {
+  private publishPause(state: SurvivorState): void {
+    const pause = this.root.querySelector('#sv-pause');
+    if (!pause) return;
+    const show = state.phase === 'paused' && !this.settingsOpen;
+    pause.classList.toggle('hidden', !show);
+  }
+
+  private publishLevelUp(state: SurvivorState, binds: KeybindMap): void {
     const levelup = this.root.querySelector('#sv-levelup');
     if (!levelup) return;
     const open = state.phase === 'levelup';
     levelup.classList.toggle('hidden', !open);
     if (open) {
-      const key = state.choices.map((c) => c.id).join('|');
+      const key = state.choices.map((c) => c.id).join('|') + formatKeyCode(binds.choice1);
       if (key !== this.lastChoicesKey) {
         this.lastChoicesKey = key;
         const box = this.root.querySelector('#sv-choices');
         if (box) {
+          const labels = [
+            formatKeyCode(binds.choice1),
+            formatKeyCode(binds.choice2),
+            formatKeyCode(binds.choice3),
+          ];
           box.innerHTML = state.choices
             .map(
               (c, i) =>
                 `<button type="button" class="sv-choice" data-i="${i}">
-                  <span class="eyebrow">${c.kind === 'passive' ? 'PASSIVE' : c.kind === 'new-weapon' ? 'NEW WEAPON' : 'WEAPON'} · ${i + 1}</span>
+                  <span class="eyebrow">${c.kind === 'passive' ? 'PASSIVE' : c.kind === 'new-weapon' ? 'NEW WEAPON' : 'WEAPON'} · ${labels[i] ?? i + 1}</span>
                   <strong>${c.title}</strong>
                   <small>${c.body}</small>
                 </button>`,
@@ -346,7 +504,6 @@ export class SurvivorHud {
   }
 
   private publishDamage(state: SurvivorState): void {
-    // Reuse pooled nodes; clear inactive
     while (this.dmgPool.length < state.damageEvents.length) {
       const n = document.createElement('span');
       n.className = 'sv-dmg';
@@ -366,11 +523,14 @@ export class SurvivorHud {
         continue;
       }
       const t = 1 - ev.life / ev.maxLife;
+      // scale pop: start large, settle
+      const pop = 1 + (ev.pop || 0.5) * 0.4 * Math.exp(-t * 8);
+      const drift = t * 42 + (ev.kind === 'kill' ? t * 12 : 0);
       node.classList.remove('hidden');
       node.className = `sv-dmg sv-dmg-${ev.kind}`;
       node.textContent = String(ev.amount);
-      node.style.transform = `translate(-50%, -50%) translate(${scr.x + Math.sin(ev.id) * 8}px, ${scr.y - t * 36}px)`;
-      node.style.opacity = String(Math.max(0, 1 - t * 1.1));
+      node.style.transform = `translate(-50%, -50%) translate(${scr.x + Math.sin(ev.id * 1.7) * 10}px, ${scr.y - drift}px) scale(${pop})`;
+      node.style.opacity = String(Math.max(0, 1 - t * 1.05));
     }
   }
 
@@ -378,15 +538,12 @@ export class SurvivorHud {
     if (this.helpHidden) return;
     this.helpTimer = (performance.now() - this.startedAt) / 1000;
     if (this.helpTimer > 7) {
-      const help = this.root.querySelector('#sv-help');
-      help?.classList.add('fade');
+      this.root.querySelector('#sv-help')?.classList.add('fade');
       this.helpHidden = true;
     }
   }
 
   dispose(): void {
-    this.root.querySelector('#sv-restart')?.removeEventListener('click', this.onRestart);
-    this.root.querySelector('#sv-crew')?.removeEventListener('click', this.onCrew);
     this.root.remove();
   }
 }

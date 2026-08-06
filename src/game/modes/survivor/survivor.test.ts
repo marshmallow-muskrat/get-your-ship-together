@@ -3,6 +3,8 @@ import { createSurvivorState } from './survivorState';
 import {
   EMPTY_SURVIVOR_INPUT,
   applyChoice,
+  applyShipExhaust,
+  clearShipHazards,
   generateChoices,
   stepSurvivor,
   tryMech,
@@ -20,6 +22,16 @@ import {
   spawnPressure,
   xpForLevel,
 } from './survivorContent';
+import {
+  DEFAULT_KEYBINDS,
+  SETTINGS_STORAGE_KEY,
+  assignKeybind,
+  formatKeyCode,
+  loadSettings,
+  normalizeKeybinds,
+  resetKeybinds,
+  saveSettings,
+} from './survivorKeybinds';
 
 describe('survivor content', () => {
   it('xp thresholds increase', () => {
@@ -186,43 +198,185 @@ describe('survivor simulation', () => {
 });
 
 describe('repulsor burst', () => {
-  it('activates when ready, goes on cooldown, pushes normals more than elites', () => {
+  it('has tripled base radius, push, and 30s cooldown', () => {
+    expect(SURVIVOR.repulsor.radius).toBeCloseTo(13.5, 5);
+    expect(SURVIVOR.repulsor.push).toBeCloseTo(12, 5);
+    expect(SURVIVOR.repulsor.cooldown).toBe(30);
+  });
+
+  it('activates when ready, goes on 30s cooldown, pushes normals more than elites', () => {
     const state = createSurvivorState('bee', null, 4);
     surroundPlayer(state, 6, 2.5);
-    const normal = state.enemies.find((e) => e.alive && !e.isElite)!;
-    // spawn elite near player
-    const elite = state.enemies.find((e) => e.alive)!;
+    const alive = state.enemies.filter((e) => e.alive);
+    const normal = alive[0]!;
+    const elite = alive[1]!;
     elite.isElite = true;
     elite.x = 1.5;
     elite.z = 0;
+    normal.isElite = false;
     normal.x = -1.5;
     normal.z = 0;
+    normal.health = 500;
+    elite.health = 500;
     const nx0 = normal.x;
     const ex0 = elite.x;
     expect(tryRepulsor(state)).toBe(true);
-    expect(state.player.repulsorCd).toBeCloseTo(SURVIVOR.repulsor.cooldown, 5);
+    expect(state.player.repulsorCd).toBe(30);
     expect(tryRepulsor(state)).toBe(false);
-    // Integrate knockback for a few frames
-    for (let i = 0; i < 20; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    const nDisp = Math.abs(normal.x - nx0) + Math.abs(normal.z);
-    const eDisp = Math.abs(elite.x - ex0) + Math.abs(elite.z);
-    // Normal should generally be pushed more (or at least knockback applied)
-    expect(Math.hypot(normal.kbX, normal.kbZ) + nDisp).toBeGreaterThan(0.1);
-    void eDisp;
+    // Immediate partial displacement + knockback impulse (before AI re-chases)
+    const nDisp = Math.hypot(normal.x - nx0, normal.z);
+    const eDisp = Math.hypot(elite.x - ex0, elite.z);
+    expect(nDisp).toBeGreaterThan(1.2);
+    expect(Math.hypot(normal.kbX, normal.kbZ)).toBeGreaterThan(Math.hypot(elite.kbX, elite.kbZ));
+    expect(nDisp).toBeGreaterThan(eDisp);
   });
 
-  it('mech modifier increases radius/damage effect path', () => {
+  it('hits outer edge of large radius and misses beyond', () => {
+    const state = createSurvivorState('bee', null, 5);
+    // Place near edge and outside
+    state.enemies.push({
+      id: 701,
+      defId: 'basic',
+      x: 12.5,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 200,
+      maxHealth: 200,
+      radius: 0.4,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 1,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 3,
+      windup: 0,
+      facingX: -1,
+      facingZ: 0,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 1,
+      hazardHitCd: 0,
+      specialCd: 0,
+      specialWindup: 0,
+    });
+    state.enemies.push({
+      id: 702,
+      defId: 'basic',
+      x: 16,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 200,
+      maxHealth: 200,
+      radius: 0.4,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 1,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 3,
+      windup: 0,
+      facingX: -1,
+      facingZ: 0,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 1,
+      hazardHitCd: 0,
+      specialCd: 0,
+      specialWindup: 0,
+    });
+    tryRepulsor(state);
+    const edge = state.enemies.find((e) => e.id === 701)!;
+    const beyond = state.enemies.find((e) => e.id === 702)!;
+    expect(edge.health).toBeLessThan(200);
+    expect(beyond.health).toBe(200);
+  });
+
+  it('clamps knockback within arena bounds', () => {
+    const state = createSurvivorState('bee', null, 6);
+    state.player.x = SURVIVOR.arenaHalf - 2;
+    state.player.z = 0;
+    state.enemies.push({
+      id: 800,
+      defId: 'basic',
+      x: state.player.x + 1,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 200,
+      maxHealth: 200,
+      radius: 0.4,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 1,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 3,
+      windup: 0,
+      facingX: -1,
+      facingZ: 0,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 1,
+      hazardHitCd: 0,
+      specialCd: 0,
+      specialWindup: 0,
+    });
+    tryRepulsor(state);
+    for (let i = 0; i < 40; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const e = state.enemies.find((en) => en.id === 800)!;
+    if (e.alive) {
+      expect(Math.abs(e.x)).toBeLessThanOrEqual(SURVIVOR.arenaHalf + 0.01);
+      expect(Math.abs(e.z)).toBeLessThanOrEqual(SURVIVOR.arenaHalf + 0.01);
+    }
+  });
+
+  it('mech modifier increases radius so farther enemies are hit', () => {
     const state = createSurvivorState('bee', null, 8);
     state.player.form = 'mech';
     state.player.mechDuration = 5;
-    surroundPlayer(state, 4, 4.0);
-    const far = state.enemies.find((e) => e.alive)!;
-    far.x = 5.0;
-    far.z = 0;
-    far.health = 200;
-    far.maxHealth = 200;
+    state.enemies.push({
+      id: 810,
+      defId: 'basic',
+      x: 15,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 200,
+      maxHealth: 200,
+      radius: 0.4,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 1,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 3,
+      windup: 0,
+      facingX: -1,
+      facingZ: 0,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 1,
+      hazardHitCd: 0,
+      specialCd: 0,
+      specialWindup: 0,
+    });
+    // base radius 13.5 misses 15; mech 13.5*1.25=16.875 hits
     tryRepulsor(state);
-    // At ~5 units, mech radius 4.5*1.25=5.625 should hit
+    const far = state.enemies.find((e) => e.id === 810)!;
     expect(far.health).toBeLessThan(200);
   });
 
@@ -240,7 +394,7 @@ describe('repulsor burst', () => {
     expect(state.boss.repulsorCd).toBeGreaterThan(0);
     const cd = state.boss.repulsorCd;
     state.player.repulsorCd = 0;
-    tryRepulsor(state); // second attempt — boss internal cd blocks re-stagger
+    tryRepulsor(state);
     expect(state.boss.repulsorCd).toBeLessThanOrEqual(cd);
   });
 });
@@ -294,7 +448,6 @@ describe('ship form', () => {
     e.health = 500;
     e.maxHealth = 500;
     tryShip(state);
-    // Force hazard on enemy
     state.hazards.push({
       id: 999,
       kind: 'wake',
@@ -314,8 +467,129 @@ describe('ship form', () => {
     expect(e.hazardHitCd).toBeGreaterThan(0);
     const hMid = e.health;
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    // Should not tick again same frame window
     expect(e.health).toBe(hMid);
+  });
+
+  it('exhaust damages behind ship, not in front, and respects tick cd', () => {
+    const state = createSurvivorState('bee', null, 16);
+    tryShip(state);
+    state.player.facingX = 1;
+    state.player.facingZ = 0;
+    state.player.x = 0;
+    state.player.z = 0;
+    // Behind
+    state.enemies.push({
+      id: 901,
+      defId: 'basic',
+      x: -1.5,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 100,
+      maxHealth: 100,
+      radius: 0.4,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 1,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 3,
+      windup: 0,
+      facingX: 1,
+      facingZ: 0,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 1,
+      hazardHitCd: 0,
+      specialCd: 0,
+      specialWindup: 0,
+    });
+    // Front
+    state.enemies.push({
+      id: 902,
+      defId: 'basic',
+      x: 2,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 100,
+      maxHealth: 100,
+      radius: 0.4,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 1,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 3,
+      windup: 0,
+      facingX: -1,
+      facingZ: 0,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 1,
+      hazardHitCd: 0,
+      specialCd: 0,
+      specialWindup: 0,
+    });
+    state.player.exhaustTickCd = 0;
+    applyShipExhaust(state, SURVIVOR.fixedDt);
+    const back = state.enemies.find((e) => e.id === 901)!;
+    const front = state.enemies.find((e) => e.id === 902)!;
+    expect(back.health).toBeLessThan(100);
+    expect(front.health).toBe(100);
+    const mid = back.health;
+    applyShipExhaust(state, SURVIVOR.fixedDt); // should no-op while tick cd active
+    expect(back.health).toBe(mid);
+  });
+
+  it('clearShipHazards removes wakes and exhaust timers on form end/restart', () => {
+    const state = createSurvivorState('bee', null, 17);
+    tryShip(state);
+    for (let i = 0; i < 20; i += 1) {
+      stepSurvivor(state, { ...EMPTY_SURVIVOR_INPUT, moveX: 1, moveY: 0 }, SURVIVOR.fixedDt);
+    }
+    expect(state.hazards.some((h) => h.active && h.kind === 'wake')).toBe(true);
+    state.player.shipDuration = SURVIVOR.fixedDt;
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.player.form).toBe('astronaut');
+    clearShipHazards(state);
+    expect(state.hazards.every((h) => !h.active || h.kind !== 'wake')).toBe(true);
+  });
+});
+
+describe('keybinds settings', () => {
+  it('defaults match expected codes', () => {
+    expect(DEFAULT_KEYBINDS.repulsor).toBe('KeyQ');
+    expect(DEFAULT_KEYBINDS.ship).toBe('KeyE');
+    expect(DEFAULT_KEYBINDS.mech).toBe('KeyR');
+    expect(DEFAULT_KEYBINDS.moveUp).toBe('KeyW');
+    expect(formatKeyCode('KeyQ')).toBe('Q');
+    expect(formatKeyCode('Escape')).toBe('Esc');
+    expect(formatKeyCode('Digit1')).toBe('1');
+  });
+
+  it('normalizes malformed data and loads/saves versioned settings', () => {
+    expect(normalizeKeybinds(null).repulsor).toBe('KeyQ');
+    expect(normalizeKeybinds({ repulsor: 'KeyF' }).repulsor).toBe('KeyF');
+    expect(normalizeKeybinds({ repulsor: 123 }).repulsor).toBe('KeyQ');
+    const map = assignKeybind(resetKeybinds(), 'repulsor', 'KeyF');
+    expect(map.repulsor).toBe('KeyF');
+    // conflict swap: assign Q to ship while repulsor still KeyQ → swap
+    const swapped = assignKeybind(resetKeybinds(), 'ship', 'KeyQ');
+    expect(swapped.ship).toBe('KeyQ');
+    expect(swapped.repulsor).toBe('KeyE');
+    // persistence (may no-op in node; still exercise API)
+    saveSettings({ version: 1, keybinds: map });
+    const loaded = loadSettings();
+    expect(loaded.version).toBe(1);
+    expect(loaded.keybinds.mech).toBeTruthy();
+    void SETTINGS_STORAGE_KEY;
   });
 });
 

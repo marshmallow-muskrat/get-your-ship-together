@@ -135,6 +135,7 @@ function emitDamage(
   z: number,
   amount: number,
   kind: DamageEvent['kind'],
+  pop = 0.5,
 ): void {
   if (amount <= 0) return;
   const existing = state.damageAgg.get(targetKey);
@@ -142,7 +143,10 @@ function emitDamage(
     existing.amount += amount;
     existing.x = x;
     existing.z = z;
-    existing.kind = kind;
+    // Prefer stronger presentation kinds when merging
+    if (kind === 'ability' || kind === 'player' || kind === 'boss') existing.kind = kind;
+    else if (existing.kind === 'enemy' && kind !== 'enemy') existing.kind = kind;
+    existing.pop = Math.max(existing.pop, pop);
     existing.timer = SURVIVOR.damageNumbers.aggregateWindow;
   } else {
     state.damageAgg.set(targetKey, {
@@ -151,6 +155,7 @@ function emitDamage(
       z,
       kind,
       timer: SURVIVOR.damageNumbers.aggregateWindow,
+      pop,
     });
   }
 }
@@ -161,7 +166,12 @@ function flushDamageAgg(state: SurvivorState, dt: number): void {
     if (agg.timer > 0) continue;
     state.damageAgg.delete(key);
     let kind = agg.kind;
-    if (kind !== 'player' && agg.amount >= SURVIVOR.damageNumbers.largeThreshold) kind = 'large';
+    if (kind === 'enemy' && agg.amount >= SURVIVOR.damageNumbers.heavyThreshold) kind = 'large';
+    else if (kind === 'enemy' && agg.amount >= SURVIVOR.damageNumbers.largeThreshold) kind = 'large';
+    const life =
+      kind === 'large' || kind === 'ability' || kind === 'boss'
+        ? SURVIVOR.damageNumbers.heavyLife
+        : SURVIVOR.damageNumbers.life;
     if (state.damageEvents.length >= SURVIVOR.damageEventCap) {
       state.damageEvents.splice(0, 12);
     }
@@ -171,9 +181,10 @@ function flushDamageAgg(state: SurvivorState, dt: number): void {
       z: agg.z,
       amount: Math.round(agg.amount),
       kind,
-      life: SURVIVOR.damageNumbers.life,
-      maxLife: SURVIVOR.damageNumbers.life,
+      life,
+      maxLife: life,
       targetKey: key,
+      pop: agg.pop,
     });
   }
   for (const ev of state.damageEvents) {
@@ -340,15 +351,23 @@ function dropPickup(
   slot.magnetized = false;
 }
 
-function damageEnemy(state: SurvivorState, e: SurvivorEnemy, dmg: number): void {
+function damageEnemy(
+  state: SurvivorState,
+  e: SurvivorEnemy,
+  dmg: number,
+  opts?: { kind?: DamageEvent['kind']; pop?: number },
+): void {
   if (!e.alive || dmg <= 0) return;
   e.health -= dmg;
   e.hitFlash = 0.1;
-  emitDamage(state, `e:${e.id}`, e.x, e.z + 0.5, dmg, e.isMiniboss ? 'boss' : 'enemy');
+  const killed = e.health <= 0;
+  let kind: DamageEvent['kind'] = opts?.kind ?? (e.isMiniboss ? 'boss' : 'enemy');
+  if (killed && kind !== 'player') kind = 'kill';
+  emitDamage(state, `e:${e.id}`, e.x, e.z + 0.5, dmg, kind, opts?.pop ?? (killed ? 0.9 : 0.5));
   if (e.isMiniboss) {
     state.miniboss.health = Math.max(0, e.health);
   }
-  if (e.health <= 0) killEnemy(state, e);
+  if (killed) killEnemy(state, e);
 }
 
 function damagePlayer(state: SurvivorState, amount: number): void {
@@ -365,6 +384,11 @@ function damagePlayer(state: SurvivorState, amount: number): void {
   if (p.health <= 0) {
     p.alive = false;
     p.health = 0;
+    if (p.form === 'ship') {
+      p.form = 'astronaut';
+      p.shipDuration = 0;
+      clearShipHazards(state);
+    }
     state.phase = 'defeat';
   }
 }
@@ -567,7 +591,12 @@ export function tryRepulsor(state: SurvivorState): boolean {
   const push = cfg.push * (mech ? cfg.mechPushMul : 1);
 
   p.repulsorCd = cfg.cooldown;
-  pushEffect(state, 'repulsor', p.x, p.z, 0.45, state.accent, radius, { radius });
+  // Multi-layer shockwave visual matching true gameplay radius
+  pushEffect(state, 'repulsor', p.x, p.z, cfg.effectLife, state.accent, radius, { radius });
+  pushEffect(state, 'pulse', p.x, p.z, cfg.effectLife * 0.7, '#ffffff', radius * 0.45, {
+    radius: radius * 0.45,
+  });
+  pushEffect(state, 'impact', p.x, p.z, 0.35, state.accent, Math.min(4, radius * 0.2));
 
   for (const e of state.enemies) {
     if (!e.alive) continue;
@@ -577,12 +606,18 @@ export function tryRepulsor(state: SurvivorState): boolean {
     if (dist > radius + e.radius || dist < 1e-4) continue;
     const nx = dx / dist;
     const nz = dz / dist;
-    damageEnemy(state, e, dmg);
+    damageEnemy(state, e, dmg, { kind: 'ability', pop: 0.85 });
     if (!e.alive) continue;
     let force = push;
     if (e.isMiniboss) force *= cfg.minibossPushMul;
     else if (e.isElite) force *= cfg.elitePushMul;
     applyKnockback(e, nx, nz, force);
+    // Immediate partial displacement for legibility, then impulse continues
+    e.x += nx * force * 0.15;
+    e.z += nz * force * 0.15;
+    const c = clampArena(e.x, e.z, e.radius * 0.5);
+    e.x = c.x;
+    e.z = c.z;
   }
 
   // Boss: stagger only, no throw
@@ -592,7 +627,7 @@ export function tryRepulsor(state: SurvivorState): boolean {
     const dz = b.z - p.z;
     const dist = Math.hypot(dx, dz);
     if (dist <= radius + SURVIVOR_BOSS.colliderRadius) {
-      damageBoss(state, dmg * 0.55);
+      damageBoss(state, dmg * 0.55, { kind: 'ability', pop: 0.9 });
       b.repulsorCd = cfg.bossInternalCd;
       if (b.state === 'windup') {
         b.state = 'recover';
@@ -640,7 +675,17 @@ function endShipForm(state: SurvivorState): void {
   p.form = 'astronaut';
   p.shipDuration = 0;
   p.shipCd = SURVIVOR.ship.cooldown;
+  clearShipHazards(state);
   pushEffect(state, 'transform', p.x, p.z, 0.4, '#88e0ff', 1.4);
+}
+
+/** Clear active thruster wakes (exhaust is presentation-only; wakes are hazards). */
+export function clearShipHazards(state: SurvivorState): void {
+  for (const h of state.hazards) {
+    if (h.kind === 'wake') h.active = false;
+  }
+  state.player.exhaustTickCd = 0;
+  state.player.wakeTimer = 0;
 }
 
 function fireWeapons(state: SurvivorState, dt: number): void {
@@ -944,12 +989,16 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
   }
 }
 
-function damageBoss(state: SurvivorState, dmg: number): void {
+function damageBoss(
+  state: SurvivorState,
+  dmg: number,
+  opts?: { kind?: DamageEvent['kind']; pop?: number },
+): void {
   const b = state.boss;
   if (!b.active || b.state === 'dead' || dmg <= 0) return;
   b.health = Math.max(0, b.health - dmg);
   b.hitFlash = 0.1;
-  emitDamage(state, 'boss', b.x, b.z + 1.2, dmg, 'boss');
+  emitDamage(state, 'boss', b.x, b.z + 1.2, dmg, opts?.kind ?? 'boss', opts?.pop ?? 0.75);
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
   if (phase > b.phase) {
     b.phase = phase;
@@ -1477,6 +1526,7 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   if (p.repulsorCd > 0) p.repulsorCd = Math.max(0, p.repulsorCd - dt);
   if (p.shipCd > 0 && p.form !== 'ship') p.shipCd = Math.max(0, p.shipCd - dt);
   if (p.bodyHitCd > 0) p.bodyHitCd = Math.max(0, p.bodyHitCd - dt);
+  if (p.exhaustTickCd > 0) p.exhaustTickCd = Math.max(0, p.exhaustTickCd - dt);
 
   const regen = passiveLevel(state, 'regen') * SURVIVOR.regenPerLevel;
   if (regen > 0 && p.health < p.maxHealth && p.form !== 'ship') {
@@ -1524,24 +1574,73 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   p.x = c.x;
   p.z = c.z;
 
-  // Ship thruster wake
-  if (p.form === 'ship' && moved) {
-    p.wakeTimer -= dt;
-    if (p.wakeTimer <= 0) {
-      p.wakeTimer = SURVIVOR.ship.wakeInterval;
-      const bx = p.x - p.facingX * 0.9;
-      const bz = p.z - p.facingZ * 0.9;
-      spawnHazard(
-        state,
-        'wake',
-        bx,
-        bz,
-        SURVIVOR.ship.wakeRadius,
-        SURVIVOR.ship.wakeLife,
-        SURVIVOR.ship.wakeDamage,
-        state.accent,
-      );
-      pushEffect(state, 'wake', bx, bz, 0.35, state.accent, SURVIVOR.ship.wakeRadius);
+  // Continuous rear exhaust jet + ground wake
+  if (p.form === 'ship') {
+    applyShipExhaust(state, dt);
+    if (moved) {
+      p.wakeTimer -= dt;
+      if (p.wakeTimer <= 0) {
+        p.wakeTimer = SURVIVOR.ship.wakeInterval;
+        const bx = p.x - p.facingX * 0.9;
+        const bz = p.z - p.facingZ * 0.9;
+        spawnHazard(
+          state,
+          'wake',
+          bx,
+          bz,
+          SURVIVOR.ship.wakeRadius,
+          SURVIVOR.ship.wakeLife,
+          SURVIVOR.ship.wakeDamage,
+          state.accent,
+        );
+        pushEffect(state, 'wake', bx, bz, 0.35, state.accent, SURVIVOR.ship.wakeRadius);
+      }
+    }
+  }
+}
+
+/** Rear-facing continuous jet: damages only enemies behind the ship. */
+export function applyShipExhaust(state: SurvivorState, _dt: number): void {
+  const p = state.player;
+  if (p.form !== 'ship' || !p.alive) return;
+  if (p.exhaustTickCd > 0) return;
+  p.exhaustTickCd = SURVIVOR.ship.exhaustTickCd;
+  const len = SURVIVOR.ship.exhaustLength;
+  const halfW = SURVIVOR.ship.exhaustWidth * 0.5;
+  const fx = p.facingX;
+  const fz = p.facingZ;
+  // Side basis
+  const sx = -fz;
+  const sz = fx;
+
+  for (const e of state.enemies) {
+    if (!e.alive || e.hazardHitCd > 0) continue;
+    const dx = e.x - p.x;
+    const dz = e.z - p.z;
+    // Behind ship: projection onto -forward
+    const back = -(dx * fx + dz * fz);
+    if (back < 0.25 || back > len) continue;
+    const side = Math.abs(dx * sx + dz * sz);
+    // Taper width toward the tip
+    const taper = halfW * (1.05 - (back / len) * 0.55);
+    if (side > taper + e.radius) continue;
+    let dmg = SURVIVOR.ship.exhaustDamage;
+    if (e.isMiniboss || e.isElite) dmg *= SURVIVOR.ship.exhaustEliteMul;
+    damageEnemy(state, e, dmg, { kind: 'ability', pop: 0.7 });
+    e.hazardHitCd = SURVIVOR.ship.wakeTickCd;
+  }
+
+  if (state.boss.active && state.boss.state !== 'dead' && state.boss.hitFlash <= 0.02) {
+    const b = state.boss;
+    const dx = b.x - p.x;
+    const dz = b.z - p.z;
+    const back = -(dx * fx + dz * fz);
+    const side = Math.abs(dx * sx + dz * sz);
+    if (back >= 0.25 && back <= len && side <= halfW + SURVIVOR_BOSS.colliderRadius) {
+      damageBoss(state, SURVIVOR.ship.exhaustDamage * SURVIVOR.ship.exhaustBossMul, {
+        kind: 'ability',
+        pop: 0.8,
+      });
     }
   }
 }

@@ -45,25 +45,29 @@ This experiment may become the preferred primary mode. It must coexist with camp
 
 ## Controls
 
-| Action | Binding |
+Defaults (remappable in Pause → Settings; stored as `gyst.settings.v1`):
+
+| Action | Default binding |
 |---|---|
-| Move | WASD / arrows (screen-relative) |
-| Repulsor Burst | **Q** (edge-triggered, 8s CD) |
-| Afterburner (ship) | **E** (edge-triggered, 2.5s form / 16s CD after) |
-| Mech Overdrive | **R** (when Mech Core full) |
+| Move | WASD (screen-relative) |
+| Repulsor Burst | Q |
+| Afterburner (ship) | E |
+| Mech Overdrive | R (when Mech Core full) |
 | Level-up choices | 1 / 2 / 3 or click |
 | Pause | Esc |
 | Mute | M (wired; audio bus intentionally disabled) |
 
+Internal bindings use `KeyboardEvent.code`. Conflicts swap. Escape cancels rebind capture (except when intentionally rebinding Pause). Settings open pauses the run; closing returns to the pause overlay.
+
 ## Active abilities
 
-### Q — Repulsor Burst
-Radial knockback + light damage. Clears breathing room. Mech form strengthens radius/damage/push. Does not throw the final boss (brief stagger + internal boss CD).
+### Repulsor Burst
+Major panic ability: **30s cooldown**, ~**13.5** world-unit radius, ~**12** unit normal knockback (elite/miniboss reduced). Mech amplifies radius/damage/push further. Dramatic multi-ring shockwave matches the true gameplay radius. Does not throw the final boss (brief stagger + internal boss CD). Arena-clamped.
 
-### E — Afterburner
-Temporary ship form using the selected hero’s real ship model. Fast steering, damage reduction, weapons offline, thruster wake damages enemies. Mutually exclusive with mech.
+### Afterburner
+Temporary ship form using the selected hero’s real ship model. Fast steering, damage reduction, weapons offline. **Dual-engine thruster exhaust** continuously damages enemies **behind** the ship (tick CD ~0.24s); ground wake still deposits. Mutually exclusive with mech. Exhaust visuals clean up on form end, death, restart, dispose.
 
-### R — Mech Overdrive
+### Mech Overdrive
 Kill-charged ultimate. HUD shows charge %, READY glow, then remaining duration while active.
 
 ## Weapons
@@ -88,6 +92,11 @@ Survivor: src/game/modes/survivor/* — own state, sim, render, HUD
 ```
 
 Survivor player form is local: `astronaut | ship | mech` (does not alter campaign `PlayerForm`).
+
+## Presentation notes
+
+- Damage numbers: larger fonts, strong outline/shadow, scale pop, heavy/ability/kill variants; still aggregated and pooled.
+- Pause overlay: Resume, Settings, Restart (confirm), Crew Select (confirm).
 
 ## Deferred
 

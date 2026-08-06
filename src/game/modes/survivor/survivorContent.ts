@@ -49,18 +49,20 @@ export const SURVIVOR = {
     damageTakenMul: 0.65,
   },
   repulsor: {
-    cooldown: 8,
-    radius: 4.5,
-    damage: 14,
-    push: 4.0,
+    /** Major panic ability — 30s CD, tripled radius/push vs original 4.5 / 4.0 */
+    cooldown: 30,
+    radius: 13.5,
+    damage: 18,
+    push: 12.0,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
     mechRadiusMul: 1.25,
     mechDamageMul: 1.35,
     mechPushMul: 1.2,
-    knockbackDuration: 0.28,
+    knockbackDuration: 0.42,
     bossStagger: 0.55,
     bossInternalCd: 6.5,
+    effectLife: 0.55,
   },
   ship: {
     duration: 2.5,
@@ -76,11 +78,20 @@ export const SURVIVOR = {
     bodyPush: 1.2,
     bodyTickCd: 0.35,
     radius: 0.7,
+    /** Continuous rear exhaust jet */
+    exhaustLength: 3.4,
+    exhaustWidth: 1.35,
+    exhaustDamage: 14,
+    exhaustTickCd: 0.24,
+    exhaustEliteMul: 0.55,
+    exhaustBossMul: 0.4,
   },
   damageNumbers: {
     aggregateWindow: 0.15,
-    life: 0.7,
-    largeThreshold: 40,
+    life: 0.85,
+    heavyLife: 1.05,
+    largeThreshold: 36,
+    heavyThreshold: 55,
   },
 } as const;
 
