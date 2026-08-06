@@ -1,50 +1,32 @@
-# Game Concept
+# Get Your Ship Together — Game Concept
 
-Working title: **Get Your Ship Together**.
+**Status:** Vertical-slice direction (authoritative)
 
-This is a browser-first, Vampire Survivors-inspired horde-survival game with long, vertically progressing maps.
+> The older horde-survival / endless vertical corridor / three-act astronaut→mech→spaceship concept is **obsolete**. Do not implement XP, random loot, equipment, skill trees, or endless streaming maps.
 
-The player chooses one of four heroes:
+## Promise
 
-- Bee
-- Flamingo
-- Frog
-- Red Panda
+A short, authored, isometric sci-fi action game:
 
-Each hero progresses through the same three forms:
+1. Choose one of four animal astronauts.
+2. Enter a composed combat facility.
+3. Fight with **manual** primary fire, dodge, a hero ability, Nanite Repair, and a temporary mech transform.
+4. Defeat normal enemies and one multi-pattern boss.
+5. Recover a prototype ship part.
 
-1. Stranded astronaut — fight through the crash zone.
-2. Mech — battle through industrial facilities toward extraction.
-3. Spaceship — fight through increasingly dangerous galaxy sectors.
+## Vertical slice scope
 
-The maps use a long vertical “combat spine,” with wide arenas, checkpoints, upgrade areas, minibosses, and locked gates. They can be hundreds of segments long while only nearby sections are loaded in Three.js.
+In scope:
 
-The existing assets provide the heroes, mechs, spaceships, buildings, enemies, vehicles, props, and pickups. We would create the connective terrain, paths, cliffs, floors, asteroids, particles, lighting, collision boundaries, and map layouts.
+- Crew selection (preserved visual identity)
+- One authored level (arrival → courtyard waves → boss arena → reward)
+- Four selectable heroes with unique abilities
+- Mech transformation
+- Two normal enemy roles + one boss
+- Clean runtime architecture suitable as a foundation
 
-# Brief development plan
+Out of scope (deferred):
 
-1. Build the Three.js/Vite/TypeScript foundation.
-2. Create the static hero hangar.
-3. Build a short playable Act 1 crash-site slice.
-4. Add enemy waves, movement, pickups, upgrades, and progression gates.
-5. Expand Act 1 into a long streamed linear map.
-6. Add the mech transformation and Act 2 facility.
-7. Add the spaceship transformation and Act 3 galaxy route.
-8. Deploy the browser version through Cloudflare Pages.
-9. Wrap the same build with Electron later.
+- Campaign of six bosses, progression, loot, vendors, crafting, currencies, towns, co-op, accounts, cloud saves, Electron, additional modes
 
-# First deliverable: hero hangar
-
-The hangar would contain four themed launch bays. Each bay would show:
-
-- The astronaut at the front on the main floor.
-- The mech behind them on a raised maintenance platform.
-- The spaceship furthest back on a launch pad, suspended dock, or gantry.
-
-The spatial hierarchy would make the progression obvious:
-
-**Astronaut → Mech → Spaceship**
-
-We could reinforce this with power cables, repair equipment, activation lights, ascending platforms, and a visual route from the astronaut toward the larger upgraded forms.
-
-For the Three.js implementation, we would use the matching `.gltf` assets whenever available. The `.blend` files would remain source/reference files rather than being loaded directly. The first hangar version can be static, with only basic camera movement and hero-bay selection before any combat systems are built.
+See `docs/VERTICAL_SLICE.md` for controls, architecture, assets, and how to run.
