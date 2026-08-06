@@ -1,32 +1,24 @@
 # Get Your Ship Together — Game Concept
 
-**Status:** Vertical-slice direction (authoritative)
+**Status:** Direction under evaluation (authoritative)
 
-> The older horde-survival / endless vertical corridor / three-act astronaut→mech→spaceship concept is **obsolete**. Do not implement XP, random loot, equipment, skill trees, or endless streaming maps.
+GYST is currently evaluating **two** playable directions. The final primary format has **not** been selected.
 
-## Promise
+1. **Campaign vertical slice** — authored isometric action: manual combat, dodge, abilities, Nanite Repair, mech transform, multi-pattern boss, ship-part recovery. See `docs/VERTICAL_SLICE.md`.
+2. **Containment Protocol (survivor experiment)** — Vampire Survivors–style horde survival with automatic weapons, XP level-ups, kill-charged mech, timed boss. See `docs/SURVIVOR_MODE_VERTICAL_SLICE.md`.
 
-A short, authored, isometric sci-fi action game:
+> Older “astronaut → endless corridor / three-act only” product docs that forbade additional modes are superseded for this authorized survivor experiment. Campaign remains a first-class mode; survivor is an explicit peer experiment.
 
-1. Choose one of four animal astronauts.
-2. Enter a composed combat facility.
-3. Fight with **manual** primary fire, dodge, a hero ability, Nanite Repair, and a temporary mech transform.
-4. Defeat normal enemies and one multi-pattern boss.
-5. Recover a prototype ship part.
+## Shared identity
 
-## Vertical slice scope
+- Four animal astronauts: Boswell, Fitzwilliam, Fortunato, Rutherford
+- Temporary mech form per hero
+- Quaternius Space / Modular Sci-Fi / Monsters visual language
+- Vite + TypeScript + Three.js static browser stack
 
-In scope:
+## Not yet decided
 
-- Crew selection (preserved visual identity)
-- One authored level (arrival → courtyard waves → boss arena → reward)
-- Four selectable heroes with unique abilities
-- Mech transformation
-- Two normal enemy roles + one boss
-- Clean runtime architecture suitable as a foundation
+- Whether campaign, survivor, or both ship as primary
+- Full campaign length, multi-boss structure, meta-progression
 
-Out of scope (deferred):
-
-- Campaign of six bosses, progression, loot, vendors, crafting, currencies, towns, co-op, accounts, cloud saves, Electron, additional modes
-
-See `docs/VERTICAL_SLICE.md` for controls, architecture, assets, and how to run.
+Agents must not delete campaign to make room for survivor, or vice versa.

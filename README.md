@@ -1,6 +1,9 @@
 # Get Your Ship Together
 
-Isometric sci-fi action vertical slice — select a crew member, fight through a short facility, transform into a mech, defeat a boss, recover a ship part.
+Isometric sci-fi action prototype evaluating **two** directions:
+
+1. **Campaign** — manual combat vertical slice  
+2. **Containment Protocol** — survivor/horde experiment  
 
 ## Quick start
 
@@ -9,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Open the printed local URL (default `http://localhost:5173/`).
+Open the local URL (default `http://localhost:5173/`).
 
 ```bash
 npm test
@@ -17,16 +20,33 @@ npm run build
 npm run preview
 ```
 
-## Dev shortcuts
+## Mode selection
 
-- `/?fixture=combat&hero=bee` — courtyard combat  
-- `/?fixture=boss&hero=frog` — boss fight  
-- `/?fixture=mech&hero=flamingo` — start in mech  
+1. Select a hero.
+2. **CONTINUE** → Campaign  
+3. **CONTAINMENT PROTOCOL** → Survivor experiment  
+
+## Dev fixtures
+
+### Campaign
+
+- `/?fixture=combat&hero=bee`
+- `/?fixture=boss&hero=frog`
+- `/?fixture=mech&hero=flamingo`
+
+### Survivor
+
+- `/?mode=survivor&fixture=survivor-start&hero=bee`
+- `/?mode=survivor&fixture=survivor-horde&hero=bee`
+- `/?mode=survivor&fixture=survivor-boss&hero=frog`
+- `/?mode=survivor&fixture=survivor-mech&hero=flamingo`
+- `/?mode=survivor&fixture=survivor-levelup&hero=red-panda`
 
 ## Docs
 
-- `GAME_CONCEPT.md` — current promise (obsolete horde concept marked dead)
-- `docs/VERTICAL_SLICE.md` — architecture, assets, controls, limitations
+- `GAME_CONCEPT.md` — dual-direction status
+- `docs/VERTICAL_SLICE.md` — campaign slice
+- `docs/SURVIVOR_MODE_VERTICAL_SLICE.md` — survivor experiment
 
 ## Stack
 

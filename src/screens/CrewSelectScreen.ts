@@ -6,6 +6,7 @@ import { AssetLibrary } from '../game/assets/AssetLibrary';
 
 export type CrewSelectHandlers = {
   onContinue: (heroId: HeroId) => void;
+  onSurvivor?: (heroId: HeroId) => void;
 };
 
 /**
@@ -158,7 +159,10 @@ export class CrewSelectScreen {
       </div>
       <div class="corner-actions" aria-label="Screen actions">
         <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
-        <button id="select-hero-button" class="select-hero-button" type="button">CONTINUE</button>
+        <div class="mode-actions">
+          <button id="survivor-button" class="select-hero-button survivor-button" type="button">CONTAINMENT PROTOCOL</button>
+          <button id="select-hero-button" class="select-hero-button" type="button">CAMPAIGN</button>
+        </div>
       </div>
     `;
     this.host.appendChild(this.hud);
@@ -181,6 +185,7 @@ export class CrewSelectScreen {
     });
 
     this.hud.querySelector('#select-hero-button')?.addEventListener('click', () => this.continue());
+    this.hud.querySelector('#survivor-button')?.addEventListener('click', () => this.launchSurvivor());
     this.hud.querySelector('#exit-button')?.addEventListener('click', () => {
       // Soft exit: stay on selection.
     });
@@ -282,6 +287,12 @@ export class CrewSelectScreen {
   private continue(): void {
     const hero = HERO_LIST[this.selectedIndex]!;
     this.handlers.onContinue(hero.id);
+  }
+
+  private launchSurvivor(): void {
+    const hero = HERO_LIST[this.selectedIndex]!;
+    if (this.handlers.onSurvivor) this.handlers.onSurvivor(hero.id);
+    else this.handlers.onContinue(hero.id);
   }
 
   private resize(): void {

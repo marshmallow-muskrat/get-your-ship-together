@@ -927,3 +927,227 @@ button {
 .game-hud .hidden {
   display: none !important;
 }
+
+/* Mode selection */
+.mode-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+.survivor-button {
+  opacity: 0.92;
+  border-color: color-mix(in srgb, var(--bay-accent) 40%, #6cf) !important;
+  background: linear-gradient(180deg, rgba(40, 80, 110, 0.55), rgba(10, 18, 32, 0.85)) !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.1em !important;
+}
+.survivor-button:hover {
+  filter: brightness(1.12);
+}
+
+/* Survivor HUD */
+.survivor-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  font-family: 'Chakra Petch', sans-serif;
+  color: #f0f4ff;
+  --hud-accent: #71f6da;
+}
+.survivor-hud .eyebrow {
+  display: block;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  color: rgba(180, 210, 255, 0.7);
+  margin-bottom: 0.2rem;
+}
+.survivor-hud .sv-top {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1rem;
+  padding: 1rem 1.3rem 0;
+  align-items: start;
+}
+.survivor-hud .sv-identity strong {
+  color: var(--hud-accent);
+  font-size: 1.15rem;
+}
+.survivor-hud .sv-timer-wrap {
+  text-align: center;
+}
+.survivor-hud .sv-timer-wrap strong {
+  font-family: 'Space Mono', monospace;
+  font-size: 1.6rem;
+  letter-spacing: 0.08em;
+}
+.survivor-hud .sv-meta {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+.survivor-hud .sv-bars {
+  position: absolute;
+  left: 1.2rem;
+  top: 5.2rem;
+  width: min(260px, 34vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.survivor-hud .sv-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(8, 14, 28, 0.72);
+  border: 1px solid rgba(140, 180, 255, 0.22);
+  overflow: hidden;
+}
+.survivor-hud .sv-track i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #2fd6b0, var(--hud-accent));
+  transition: width 80ms linear;
+}
+.survivor-hud .sv-track.xp i {
+  background: linear-gradient(90deg, #3a8cff, #88e0ff);
+}
+.survivor-hud .sv-track.mech i {
+  background: linear-gradient(90deg, #a060ff, var(--hud-accent));
+}
+.survivor-hud .sv-track.boss {
+  height: 10px;
+}
+.survivor-hud .sv-track.boss i {
+  background: linear-gradient(90deg, #a01828, #ff5a4a);
+}
+.survivor-hud .sv-boss {
+  position: absolute;
+  top: 5.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 70vw);
+  text-align: center;
+}
+.survivor-hud .sv-weapons {
+  position: absolute;
+  right: 1.2rem;
+  top: 5.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.survivor-hud .sv-wep {
+  background: rgba(6, 12, 28, 0.7);
+  border: 1px solid rgba(140, 180, 255, 0.2);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-width: 9rem;
+}
+.survivor-hud .sv-metrics {
+  position: absolute;
+  left: 1.2rem;
+  bottom: 4.5rem;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.62rem;
+  color: rgba(180, 220, 255, 0.75);
+}
+.survivor-hud .sv-help {
+  position: absolute;
+  left: 1.2rem;
+  bottom: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  color: rgba(190, 210, 240, 0.7);
+}
+.survivor-hud .sv-help kbd {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.64rem;
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.2rem;
+  border: 1px solid rgba(160, 190, 255, 0.25);
+  background: rgba(8, 14, 28, 0.55);
+}
+.survivor-hud .sv-modal {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: radial-gradient(circle at 50% 40%, rgba(12, 24, 48, 0.78), rgba(4, 8, 18, 0.9));
+  text-align: center;
+  padding: 1rem;
+}
+.survivor-hud .sv-modal h2 {
+  margin: 0.15rem 0 0.6rem;
+  font-family: 'Audiowide', sans-serif;
+  letter-spacing: 0.06em;
+}
+.survivor-hud .sv-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  max-width: 920px;
+}
+.survivor-hud .sv-choice {
+  pointer-events: auto;
+  cursor: pointer;
+  width: min(260px, 90vw);
+  text-align: left;
+  border-radius: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--hud-accent) 50%, white 10%);
+  background: linear-gradient(180deg, rgba(20, 36, 56, 0.95), rgba(8, 14, 28, 0.95));
+  color: #f4f8ff;
+  padding: 0.9rem 1rem;
+}
+.survivor-hud .sv-choice:hover {
+  border-color: var(--hud-accent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--hud-accent) 30%, transparent);
+}
+.survivor-hud .sv-choice strong {
+  display: block;
+  margin: 0.25rem 0;
+  font-size: 1.05rem;
+  color: var(--hud-accent);
+}
+.survivor-hud .sv-choice small {
+  color: rgba(200, 220, 255, 0.78);
+  line-height: 1.35;
+}
+.survivor-hud .sv-end-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.8rem;
+}
+.survivor-hud .sv-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--hud-accent) 55%, white 10%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--hud-accent) 30%, #122), #0a1520);
+  color: #f7fbff;
+  padding: 0.7rem 1.15rem;
+  border-radius: 0.45rem;
+  letter-spacing: 0.1em;
+  font-size: 0.78rem;
+}
+.survivor-hud .sv-btn.ghost {
+  background: rgba(10, 16, 30, 0.7);
+  border-color: rgba(160, 190, 255, 0.3);
+}
+.survivor-hud .hidden {
+  display: none !important;
+}
