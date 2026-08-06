@@ -1091,6 +1091,111 @@ button {
   height: 5.1rem;
   border-width: 2px;
 }
+.survivor-hud .sv-ability.mech-flourish {
+  animation: sv-mech-flourish 0.85s ease-out;
+}
+@keyframes sv-mech-flourish {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--hud-accent) 70%, transparent);
+    transform: scale(1);
+  }
+  40% {
+    box-shadow: 0 0 28px 8px color-mix(in srgb, var(--hud-accent) 55%, transparent);
+    transform: scale(1.08);
+  }
+  100% {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--hud-accent) 35%, transparent);
+    transform: scale(1);
+  }
+}
+.survivor-hud .sv-build {
+  position: absolute;
+  right: 0.9rem;
+  bottom: 0.9rem;
+  width: min(200px, 22vw);
+  max-height: min(38vh, 280px);
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.5rem;
+  background: rgba(6, 12, 24, 0.72);
+  border: 1px solid rgba(140, 180, 255, 0.16);
+}
+.survivor-hud .sv-build-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.62rem;
+  border-left: 3px solid var(--wep, rgba(140, 180, 255, 0.4));
+  padding: 0.15rem 0.3rem;
+  background: rgba(8, 14, 28, 0.55);
+  border-radius: 0.25rem;
+  text-transform: capitalize;
+}
+.survivor-hud .sv-build-item.passive {
+  border-left-color: #9b7bff;
+}
+.survivor-hud .sv-build-item.temp {
+  border-left-color: #ffd46a;
+  color: #ffe9a8;
+}
+.survivor-hud .sv-inbound {
+  margin-top: 0.25rem;
+  font-family: 'Audiowide', sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  color: #ff6a6a;
+  text-shadow: 0 0 12px rgba(255, 60, 60, 0.55);
+}
+.survivor-hud .sv-bosses-active {
+  margin-top: 0.2rem;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.68rem;
+  color: #ffb08a;
+}
+.survivor-hud .sv-mech-toast {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  font-family: 'Audiowide', sans-serif;
+  letter-spacing: 0.14em;
+  color: var(--hud-accent);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--hud-accent) 60%, transparent);
+  pointer-events: none;
+  animation: sv-mech-toast 1.3s ease-out forwards;
+}
+@keyframes sv-mech-toast {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px) scale(0.9);
+  }
+  20% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-12px) scale(1);
+  }
+}
+.survivor-hud .sv-end-record {
+  color: #ffe566;
+  font-family: 'Audiowide', sans-serif;
+  letter-spacing: 0.12em;
+}
+.survivor-hud .sv-end-build {
+  max-width: 520px;
+  font-size: 0.78rem;
+  color: rgba(200, 220, 255, 0.8);
+}
+.survivor-hud .sv-command {
+  /* keep command deck independent of build panel */
+  right: auto;
+}
 .survivor-hud .sv-ability.ready {
   border-color: color-mix(in srgb, var(--hud-accent) 70%, white 10%);
   box-shadow: 0 0 14px color-mix(in srgb, var(--hud-accent) 35%, transparent);

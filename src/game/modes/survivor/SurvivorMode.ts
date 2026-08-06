@@ -58,7 +58,7 @@ export class SurvivorMode {
   private disposed = false;
   /** Physical key codes currently held */
   private codesDown = new Set<string>();
-  private edge = { mech: false, ship: false, repulsor: false, pause: false, mute: false };
+  private edge = { mech: false, ship: false, repulsor: false, dodge: false, pause: false, mute: false };
   private choiceIndex: number | null = null;
   private frameSamples: number[] = [];
   private showMetrics = false;
@@ -123,6 +123,7 @@ export class SurvivorMode {
 
     if (!e.repeat) {
       const action = findActionForCode(this.keybinds, code);
+      if (action === 'dodge') this.edge.dodge = true;
       if (action === 'repulsor') this.edge.repulsor = true;
       if (action === 'ship') this.edge.ship = true;
       if (action === 'mech') this.edge.mech = true;
@@ -313,7 +314,7 @@ export class SurvivorMode {
     this.applyFixtureSpawn(this.state);
     this.accumulator = 0;
     this.choiceIndex = null;
-    this.edge = { mech: false, ship: false, repulsor: false, pause: false, mute: false };
+    this.edge = { mech: false, ship: false, repulsor: false, dodge: false, pause: false, mute: false };
     this.settingsOpen = false;
     this.rebindingAction = null;
     this.inputBlocked = false;
@@ -349,6 +350,7 @@ export class SurvivorMode {
       mechPressed: this.edge.mech,
       shipPressed: this.edge.ship,
       repulsorPressed: this.edge.repulsor,
+      dodgePressed: this.edge.dodge,
       pausePressed: this.edge.pause,
       mutePressed: this.edge.mute,
       choiceIndex: this.choiceIndex,
@@ -356,6 +358,7 @@ export class SurvivorMode {
     this.edge.mech = false;
     this.edge.ship = false;
     this.edge.repulsor = false;
+    this.edge.dodge = false;
     this.edge.pause = false;
     this.edge.mute = false;
     return frame;
@@ -379,14 +382,14 @@ export class SurvivorMode {
       input.mechPressed = false;
       input.shipPressed = false;
       input.repulsorPressed = false;
+      input.dodgePressed = false;
       input.pausePressed = false;
-      // keep choiceIndex
     }
-    // While settings open, never step abilities
     if (this.settingsOpen) {
       input.mechPressed = false;
       input.shipPressed = false;
       input.repulsorPressed = false;
+      input.dodgePressed = false;
       input.pausePressed = false;
       input.moveX = 0;
       input.moveY = 0;
@@ -399,6 +402,7 @@ export class SurvivorMode {
       input.mechPressed = false;
       input.shipPressed = false;
       input.repulsorPressed = false;
+      input.dodgePressed = false;
       input.pausePressed = false;
       input.mutePressed = false;
       input.choiceIndex = null;

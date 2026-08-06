@@ -30,7 +30,7 @@ export class SurvivorRenderer {
   private exhaustMats: THREE.MeshBasicMaterial[] = [];
   private heroAccent = '#88e0ff';
   private enemies = new Map<number, ActorVis>();
-  private boss: ActorVis | null = null;
+  private bosses = new Map<number, ActorVis>();
   private projectiles = new Map<number, THREE.Mesh>();
   private pickups = new Map<number, THREE.Object3D>();
   private hazards = new Map<number, THREE.Object3D>();
@@ -80,46 +80,47 @@ export class SurvivorRenderer {
     group.name = 'ship-exhaust';
     group.visible = false;
 
+    const vs = SURVIVOR.ship.exhaustVisualScale;
     const makeEngine = (x: number): THREE.Group => {
       const eng = new THREE.Group();
-      eng.position.set(x, 0.25, -0.55);
+      eng.position.set(x * vs, 0.28, -0.45);
       const coreMat = new THREE.MeshBasicMaterial({
-        color: '#fff6d0',
+        color: '#fffef5',
         transparent: true,
-        opacity: 0.95,
+        opacity: 1,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
       const midMat = new THREE.MeshBasicMaterial({
-        color: '#ff9a3c',
+        color: '#7de8ff',
         transparent: true,
-        opacity: 0.75,
+        opacity: 0.85,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
       const outerMat = new THREE.MeshBasicMaterial({
         color: this.heroAccent,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.62,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
       this.exhaustMats.push(coreMat, midMat, outerMat);
-      const core = new THREE.Mesh(new THREE.ConeGeometry(0.12, 1.1, 8, 1, true), coreMat);
+      const core = new THREE.Mesh(new THREE.ConeGeometry(0.16 * vs, 1.5 * vs, 10, 1, true), coreMat);
       core.rotation.x = Math.PI / 2;
-      core.position.z = -0.55;
-      const mid = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.6, 10, 1, true), midMat);
+      core.position.z = -0.7 * vs;
+      const mid = new THREE.Mesh(new THREE.ConeGeometry(0.3 * vs, 2.2 * vs, 12, 1, true), midMat);
       mid.rotation.x = Math.PI / 2;
-      mid.position.z = -0.75;
-      const outer = new THREE.Mesh(new THREE.ConeGeometry(0.34, 2.2, 12, 1, true), outerMat);
+      mid.position.z = -1.0 * vs;
+      const outer = new THREE.Mesh(new THREE.ConeGeometry(0.48 * vs, 3.0 * vs, 14, 1, true), outerMat);
       outer.rotation.x = Math.PI / 2;
-      outer.position.z = -1.0;
+      outer.position.z = -1.35 * vs;
       eng.add(outer, mid, core);
       return eng;
     };
 
-    this.exhaustL = makeEngine(-0.28);
-    this.exhaustR = makeEngine(0.28);
+    this.exhaustL = makeEngine(-0.32);
+    this.exhaustR = makeEngine(0.32);
     group.add(this.exhaustL, this.exhaustR);
     ship.add(group);
     this.shipExhaust = group;
@@ -226,6 +227,7 @@ export class SurvivorRenderer {
   private animPlayer(vis: ActorVis, p: SurvivorState['player'], dt: number): void {
     if (!vis.animator) return;
     if (!p.alive) vis.animator.play('death', 0.05);
+    else if (p.dodgeActive > 0) vis.animator.play('dodge', 0.04);
     else if (p.hitFlash > 0.08) vis.animator.play('hit', 0.05);
     else vis.animator.play('run');
     vis.animator.update(dt);
@@ -290,41 +292,48 @@ export class SurvivorRenderer {
   }
 
   private syncBoss(state: SurvivorState, dt: number): void {
-    const b = state.boss;
-    if (!b.active) {
-      if (this.boss) {
-        this.root.remove(this.boss.root);
-        this.boss = null;
+    const aliveIds = new Set(
+      state.bosses.filter((b) => b.active || (b.state === 'dead' && b.timer > 0)).map((b) => b.id),
+    );
+    for (const [id, vis] of this.bosses) {
+      if (!aliveIds.has(id)) {
+        this.root.remove(vis.root);
+        this.bosses.delete(id);
       }
-      return;
     }
-    if (!this.boss) {
-      this.boss = this.makeFromUrl(
-        SURVIVOR_BOSS.url,
-        {
-          idle: [...BOSS_DEMON.anim.idle],
-          walk: [...BOSS_DEMON.anim.walk],
-          run: [...BOSS_DEMON.anim.walk],
-          shoot: [...BOSS_DEMON.anim.attack],
-          dodge: [...BOSS_DEMON.anim.idle],
-          hit: [...BOSS_DEMON.anim.hit],
-          death: [...BOSS_DEMON.anim.death],
-          ability: [...BOSS_DEMON.anim.attack],
-        },
-        'boss',
-      );
-      if (this.boss) this.root.add(this.boss.root);
+    for (const b of state.bosses) {
+      if (!b.active && !(b.state === 'dead' && b.timer > 0)) continue;
+      let vis = this.bosses.get(b.id);
+      if (!vis) {
+        const created = this.makeFromUrl(
+          SURVIVOR_BOSS.url,
+          {
+            idle: [...BOSS_DEMON.anim.idle],
+            walk: [...BOSS_DEMON.anim.walk],
+            run: [...BOSS_DEMON.anim.walk],
+            shoot: [...BOSS_DEMON.anim.attack],
+            dodge: [...BOSS_DEMON.anim.idle],
+            hit: [...BOSS_DEMON.anim.hit],
+            death: [...BOSS_DEMON.anim.death],
+            ability: [...BOSS_DEMON.anim.attack],
+          },
+          'boss',
+        );
+        if (!created) continue;
+        vis = created;
+        this.bosses.set(b.id, vis);
+        this.root.add(vis.root);
+      }
+      const scale = SURVIVOR.actorScale.boss * (b.phase >= 3 ? 1.08 : 1) * (1 + b.breachEmpower * 0.05);
+      this.place(vis, b.x, b.z, b.facingX, b.facingZ, scale);
+      if (vis.animator) {
+        if (b.state === 'dead') vis.animator.play('death', 0.08);
+        else if (b.state === 'windup' || b.state === 'active') vis.animator.play('shoot', 0.06);
+        else vis.animator.play('idle');
+        vis.animator.update(dt);
+      }
+      this.flash(vis, b.hitFlash, b.state === 'windup' || b.phase >= 3);
     }
-    if (!this.boss) return;
-    const scale = SURVIVOR.actorScale.boss * (b.phase >= 3 ? 1.08 : 1);
-    this.place(this.boss, b.x, b.z, b.facingX, b.facingZ, scale);
-    if (this.boss.animator) {
-      if (b.state === 'dead') this.boss.animator.play('death', 0.08);
-      else if (b.state === 'windup' || b.state === 'active') this.boss.animator.play('shoot', 0.06);
-      else this.boss.animator.play('idle');
-      this.boss.animator.update(dt);
-    }
-    this.flash(this.boss, b.hitFlash, b.state === 'windup' || b.phase >= 3);
   }
 
   private syncProjectiles(state: SurvivorState): void {
@@ -489,31 +498,41 @@ export class SurvivorRenderer {
     }
     const r = e.radius ?? e.scale ?? 1;
     if (e.kind === 'repulsor') {
-      // Expanding multi-ring shockwave sized to true radius
+      // Strong multi-layer expanding shockwave matching gameplay radius
       const outer = new THREE.Mesh(
-        new THREE.RingGeometry(r * 0.82, r, 64),
-        this.basic(color, 0.85, true),
+        new THREE.RingGeometry(r * 0.88, r, 72),
+        this.basic(color, 0.95, true),
       );
       outer.rotation.x = -Math.PI / 2;
       const mid = new THREE.Mesh(
-        new THREE.RingGeometry(r * 0.45, r * 0.72, 48),
-        this.basic('#ffffff', 0.35, true),
+        new THREE.RingGeometry(r * 0.55, r * 0.82, 56),
+        this.basic('#ffffff', 0.5, true),
       );
       mid.rotation.x = -Math.PI / 2;
-      mid.position.y = 0.02;
+      mid.position.y = 0.03;
+      const inner = new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.2, r * 0.5, 48),
+        this.basic(color, 0.4, true),
+      );
+      inner.rotation.x = -Math.PI / 2;
+      inner.position.y = 0.05;
       const floor = new THREE.Mesh(
-        new THREE.CircleGeometry(r * 0.95, 48),
-        this.basic(color, 0.14, true),
+        new THREE.CircleGeometry(r * 0.98, 56),
+        this.basic(color, 0.2, true),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.position.y = -0.02;
-      // Vertical cylindrical shock suggestion
       const shell = new THREE.Mesh(
-        new THREE.CylinderGeometry(r * 0.92, r, 0.55, 40, 1, true),
-        this.basic(color, 0.18, true),
+        new THREE.CylinderGeometry(r * 0.95, r * 1.02, 1.1, 48, 1, true),
+        this.basic(color, 0.28, true),
       );
-      shell.position.y = 0.3;
-      g.add(floor, mid, outer, shell);
+      shell.position.y = 0.55;
+      const shell2 = new THREE.Mesh(
+        new THREE.CylinderGeometry(r * 0.7, r * 0.85, 0.7, 40, 1, true),
+        this.basic('#ffffff', 0.15, true),
+      );
+      shell2.position.y = 0.4;
+      g.add(floor, mid, inner, outer, shell, shell2);
       g.position.set(e.x, 0.08, e.z);
       return g;
     }
@@ -579,7 +598,7 @@ export class SurvivorRenderer {
     this.shipExhaust = null;
     this.exhaustL = null;
     this.exhaustR = null;
-    this.boss = null;
+    this.bosses.clear();
   }
 }
 

@@ -5,7 +5,7 @@
 GYST is currently evaluating **two** playable directions. The final primary format has **not** been selected.
 
 1. **Campaign vertical slice** — authored isometric action: manual combat, dodge, abilities, Nanite Repair, mech transform, multi-pattern boss, ship-part recovery. See `docs/VERTICAL_SLICE.md`.
-2. **Containment Protocol (survivor experiment)** — Vampire Survivors–style horde survival with automatic weapons, XP level-ups, kill-charged mech, timed boss. See `docs/SURVIVOR_MODE_VERTICAL_SLICE.md`.
+2. **Containment Protocol (survivor experiment)** — Endless one-map high-score survival: upward timer, bosses every two minutes, automatic weapons, XP level-ups, Dodge / Repulsor / Afterburner / Mech, local records. Death ends the run (no eight-minute victory). See `docs/SURVIVOR_MODE_VERTICAL_SLICE.md`.
 
 > Older “astronaut → endless corridor / three-act only” product docs that forbade additional modes are superseded for this authorized survivor experiment. Campaign remains a first-class mode; survivor is an explicit peer experiment.
 

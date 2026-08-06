@@ -41,8 +41,6 @@ export class SurvivorArena {
       'Details_Pipes_Long',
       'Details_Vent_1',
       'Details_Plate_Large',
-      'RoofTile_Vents',
-      'RoofTile_Pipes1',
       'Pipes',
     ];
     await this.lib.preloadAll(pieces, [], []);
@@ -146,7 +144,6 @@ export class SurvivorArena {
     this.mod('Props_Base', 0, 0, { scale: 1.4 });
     this.mod('Column_3', 0, 0, { y: 0.1 });
     this.mod('Props_Teleporter_1', 0, 0, { y: 0.05, scale: 1.15 });
-    this.mod('RoofTile_Vents', 0, 0, { y: 3.2, scale: 0.9 });
     this.mod('Props_Laser', 1.8, 0, { ry: Math.PI / 2 });
     this.mod('Props_Laser', -1.8, 0, { ry: -Math.PI / 2 });
 
@@ -165,8 +162,6 @@ export class SurvivorArena {
     this.mod('Column_1', q, q);
     this.mod('Props_Crate', -q + 1.5, -q + 1.2, { ry: 0.4 });
     this.mod('Props_Crate', q - 1.5, q - 1.2, { ry: -0.5 });
-    this.mod('RoofTile_Pipes1', -q, 0, { y: 3.0, scale: 0.85 });
-    this.mod('RoofTile_Pipes1', q, 0, { y: 3.0, scale: 0.85 });
   }
 
   private addLighting(): void {

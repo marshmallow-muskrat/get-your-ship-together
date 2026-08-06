@@ -1,4 +1,4 @@
-# Containment Protocol — Survivor Mode Vertical Slice
+# Containment Protocol — Endless High-Score Mode
 
 **Status:** Authorized experiment (owner-directed)  
 **Mode name:** Containment Protocol  
@@ -6,98 +6,94 @@
 
 ## Purpose
 
-Answer whether a Vampire Survivors–style horde mode is more appealing for GYST than (or as a peer to) the campaign direction—using GYST heroes, mechs, ships, Modular Sci-Fi, and Ultimate Monsters only.
+Survive an increasingly impossible containment breach for as long as possible — one arena, endless upward timer, bosses every two minutes, local high scores.
 
-This experiment may become the preferred primary mode. It must coexist with campaign without corrupting campaign architecture.
+## Fantasy
+
+> Survive an increasingly impossible containment breach for as long as possible.
 
 ## Access
 
 1. Select a hero on crew selection.
-2. Choose **CAMPAIGN** or **CONTAINMENT PROTOCOL**.
-3. Survive 8 minutes, level up, use active abilities, defeat the midpoint warden and final boss.
+2. Choose **CONTAINMENT PROTOCOL**.
+3. Survive until death. Score = survival time.
 
 ### Dev fixtures
 
-| Fixture | URL example |
+| Fixture | Purpose |
 |---|---|
-| Start | `?mode=survivor&fixture=survivor-start&hero=bee` |
-| Level-up | `?mode=survivor&fixture=survivor-levelup&hero=red-panda` |
-| Dense horde | `?mode=survivor&fixture=survivor-horde&hero=bee` |
-| Mech ready | `?mode=survivor&fixture=survivor-mech&hero=flamingo` |
-| Late-run boss | `?mode=survivor&fixture=survivor-boss&hero=frog` |
-| Repulsor QA | `?mode=survivor&fixture=survivor-repulsor&hero=bee` |
-| Ship QA | `?mode=survivor&fixture=survivor-ship&hero=flamingo` |
-| Damage numbers | `?mode=survivor&fixture=survivor-damage&hero=frog` |
-| Miniboss @ 4:00 | `?mode=survivor&fixture=survivor-miniboss&hero=bee` |
+| `survivor-start` | Clean endless start |
+| `survivor-levelup` | Level-up modal |
+| `survivor-horde` | Dense late pressure |
+| `survivor-mech` | Mech ready |
+| `survivor-boss` | Just before first boss (~2:00) with mid-run build |
+| `survivor-repulsor` | Large repulsor QA |
+| `survivor-ship` | Afterburner / thrusters |
+| `survivor-damage` | Damage numbers |
+| `survivor-miniboss` | Legacy alias for ~4:00 boss window |
+
+Example: `?mode=survivor&fixture=survivor-boss&hero=frog`
 
 ## Design summary
 
 | Pillar | Choice |
 |---|---|
-| Camera | Isometric orthographic follow (not top-down) |
-| Combat | Automatic weapons + active Q / E / R |
-| Arena | Reactor Platform 7 — single map, 64×64 |
-| Run | 8 minutes → multi-phase boss |
-| Midpoint | Containment Warden miniboss ~4:00 |
-| Progression | XP drops → 3-choice level-ups (run-only). Energy bar = XP |
-| Mech | Kill-charged meter, R when full (ultimate) |
-| Architecture | Isolated `SurvivorMode` — no campaign state bleed |
+| Camera | Isometric orthographic follow |
+| Combat | Auto weapons + Dodge / Q / E / R |
+| Arena | Single Reactor Platform 7 (64×64), no roof ventilation tiles |
+| Run | **Endless** — timer counts **up** from 00:00 |
+| End | **Death only** (no normal victory) |
+| Score | Survival time + local bests |
+| Bosses | Every **2 minutes**, scale forever, up to 3 concurrent + breach stacks |
+| Progression | Run-only XP upgrades; permanent power ceilings; temp consumables when exhausted |
 
-## Controls
+## Controls (defaults — remappable)
 
-Defaults (remappable in Pause → Settings; stored as `gyst.settings.v1`):
-
-| Action | Default binding |
+| Action | Default |
 |---|---|
-| Move | WASD (screen-relative) |
-| Repulsor Burst | Q |
-| Afterburner (ship) | E |
-| Mech Overdrive | R (when Mech Core full) |
-| Level-up choices | 1 / 2 / 3 or click |
-| Pause | Esc |
-| Mute | M (wired; audio bus intentionally disabled) |
+| Move | WASD |
+| **Dodge** | **Space** (10s CD) |
+| Repulsor Burst | Q (30s CD, ~18 unit radius) |
+| Afterburner | E (ship + dual thruster exhaust) |
+| Mech Overdrive | R (kill charge) |
+| Level-up | 1 / 2 / 3 or click |
+| Pause | Esc → Resume / Settings / Restart / Crew |
 
-Internal bindings use `KeyboardEvent.code`. Conflicts swap. Escape cancels rebind capture (except when intentionally rebinding Pause). Settings open pauses the run; closing returns to the pause overlay.
+Bindings: `gyst.settings.v1` (KeyboardEvent.code). HUD labels update live.
 
-## Active abilities
+## Endless systems
 
-### Repulsor Burst
-Major panic ability: **30s cooldown**, ~**13.5** world-unit radius, ~**12** unit normal knockback (elite/miniboss reduced). Mech amplifies radius/damage/push further. Dramatic multi-ring shockwave matches the true gameplay radius. Does not throw the final boss (brief stagger + internal boss CD). Arena-clamped.
+### Survival timer
+Authoritative sim time only while `phase === 'playing'`. Pause, level-up, and Settings do not advance time.
 
-### Afterburner
-Temporary ship form using the selected hero’s real ship model. Fast steering, damage reduction, weapons offline. **Dual-engine thruster exhaust** continuously damages enemies **behind** the ship (tick CD ~0.24s); ground wake still deposits. Mutually exclusive with mech. Exhaust visuals clean up on form end, death, restart, dispose.
+### Boss schedule
+Boss index `n` at `t = n * 120` seconds. If 3 bosses already live, new schedules add **breach stacks** that empower living bosses and spawn when a slot frees — never silently dropped.
 
-### Mech Overdrive
-Kill-charged ultimate. HUD shows charge %, READY glow, then remaining duration while active.
-
-## Weapons
-
-Five families remain (Pulse, Microdrone, Rail, Gravity, Rocket). Frog’s starter is **Bio-Plasma Glob** (ranged toxic globs + splash + corrosive puddles). Gravity Pulse remains available in the upgrade pool.
-
-## Difficulty director
-
-Time-based `difficultyAt(t)` applies health/damage/speed multipliers **at spawn** and drives population targets + spawn rate. No rubber-banding off player DPS. Speed scaling caps ~1.10×.
-
-## Bosses
-
-- **Containment Warden** (~4:00): one-shot miniboss, telegraphed slam, large XP + repair/supply on death.
-- **Final breach** (~8:00): ~7600 HP, three phases (100–65 / 65–35 / &lt;35) with tighter recovery, more projectiles/summons, visual phase transitions. Victory on death.
-
-## Architecture
-
-```text
-Shared: assets, heroes/forms, animation helpers, modular kit, audio bus
-Campaign: GystRuntime + campaign simulation (unchanged ownership)
-Survivor: src/game/modes/survivor/* — own state, sim, render, HUD
+### Enemy scaling (`endlessDifficultyAt`)
+```
+m = t/60
+health = 1 + 0.12m + 0.02*max(0,m-8)²
+damage = 1 + 0.08m + 0.05*max(0,m-10)
+speed  = min(1.30, 1 + 0.015m)
 ```
 
-Survivor player form is local: `astronaut | ship | mech` (does not alter campaign `PlayerForm`).
+### Boss scaling (`bossDifficultyFor(n)`)
+```
+healthMul = 1.55^(n-1)
+damageMul = 1.18^(n-1)
+recovery  = max(0.45, 0.94^(n-1))
+```
+First boss base HP ≈ 2200.
 
-## Presentation notes
+### Local records
+`gyst.survivor.records.v1` — best overall/per-hero time, kills, level, bosses defeated, build snapshot. Recorded once on defeat.
 
-- Damage numbers: larger fonts, strong outline/shadow, scale pop, heavy/ability/kill variants; still aggregated and pooled.
-- Pause overlay: Resume, Settings, Restart (confirm), Crew Select (confirm).
+## HUD
+
+Bottom-center command deck: Integrity, Energy (XP), **Dodge · Q · E · R**.  
+Separate bottom-right **BUILD** panel for weapons/passives/temps — does not reflow the command deck.  
+Mech ready: one-shot flourish + toast when charge first reaches 100%.
 
 ## Deferred
 
-Audio/music, permanent meta-progression, shops, rarity, inventory, gamepad, mobile controls, additional maps, co-op.
+Audio, online leaderboards, accounts, permanent metagame, extra maps, gamepad, co-op.

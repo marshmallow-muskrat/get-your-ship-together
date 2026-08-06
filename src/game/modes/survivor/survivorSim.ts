@@ -6,19 +6,28 @@ import {
   PASSIVES,
   SURVIVOR,
   SURVIVOR_BOSS,
+  TEMP_BUFFS,
   WEAPONS,
+  bossDifficultyFor,
   bossPhaseFromHealth,
+  bossTimeForIndex,
   compositionAt,
-  difficultyAt,
+  endlessDifficultyAt,
   weaponLevelDef,
   xpForLevel,
   type PassiveId,
+  type TempBuffId,
   type WeaponId,
 } from './survivorContent';
 import {
+  aliveBossCount,
+  emptyBoss,
   emptyEnemy,
   nextEntityId,
+  primaryBoss,
+  syncPrimaryBossMirror,
   type DamageEvent,
+  type SurvivorBoss,
   type SurvivorEnemy,
   type SurvivorHazard,
   type SurvivorPickup,
@@ -37,6 +46,7 @@ export interface SurvivorInput {
   mechPressed: boolean;
   shipPressed: boolean;
   repulsorPressed: boolean;
+  dodgePressed: boolean;
   pausePressed: boolean;
   mutePressed: boolean;
   choiceIndex: number | null;
@@ -48,6 +58,7 @@ export const EMPTY_SURVIVOR_INPUT: SurvivorInput = {
   mechPressed: false,
   shipPressed: false,
   repulsorPressed: false,
+  dodgePressed: false,
   pausePressed: false,
   mutePressed: false,
   choiceIndex: null,
@@ -209,7 +220,7 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   const slot = acquireEnemySlot(state);
   if (!slot) return null;
   const v = def.visual;
-  const diff = difficultyAt(state.time);
+  const diff = endlessDifficultyAt(state.time);
   const isMb = !!def.isMiniboss;
   const healthMul = isMb ? MINIBOSS.healthMul : diff.healthMul * (def.isElite ? 2.2 : 1);
   const dmgMul = isMb ? MINIBOSS.damageMul : diff.damageMul;
@@ -225,10 +236,12 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   slot.kbZ = 0;
   slot.health = v.maxHealth * healthMul;
   slot.maxHealth = slot.health;
+  // attack cooldown scaled by endless attack rate
+  const atkMul = isMb ? 1 : diff.attackRateMul;
   slot.radius = v.colliderRadius * (isMb ? MINIBOSS.radiusMul : def.isElite ? 1.45 : 1.25);
   slot.role = def.role;
   slot.hitFlash = 0;
-  slot.attackCd = 0.4 + rng(state) * 0.6;
+  slot.attackCd = (0.4 + rng(state) * 0.6) / Math.max(0.6, isMb ? 1 : endlessDifficultyAt(state.time).attackRateMul);
   slot.alive = true;
   slot.isElite = !!def.isElite || isMb;
   slot.isMiniboss = isMb;
@@ -372,7 +385,14 @@ function damageEnemy(
 
 function damagePlayer(state: SurvivorState, amount: number): void {
   const p = state.player;
-  if (!p.alive || p.invuln > 0 || amount <= 0) return;
+  if (!p.alive || p.invuln > 0 || p.dodgeActive > 0 || amount <= 0) return;
+  if (p.barrierHits > 0) {
+    p.barrierHits -= 1;
+    p.hitFlash = 0.12;
+    p.invuln = 0.15;
+    pushEffect(state, 'pulse', p.x, p.z, 0.3, '#88e0ff', 1.2);
+    return;
+  }
   let mul = 1;
   if (p.form === 'mech') mul = SURVIVOR.mech.damageTakenMul;
   else if (p.form === 'ship') mul = SURVIVOR.ship.damageTakenMul;
@@ -620,14 +640,14 @@ export function tryRepulsor(state: SurvivorState): boolean {
     e.z = c.z;
   }
 
-  // Boss: stagger only, no throw
-  const b = state.boss;
-  if (b.active && b.state !== 'dead' && b.repulsorCd <= 0) {
+  // Bosses: stagger only, no throw
+  for (const b of state.bosses) {
+    if (!b.active || b.state === 'dead' || b.repulsorCd > 0) continue;
     const dx = b.x - p.x;
     const dz = b.z - p.z;
     const dist = Math.hypot(dx, dz);
     if (dist <= radius + SURVIVOR_BOSS.colliderRadius) {
-      damageBoss(state, dmg * 0.55, { kind: 'ability', pop: 0.9 });
+      damageBoss(state, dmg * 0.55, { kind: 'ability', pop: 0.9, boss: b });
       b.repulsorCd = cfg.bossInternalCd;
       if (b.state === 'windup') {
         b.state = 'recover';
@@ -748,7 +768,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           Math.cos(a) * spd,
           Math.sin(a) * spd,
           {
-            damage: def.damage * (mech ? 1.35 : 1),
+            damage: def.damage * (mech ? 1.35 : 1) * p.damageMul,
             radius: (def.radius ?? 0.18) * area,
             life: (def.life ?? 2.2) * (mech ? 1.2 : 1),
             homing: true,
@@ -787,26 +807,27 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           length,
           width,
         });
-        const dmg = def.damage * (mech ? 1.45 : 1);
+        const dmg = def.damage * (mech ? 1.45 : 1) * p.damageMul;
         for (const e of state.enemies) {
           if (!e.alive) continue;
           if (segmentHit(p.x + ox, p.z + oz, x1, z1, e.x, e.z, e.radius + width * 0.5)) {
             damageEnemy(state, e, dmg);
           }
         }
-        if (state.boss.active && state.boss.state !== 'dead') {
+        for (const b of state.bosses) {
+          if (!b.active || b.state === 'dead') continue;
           if (
             segmentHit(
               p.x + ox,
               p.z + oz,
               x1,
               z1,
-              state.boss.x,
-              state.boss.z,
+              b.x,
+              b.z,
               SURVIVOR_BOSS.colliderRadius + width * 0.5,
             )
           ) {
-            damageBoss(state, dmg * 0.85);
+            damageBoss(state, dmg * 0.85, { boss: b });
           }
         }
       }
@@ -816,7 +837,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const cx = p.x + state.player.facingX * i * 0.8;
         const cz = p.z + state.player.facingZ * i * 0.8;
         pushEffect(state, 'pulse', cx, cz, 0.4, state.accent, radius, { radius });
-        const dmg = def.damage * (mech ? 1.4 : 1);
+        const dmg = def.damage * (mech ? 1.4 : 1) * p.damageMul;
         for (const e of state.enemies) {
           if (!e.alive) continue;
           const dx = e.x - cx;
@@ -827,11 +848,12 @@ function fireWeapons(state: SurvivorState, dt: number): void {
             applyKnockback(e, -dx / len, -dz / len, 0.8);
           }
         }
-        if (state.boss.active && state.boss.state !== 'dead') {
-          const dx = state.boss.x - cx;
-          const dz = state.boss.z - cz;
+        for (const b of state.bosses) {
+          if (!b.active || b.state === 'dead') continue;
+          const dx = b.x - cx;
+          const dz = b.z - cz;
           if (dx * dx + dz * dz <= (radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
-            damageBoss(state, dmg * 0.7);
+            damageBoss(state, dmg * 0.7, { boss: b });
           }
         }
       }
@@ -845,7 +867,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         if (!proj) break;
         const arm = 0.35 + i * 0.06;
         resetProj(proj, state, 'rocket', 'rocket', tx, tz, 0, 0, {
-          damage: def.damage * (mech ? 1.35 : 1),
+          damage: def.damage * (mech ? 1.35 : 1) * p.damageMul,
           radius: 0.25,
           life: arm + 0.05,
           color: state.accent,
@@ -923,7 +945,7 @@ function fireBioGlob(
   if (!proj) return;
   const spd = def.speed ?? 16;
   resetProj(proj, state, 'bioplasma', 'bioplasma', x, z, Math.sin(angle) * spd, Math.cos(angle) * spd, {
-    damage: def.damage * (mech ? 1.3 : 1),
+    damage: def.damage * (mech ? 1.3 : 1) * state.player.damageMul,
     radius: (def.radius ?? 0.28) * area,
     life: def.life ?? 1.4,
     color: WEAPONS.bioplasma.color,
@@ -947,11 +969,12 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
         damageEnemy(state, e, proj.damage * 0.55);
       }
     }
-    if (state.boss.active && state.boss.state !== 'dead') {
-      const dx = state.boss.x - hitX;
-      const dz = state.boss.z - hitZ;
+    for (const b of state.bosses) {
+      if (!b.active || b.state === 'dead') continue;
+      const dx = b.x - hitX;
+      const dz = b.z - hitZ;
       if (dx * dx + dz * dz <= (proj.splash + SURVIVOR_BOSS.colliderRadius) ** 2) {
-        damageBoss(state, proj.damage * 0.45);
+        damageBoss(state, proj.damage * 0.45, { boss: b });
       }
     }
   }
@@ -989,16 +1012,36 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
   }
 }
 
+function nearestAliveBoss(state: SurvivorState, x: number, z: number): SurvivorBoss | null {
+  let best: SurvivorBoss | null = null;
+  let bestD = Infinity;
+  for (const b of state.bosses) {
+    if (!b.active || b.state === 'dead') continue;
+    const d = (b.x - x) ** 2 + (b.z - z) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
 function damageBoss(
   state: SurvivorState,
   dmg: number,
-  opts?: { kind?: DamageEvent['kind']; pop?: number },
+  opts?: { kind?: DamageEvent['kind']; pop?: number; boss?: SurvivorBoss; x?: number; z?: number },
 ): void {
-  const b = state.boss;
-  if (!b.active || b.state === 'dead' || dmg <= 0) return;
+  if (dmg <= 0) return;
+  let b = opts?.boss ?? null;
+  if (!b) {
+    const x = opts?.x ?? state.player.x;
+    const z = opts?.z ?? state.player.z;
+    b = nearestAliveBoss(state, x, z);
+  }
+  if (!b || !b.active || b.state === 'dead') return;
   b.health = Math.max(0, b.health - dmg);
   b.hitFlash = 0.1;
-  emitDamage(state, 'boss', b.x, b.z + 1.2, dmg, opts?.kind ?? 'boss', opts?.pop ?? 0.75);
+  emitDamage(state, `boss:${b.id}`, b.x, b.z + 1.2, dmg, opts?.kind ?? 'boss', opts?.pop ?? 0.75);
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
   if (phase > b.phase) {
     b.phase = phase;
@@ -1009,11 +1052,30 @@ function damageBoss(
     b.pattern = null;
   }
   if (b.health <= 0) {
-    b.state = 'dead';
-    b.timer = 1.2;
-    pushEffect(state, 'death', b.x, b.z, 1.2, '#66e0ff', 3.5);
-    state.phase = 'victory';
+    onBossDefeated(state, b);
   }
+  syncPrimaryBossMirror(state);
+}
+
+function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
+  b.state = 'dead';
+  b.timer = 1.2;
+  b.active = false;
+  state.bossesDefeated += 1;
+  pushEffect(state, 'death', b.x, b.z, 1.2, '#66e0ff', 3.5);
+  // Large rewards — never victory
+  dropPickup(state, b.x, b.z, 'xp', 80 + b.index * 25);
+  dropPickup(state, b.x + 0.5, b.z, 'repair', 45);
+  dropPickup(state, b.x - 0.5, b.z, 'supply', 1);
+  if (state.player.form !== 'mech') {
+    state.player.mechCharge = Math.min(1, state.player.mechCharge + SURVIVOR.mech.chargePerBoss);
+  }
+  // Drain one breach stack into a free spawn slot if pending
+  if (state.breachStacks > 0 && aliveBossCount(state) < SURVIVOR.maxSimultaneousBosses) {
+    state.breachStacks -= 1;
+    spawnBossAtIndex(state, state.bossesSpawned + 1, true);
+  }
+  syncPrimaryBossMirror(state);
 }
 
 function rebuildHash(state: SurvivorState): void {
@@ -1039,11 +1101,12 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
           damageEnemy(state, e, proj.damage);
         }
       }
-      if (state.boss.active && state.boss.state !== 'dead') {
-        const dx = state.boss.x - proj.x;
-        const dz = state.boss.z - proj.z;
+      for (const b of state.bosses) {
+        if (!b.active || b.state === 'dead') continue;
+        const dx = b.x - proj.x;
+        const dz = b.z - proj.z;
         if (dx * dx + dz * dz <= (proj.explodeRadius + SURVIVOR_BOSS.colliderRadius) ** 2) {
-          damageBoss(state, proj.damage);
+          damageBoss(state, proj.damage, { boss: b });
         }
       }
       proj.active = false;
@@ -1057,9 +1120,12 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       if (t) {
         tx = t.x;
         tz = t.z;
-      } else if (state.boss.active && state.boss.state !== 'dead') {
-        tx = state.boss.x;
-        tz = state.boss.z;
+      } else {
+        const bb = nearestAliveBoss(state, proj.x, proj.z);
+        if (bb) {
+          tx = bb.x;
+          tz = bb.z;
+        }
       }
       const spd = Math.hypot(proj.vx, proj.vz) || 12;
       const dx = tx - proj.x;
@@ -1146,18 +1212,21 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         continue;
       }
 
-      if (state.boss.active && state.boss.state !== 'dead') {
-        const dx = state.boss.x - proj.x;
-        const dz = state.boss.z - proj.z;
-        if (dx * dx + dz * dz <= (proj.radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
-          damageBoss(state, proj.damage);
-          if (proj.kind === 'bioplasma') {
-            bioImpact(state, proj, state.boss.x, state.boss.z);
-            proj.active = false;
-          } else if (proj.pierce > 0) proj.pierce -= 1;
-          else {
-            proj.active = false;
-            pushEffect(state, 'impact', proj.x, proj.z, 0.12, proj.color, 0.6);
+      {
+        const bb = nearestAliveBoss(state, proj.x, proj.z);
+        if (bb) {
+          const dx = bb.x - proj.x;
+          const dz = bb.z - proj.z;
+          if (dx * dx + dz * dz <= (proj.radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
+            damageBoss(state, proj.damage, { boss: bb });
+            if (proj.kind === 'bioplasma') {
+              bioImpact(state, proj, bb.x, bb.z);
+              proj.active = false;
+            } else if (proj.pierce > 0) proj.pierce -= 1;
+            else {
+              proj.active = false;
+              pushEffect(state, 'impact', proj.x, proj.z, 0.12, proj.color, 0.6);
+            }
           }
         }
       }
@@ -1192,13 +1261,13 @@ function updateHazards(state: SurvivorState, dt: number): void {
         e.hazardHitCd = SURVIVOR.ship.wakeTickCd;
       }
     }
-    if (state.boss.active && state.boss.state !== 'dead' && h.kind === 'wake') {
-      // boss can be tick-damaged by wake with its own throttle via repulsorCd abuse? use hitFlash as soft throttle
-      if (state.boss.hitFlash <= 0.02) {
-        const dx = state.boss.x - h.x;
-        const dz = state.boss.z - h.z;
+    if (h.kind === 'wake') {
+      for (const b of state.bosses) {
+        if (!b.active || b.state === 'dead' || b.hitFlash > 0.02) continue;
+        const dx = b.x - h.x;
+        const dz = b.z - h.z;
         if (dx * dx + dz * dz <= (h.radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
-          damageBoss(state, h.damage * 0.7);
+          damageBoss(state, h.damage * 0.7, { boss: b });
         }
       }
     }
@@ -1427,7 +1496,7 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
       });
     }
   }
-  if (state.weapons.length < 5) {
+  if (state.weapons.length < SURVIVOR.maxWeaponSlots) {
     for (const id of Object.keys(WEAPONS) as WeaponId[]) {
       if (ownedWeaponLevel(state, id) > 0) continue;
       const fam = WEAPONS[id];
@@ -1452,6 +1521,19 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     });
   }
 
+  // When permanent upgrades are exhausted, fill with temporary consumables
+  if (pool.length < 3) {
+    for (const t of TEMP_BUFFS) {
+      pool.push({
+        kind: 'temp',
+        id: `t-${t.id}-${state.level}`,
+        title: t.title,
+        body: t.body,
+        tempId: t.id,
+      });
+    }
+  }
+
   const choices: UpgradeChoice[] = [];
   const used = new Set<string>();
   const bag = [...pool];
@@ -1461,7 +1543,13 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
   }
   for (const c of bag) {
     const key =
-      c.kind === 'passive' ? `p:${c.passiveId}` : c.kind === 'new-weapon' ? `n:${c.weaponId}` : `u:${c.weaponId}`;
+      c.kind === 'passive'
+        ? `p:${c.passiveId}`
+        : c.kind === 'new-weapon'
+          ? `n:${c.weaponId}`
+          : c.kind === 'temp'
+            ? `t:${c.tempId}`
+            : `u:${c.weaponId}`;
     if (used.has(key)) continue;
     used.add(key);
     choices.push(c);
@@ -1470,6 +1558,17 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
   while (choices.length < 3 && bag.length > 0) {
     const c = bag[choices.length % bag.length]!;
     choices.push(c);
+  }
+  // Absolute fallback
+  while (choices.length < 3) {
+    const t = TEMP_BUFFS[choices.length % TEMP_BUFFS.length]!;
+    choices.push({
+      kind: 'temp',
+      id: `t-fill-${choices.length}`,
+      title: t.title,
+      body: t.body,
+      tempId: t.id,
+    });
   }
   return choices.slice(0, 3);
 }
@@ -1503,7 +1602,10 @@ export function applyChoice(state: SurvivorState, index: number): void {
     const slot = state.weapons.find((w) => w.weaponId === choice.weaponId);
     if (slot) slot.level = Math.min(WEAPONS[slot.weaponId].levels.length, slot.level + 1);
   } else if (choice.kind === 'new-weapon' && choice.weaponId) {
-    if (!state.weapons.some((w) => w.weaponId === choice.weaponId)) {
+    if (
+      state.weapons.length < SURVIVOR.maxWeaponSlots &&
+      !state.weapons.some((w) => w.weaponId === choice.weaponId)
+    ) {
       state.weapons.push({ weaponId: choice.weaponId, level: 1, cooldown: 0.5 });
     }
   } else if (choice.kind === 'passive' && choice.passiveId) {
@@ -1513,9 +1615,89 @@ export function applyChoice(state: SurvivorState, index: number): void {
       state.player.maxHealth += 20;
       state.player.health += 20;
     }
+  } else if (choice.kind === 'temp' && choice.tempId) {
+    applyTempBuff(state, choice.tempId);
   }
   state.choices = [];
   state.phase = 'playing';
+}
+
+function applyTempBuff(state: SurvivorState, id: TempBuffId): void {
+  const p = state.player;
+  const cfg = SURVIVOR.tempBuff;
+  if (id === 'emergency-repair') {
+    p.health = Math.min(p.maxHealth, p.health + cfg.repairAmount);
+    pushEffect(state, 'pulse', p.x, p.z, 0.45, '#4df0d0', 1.6);
+  } else if (id === 'weapon-overcharge') {
+    upsertTemp(state, 'weapon-overcharge', cfg.overchargeDuration, 1);
+    p.damageMul = cfg.overchargeDamageMul;
+  } else if (id === 'cooldown-flush') {
+    p.dodgeCd = Math.max(0, p.dodgeCd * 0.25);
+    p.repulsorCd = Math.max(0, p.repulsorCd * 0.25);
+    p.shipCd = Math.max(0, p.shipCd * 0.25);
+    pushEffect(state, 'levelup', p.x, p.z, 0.4, state.accent, 1.5);
+  } else if (id === 'emergency-barrier') {
+    p.barrierHits = Math.min(2, p.barrierHits + cfg.barrierHits);
+    upsertTemp(state, 'emergency-barrier', 60, p.barrierHits);
+  } else if (id === 'thruster-surge') {
+    upsertTemp(state, 'thruster-surge', cfg.thrusterDuration, 1);
+  }
+}
+
+function upsertTemp(
+  state: SurvivorState,
+  id: TempBuffId,
+  duration: number,
+  stacks: number,
+): void {
+  const existing = state.tempBuffs.find((t) => t.id === id);
+  if (existing) {
+    existing.remaining = Math.max(existing.remaining, duration);
+    existing.stacks = Math.min(3, existing.stacks + stacks);
+  } else {
+    state.tempBuffs.push({ id, remaining: duration, stacks });
+  }
+}
+
+function tickTempBuffs(state: SurvivorState, dt: number): void {
+  const p = state.player;
+  let overcharge = false;
+  let thruster = false;
+  for (const t of state.tempBuffs) {
+    t.remaining -= dt;
+    if (t.id === 'weapon-overcharge' && t.remaining > 0) overcharge = true;
+    if (t.id === 'thruster-surge' && t.remaining > 0) thruster = true;
+    if (t.id === 'emergency-barrier') t.stacks = p.barrierHits;
+  }
+  state.tempBuffs = state.tempBuffs.filter((t) => t.remaining > 0 && (t.id !== 'emergency-barrier' || p.barrierHits > 0));
+  p.damageMul = overcharge ? SURVIVOR.tempBuff.overchargeDamageMul : 1;
+  // thruster applied in moveMul path via flag
+  (p as { _thruster?: boolean })._thruster = thruster;
+}
+
+export function tryDodge(state: SurvivorState, moveX: number, moveY: number): boolean {
+  const p = state.player;
+  if (!p.alive || p.form === 'ship') return false;
+  if (p.dodgeCd > 0 || p.dodgeActive > 0) return false;
+  const world = screenToWorldMove(moveX, moveY);
+  let dx = world.x;
+  let dz = world.z;
+  let len = Math.hypot(dx, dz);
+  if (len < 0.1) {
+    dx = p.facingX;
+    dz = p.facingZ;
+    len = Math.hypot(dx, dz) || 1;
+  }
+  p.dodgeDirX = dx / len;
+  p.dodgeDirZ = dz / len;
+  p.dodgeActive = SURVIVOR.dodge.duration;
+  p.dodgeCd = SURVIVOR.dodge.cooldown;
+  p.invuln = Math.max(p.invuln, SURVIVOR.dodge.invuln);
+  p.facingX = p.dodgeDirX;
+  p.facingZ = p.dodgeDirZ;
+  pushEffect(state, 'muzzle', p.x, p.z, 0.2, state.accent, 1.2);
+  pushEffect(state, 'wake', p.x - p.dodgeDirX, p.z - p.dodgeDirZ, 0.25, state.accent, 0.8);
+  return true;
 }
 
 function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): void {
@@ -1525,8 +1707,10 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   if (p.hitFlash > 0) p.hitFlash = Math.max(0, p.hitFlash - dt);
   if (p.repulsorCd > 0) p.repulsorCd = Math.max(0, p.repulsorCd - dt);
   if (p.shipCd > 0 && p.form !== 'ship') p.shipCd = Math.max(0, p.shipCd - dt);
+  if (p.dodgeCd > 0) p.dodgeCd = Math.max(0, p.dodgeCd - dt);
   if (p.bodyHitCd > 0) p.bodyHitCd = Math.max(0, p.bodyHitCd - dt);
   if (p.exhaustTickCd > 0) p.exhaustTickCd = Math.max(0, p.exhaustTickCd - dt);
+  tickTempBuffs(state, dt);
 
   const regen = passiveLevel(state, 'regen') * SURVIVOR.regenPerLevel;
   if (regen > 0 && p.health < p.maxHealth && p.form !== 'ship') {
@@ -1534,9 +1718,12 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   }
 
   // Ability edges
+  if (input.dodgePressed) tryDodge(state, input.moveX, input.moveY);
   if (input.repulsorPressed) tryRepulsor(state);
   if (input.shipPressed) tryShip(state);
-  if (input.mechPressed) tryMech(state);
+  if (input.mechPressed) {
+    if (tryMech(state)) p.mechReadyAnnounced = false;
+  }
 
   // Form timers
   if (p.form === 'mech') {
@@ -1553,9 +1740,23 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
     }
   }
 
+  // Dodge dash motion
+  if (p.dodgeActive > 0) {
+    const spd = SURVIVOR.dodge.distance / SURVIVOR.dodge.duration;
+    p.x += p.dodgeDirX * spd * dt;
+    p.z += p.dodgeDirZ * spd * dt;
+    p.dodgeActive = Math.max(0, p.dodgeActive - dt);
+    const pr = SURVIVOR.playerRadius;
+    const c = clampArena(p.x, p.z, pr);
+    p.x = c.x;
+    p.z = c.z;
+    return;
+  }
+
   const world = screenToWorldMove(input.moveX, input.moveY);
   const len = Math.hypot(world.x, world.z);
   let speed = SURVIVOR.playerSpeed * moveMul(state);
+  if ((p as { _thruster?: boolean })._thruster) speed *= SURVIVOR.tempBuff.thrusterSpeedMul;
   if (p.form === 'mech') speed *= 0.92;
   if (p.form === 'ship') speed *= SURVIVOR.ship.speedMul;
 
@@ -1574,7 +1775,6 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   p.x = c.x;
   p.z = c.z;
 
-  // Continuous rear exhaust jet + ground wake
   if (p.form === 'ship') {
     applyShipExhaust(state, dt);
     if (moved) {
@@ -1630,8 +1830,8 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
     e.hazardHitCd = SURVIVOR.ship.wakeTickCd;
   }
 
-  if (state.boss.active && state.boss.state !== 'dead' && state.boss.hitFlash <= 0.02) {
-    const b = state.boss;
+  for (const b of state.bosses) {
+    if (!b.active || b.state === 'dead' || b.hitFlash > 0.02) continue;
     const dx = b.x - p.x;
     const dz = b.z - p.z;
     const back = -(dx * fx + dz * fz);
@@ -1640,87 +1840,137 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
       damageBoss(state, SURVIVOR.ship.exhaustDamage * SURVIVOR.ship.exhaustBossMul, {
         kind: 'ability',
         pop: 0.8,
+        boss: b,
       });
     }
   }
 }
 
 function updateSpawns(state: SurvivorState, dt: number): void {
-  const diff = difficultyAt(state.time);
+  const diff = endlessDifficultyAt(state.time);
   const alive = state.enemies.reduce((n, e) => n + (e.alive ? 1 : 0), 0);
-  const target = (diff.populationMin + diff.populationMax) * 0.5;
-  // Replenish more aggressively when below target, never burst dozens in one frame
+  const target = diff.targetActive;
   let rate = diff.spawnRate;
   if (alive < diff.populationMin) rate *= 1.75;
   else if (alive > target) rate *= 0.55;
-  if (state.boss.active && state.boss.state !== 'dead') rate *= 0.55;
+  if (aliveBossCount(state) > 0) rate *= 0.7;
 
   state.spawnAcc += dt * rate;
   let spawnedThisFrame = 0;
   while (state.spawnAcc >= 1 && alive + spawnedThisFrame < state.enemyCap && spawnedThisFrame < 4) {
     state.spawnAcc -= 1;
     const pos = edgeSpawn(state);
-    if (spawnEnemy(state, pickComposition(state), pos.x, pos.z)) spawnedThisFrame += 1;
+    let defId = pickComposition(state);
+    if (rng(state) < diff.eliteChance && state.time > 90) defId = 'elite';
+    if (spawnEnemy(state, defId, pos.x, pos.z)) spawnedThisFrame += 1;
   }
 
   state.eliteTimer -= dt;
-  if (state.eliteTimer <= 0 && state.time > 100 && state.time < SURVIVOR.bossTime) {
-    state.eliteTimer = 18 + rng(state) * 12;
+  if (state.eliteTimer <= 0 && state.time > 80) {
+    state.eliteTimer = Math.max(8, 20 - state.time / 60) + rng(state) * 10;
     const pos = edgeSpawn(state);
     spawnEnemy(state, 'elite', pos.x, pos.z);
   }
-
-  ensureMiniboss(state);
 }
 
-function ensureMiniboss(state: SurvivorState): void {
-  if (state.miniboss.spawned) return;
-  if (state.time < SURVIVOR.minibossTime) return;
-  state.miniboss.spawned = true;
-  const pos = { x: 0, z: -SURVIVOR.arenaHalf * 0.4 };
-  // Keep away from player
-  const p = state.player;
-  if (Math.hypot(p.x - pos.x, p.z - pos.z) < 8) {
-    pos.x = SURVIVOR.arenaHalf * 0.35;
-    pos.z = -SURVIVOR.arenaHalf * 0.35;
+function spawnBossAtIndex(state: SurvivorState, index: number, fromStack = false): SurvivorBoss | null {
+  if (aliveBossCount(state) >= SURVIVOR.maxSimultaneousBosses) {
+    if (!fromStack) state.breachStacks += 1;
+    // Empower living bosses instead of dropping the schedule
+    for (const b of state.bosses) {
+      if (b.active && b.state !== 'dead') {
+        b.breachEmpower += 0.12;
+        b.damageMul *= 1.08;
+      }
+    }
+    state.inboundBanner = 2.5;
+    return null;
   }
-  const e = spawnEnemy(state, 'miniboss', pos.x, pos.z);
-  if (e) {
-    state.miniboss.alive = true;
-    state.miniboss.enemyId = e.id;
-    state.miniboss.health = e.health;
-    state.miniboss.maxHealth = e.maxHealth;
-    pushEffect(state, 'transform', e.x, e.z, 1, '#ffcc44', 2.8);
-  }
-}
 
-function ensureBoss(state: SurvivorState): void {
-  if (state.boss.active || state.time < SURVIVOR.bossTime) return;
-  state.boss.active = true;
-  // Safe entrance away from player
+  const diff = bossDifficultyFor(index);
   const px = state.player.x;
   const pz = state.player.z;
   let bx = 0;
   let bz = -SURVIVOR.arenaHalf * 0.45;
-  if (Math.hypot(px - bx, pz - bz) < 10) {
-    bx = SURVIVOR.arenaHalf * 0.4;
-    bz = SURVIVOR.arenaHalf * 0.35;
+  // Rotate entry by boss index
+  const ang = (index * 1.7) % (Math.PI * 2);
+  bx = Math.sin(ang) * SURVIVOR.arenaHalf * 0.42;
+  bz = -Math.cos(ang) * SURVIVOR.arenaHalf * 0.42;
+  if (Math.hypot(px - bx, pz - bz) < 12) {
+    bx = -bx;
+    bz = -bz;
   }
-  state.boss.x = bx;
-  state.boss.z = bz;
-  state.boss.health = SURVIVOR_BOSS.maxHealth;
-  state.boss.maxHealth = SURVIVOR_BOSS.maxHealth;
-  state.boss.state = 'idle';
-  state.boss.timer = 1.4;
-  state.boss.pattern = null;
-  state.boss.phase = 1;
-  state.boss.phaseAnnounced = 1;
-  state.boss.repulsorCd = 0;
-  pushEffect(state, 'transform', state.boss.x, state.boss.z, 1.1, '#ff4455', 3.5);
+  const c = clampArena(bx, bz, SURVIVOR_BOSS.colliderRadius);
+  bx = c.x;
+  bz = c.z;
+
+  const b = emptyBoss();
+  b.id = nextEntityId(state);
+  b.index = index;
+  b.active = true;
+  b.x = bx;
+  b.z = bz;
+  b.maxHealth = SURVIVOR.firstBossBaseHealth * diff.healthMul;
+  b.health = b.maxHealth;
+  b.state = 'idle';
+  b.timer = 1.5;
+  b.pattern = null;
+  b.phase = 1;
+  b.phaseAnnounced = 1;
+  b.repulsorCd = 0;
+  b.healthMul = diff.healthMul;
+  b.damageMul = diff.damageMul;
+  b.recoveryMul = diff.recoveryMul;
+  b.moveMul = diff.moveMul;
+  b.fanAdd = diff.fanAdd;
+  b.summonAdd = diff.summonAdd;
+  b.breachEmpower = 0;
+  state.bosses.push(b);
+  if (!fromStack) {
+    state.bossesSpawned = Math.max(state.bossesSpawned, index);
+  } else {
+    state.bossesSpawned += 1;
+  }
+  state.inboundBanner = 2.8;
+  pushEffect(state, 'telegraph', bx, bz, 1.2, '#ff4455', 3.5, { radius: 3.5 });
+  pushEffect(state, 'transform', bx, bz, 1.1, '#ff4455', 3.5);
+  syncPrimaryBossMirror(state);
+  return b;
 }
 
-function updateBoss(state: SurvivorState, dt: number): void {
-  const b = state.boss;
+/** Advance boss schedule from simulation time without skipping. */
+function ensureBossSchedule(state: SurvivorState): void {
+  // Catch up any owed indices while time advanced (pause doesn't advance time)
+  while (state.time + 1e-6 >= state.nextBossTime) {
+    const idx = state.nextBossIndex;
+    spawnBossAtIndex(state, idx, false);
+    state.nextBossIndex = idx + 1;
+    state.nextBossTime = bossTimeForIndex(state.nextBossIndex);
+  }
+  // Free a slot for pending stacks
+  while (state.breachStacks > 0 && aliveBossCount(state) < SURVIVOR.maxSimultaneousBosses) {
+    state.breachStacks -= 1;
+    spawnBossAtIndex(state, state.bossesSpawned + 1, true);
+  }
+}
+
+function updateBosses(state: SurvivorState, dt: number): void {
+  if (state.inboundBanner > 0) state.inboundBanner = Math.max(0, state.inboundBanner - dt);
+  for (const b of state.bosses) {
+    updateOneBoss(state, b, dt);
+  }
+  // Prune long-dead bosses to keep list bounded
+  if (state.bosses.length > 8) {
+    state.bosses = state.bosses.filter((b) => b.active || b.state !== 'dead' || b.timer > 0);
+  }
+  syncPrimaryBossMirror(state);
+}
+
+function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number): void {
+  if (!b.active && b.state === 'dead') {
+    if (b.timer > 0) b.timer -= dt;
+    return;
+  }
   if (!b.active || b.state === 'dead') return;
   if (b.hitFlash > 0) b.hitFlash = Math.max(0, b.hitFlash - dt);
   if (b.repulsorCd > 0) b.repulsorCd = Math.max(0, b.repulsorCd - dt);
@@ -1735,19 +1985,21 @@ function updateBoss(state: SurvivorState, dt: number): void {
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
   b.phase = phase;
   const mod = SURVIVOR_BOSS.phaseMods[phase];
+  const dmgScale = b.damageMul * mod.damageMul * (1 + b.breachEmpower);
+  const recScale = b.recoveryMul * mod.recoveryMul;
 
   if (b.state === 'idle') {
     if (dist > 5) {
-      b.x += b.facingX * SURVIVOR_BOSS.moveSpeed * (1 + (phase - 1) * 0.12) * dt;
-      b.z += b.facingZ * SURVIVOR_BOSS.moveSpeed * (1 + (phase - 1) * 0.12) * dt;
+      const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * (1 + (phase - 1) * 0.08);
+      b.x += b.facingX * spd * dt;
+      b.z += b.facingZ * spd * dt;
       const c = clampArena(b.x, b.z, SURVIVOR_BOSS.colliderRadius);
       b.x = c.x;
       b.z = c.z;
     }
     if (b.timer <= 0) {
       const roll = rng(state);
-      b.pattern =
-        roll < 0.26 ? 'pulse' : roll < 0.52 ? 'line' : roll < 0.78 ? 'fan' : 'summon';
+      b.pattern = roll < 0.26 ? 'pulse' : roll < 0.52 ? 'line' : roll < 0.78 ? 'fan' : 'summon';
       b.state = 'windup';
       if (b.pattern === 'pulse') {
         const pulse = SURVIVOR_BOSS.patterns.pulse;
@@ -1784,16 +2036,15 @@ function updateBoss(state: SurvivorState, dt: number): void {
   }
 
   if (b.state === 'active' && b.pattern) {
-    const dmgMul = mod.damageMul;
     if (b.pattern === 'pulse') {
       const pulse = SURVIVOR_BOSS.patterns.pulse;
       const t = 1 - b.timer / pulse.active;
       b.telegraphR = pulse.maxRadius * t;
       const d = Math.hypot(p.x - b.x, p.z - b.z);
-      if (Math.abs(d - b.telegraphR) < 1.1) damagePlayer(state, pulse.damage * dmgMul * dt * 2.5);
+      if (Math.abs(d - b.telegraphR) < 1.1) damagePlayer(state, pulse.damage * dmgScale * dt * 2.5);
       if (b.timer <= 0) {
         b.state = 'recover';
-        b.timer = pulse.recovery * mod.recoveryMul;
+        b.timer = pulse.recovery * recScale;
         b.pattern = null;
         b.telegraphR = 0;
       }
@@ -1810,51 +2061,41 @@ function updateBoss(state: SurvivorState, dt: number): void {
           SURVIVOR.playerRadius + line.width * 0.5,
         )
       ) {
-        damagePlayer(state, line.damage * dmgMul);
+        damagePlayer(state, line.damage * dmgScale);
       }
       if (b.timer <= 0) {
         b.state = 'recover';
-        b.timer = line.recovery * mod.recoveryMul;
+        b.timer = line.recovery * recScale;
         b.pattern = null;
         b.telegraphR = 0;
       }
     } else if (b.pattern === 'fan') {
       const fan = SURVIVOR_BOSS.patterns.fan;
-      const count = fan.count + mod.fanCountAdd;
+      const count = fan.count + mod.fanCountAdd + b.fanAdd;
       if (b.timer > fan.active * 0.7) {
         for (let i = 0; i < count; i += 1) {
           const a = Math.atan2(b.facingX, b.facingZ) + (i - (count - 1) / 2) * 0.26;
           const proj = acquireProjectile(state);
           if (!proj) break;
-          resetProj(
-            proj,
-            state,
-            'enemy',
-            null,
-            b.x,
-            b.z,
-            Math.sin(a) * fan.speed,
-            Math.cos(a) * fan.speed,
-            {
-              damage: fan.damage * dmgMul,
-              radius: 0.28,
-              life: 2.5,
-              owner: 'enemy',
-              color: phase >= 3 ? '#ff3366' : '#ff6688',
-            },
-          );
+          resetProj(proj, state, 'enemy', null, b.x, b.z, Math.sin(a) * fan.speed, Math.cos(a) * fan.speed, {
+            damage: fan.damage * dmgScale,
+            radius: 0.28,
+            life: 2.5,
+            owner: 'enemy',
+            color: phase >= 3 ? '#ff3366' : '#ff6688',
+          });
         }
       }
       if (b.timer <= 0) {
         b.state = 'recover';
-        b.timer = fan.recovery * mod.recoveryMul;
+        b.timer = fan.recovery * recScale;
         b.pattern = null;
         b.telegraphR = 0;
       }
     } else if (b.pattern === 'summon') {
       const summon = SURVIVOR_BOSS.patterns.summon;
       if (b.timer > summon.active * 0.5) {
-        const n = Math.min(mod.summonCount, phase >= 3 ? 5 : 4);
+        const n = Math.min(mod.summonCount + b.summonAdd, phase >= 3 ? 8 : 5);
         for (let i = 0; i < n; i += 1) {
           const ang = rng(state) * Math.PI * 2;
           const id = phase >= 3 && rng(state) < 0.35 ? 'elite' : phase >= 2 ? 'spiky' : 'basic';
@@ -1863,7 +2104,7 @@ function updateBoss(state: SurvivorState, dt: number): void {
       }
       if (b.timer <= 0) {
         b.state = 'recover';
-        b.timer = summon.recovery * mod.recoveryMul;
+        b.timer = summon.recovery * recScale;
         b.pattern = null;
         b.telegraphR = 0;
       }
@@ -1924,14 +2165,14 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
     return;
   }
 
-  ensureBoss(state);
+  ensureBossSchedule(state);
   updatePlayer(state, input, dt);
   rebuildHash(state);
   fireWeapons(state, dt);
   updateProjectiles(state, dt);
   updateHazards(state, dt);
   updateEnemies(state, dt);
-  updateBoss(state, dt);
+  updateBosses(state, dt);
   updatePickups(state, dt);
   updateSpawns(state, dt);
   flushDamageAgg(state, dt);

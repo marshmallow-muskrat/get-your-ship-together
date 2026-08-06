@@ -1,5 +1,5 @@
 import { HEROES } from '../../content/heroes';
-import { SURVIVOR, WEAPONS } from './survivorContent';
+import { PASSIVES, SURVIVOR, WEAPONS } from './survivorContent';
 import type { SurvivorState } from './survivorState';
 import {
   ACTION_LABELS,
@@ -8,6 +8,8 @@ import {
   type ActionId,
   type KeybindMap,
 } from './survivorKeybinds';
+import { formatSurvivalTime, loadRecords, makeRunSummary, recordRun } from './survivorRecords';
+import { aliveBossCount, primaryBoss } from './survivorState';
 
 export type HudPublishOpts = {
   settingsOpen: boolean;
@@ -80,8 +82,10 @@ export class SurvivorHud {
             <span class="eyebrow" id="sv-mb-name">WARDEN</span>
             <div class="sv-track miniboss"><i id="sv-mb-hp"></i></div>
           </div>
-          <span class="eyebrow">T-MINUS</span>
-          <strong id="sv-timer">08:00</strong>
+          <span class="eyebrow">SURVIVAL TIME</span>
+          <strong id="sv-timer">00:00</strong>
+          <div id="sv-inbound" class="sv-inbound hidden">CONTAINMENT BREACH</div>
+          <div id="sv-bosses-active" class="sv-bosses-active hidden"></div>
         </div>
         <div class="sv-meta">
           <span>LVL <strong id="sv-level">1</strong></span>
@@ -107,6 +111,11 @@ export class SurvivorHud {
           </div>
         </div>
         <div class="sv-abilities">
+          <button type="button" class="sv-ability" id="sv-ab-dodge" disabled tabindex="-1">
+            <span class="sv-ab-key" id="sv-key-dodge">SPC</span>
+            <span class="sv-ab-name">DODGE</span>
+            <span class="sv-ab-state" id="sv-dodge-state">READY</span>
+          </button>
           <button type="button" class="sv-ability" id="sv-ab-q" disabled tabindex="-1">
             <span class="sv-ab-key" id="sv-key-repulsor">Q</span>
             <span class="sv-ab-name">REPULSE</span>
@@ -123,8 +132,9 @@ export class SurvivorHud {
             <span class="sv-ab-state" id="sv-r-state">0%</span>
           </button>
         </div>
-        <div id="sv-weapons" class="sv-weapons"></div>
       </div>
+      <div id="sv-build" class="sv-build"></div>
+      <div id="sv-mech-toast" class="sv-mech-toast hidden">MECH CORE READY</div>
 
       <div id="sv-metrics" class="sv-metrics hidden"></div>
       <div id="sv-dmg" class="sv-dmg-layer"></div>
@@ -160,6 +170,8 @@ export class SurvivorHud {
         <p class="eyebrow" id="sv-end-eye">RUN COMPLETE</p>
         <h2 id="sv-end-title">Victory</h2>
         <p id="sv-end-body"></p>
+        <p id="sv-end-record" class="sv-end-record hidden">NEW RECORD</p>
+        <div id="sv-end-build" class="sv-end-build"></div>
         <div class="sv-end-actions">
           <button type="button" id="sv-restart" class="sv-btn">RUN AGAIN</button>
           <button type="button" id="sv-crew" class="sv-btn ghost">CREW SELECT</button>
@@ -209,6 +221,7 @@ export class SurvivorHud {
       const el = this.root.querySelector(`#${id}`);
       if (el) el.textContent = text;
     };
+    set('sv-key-dodge', formatKeyCode(binds.dodge));
     set('sv-key-repulsor', formatKeyCode(binds.repulsor));
     set('sv-key-ship', formatKeyCode(binds.ship));
     set('sv-key-mech', formatKeyCode(binds.mech));
@@ -226,7 +239,7 @@ export class SurvivorHud {
     // rebuild help with kbd tags properly
     const helpAbil = this.root.querySelector('#sv-help-abil');
     if (helpAbil) {
-      helpAbil.innerHTML = `<kbd>${formatKeyCode(binds.repulsor)}</kbd> Repulsor · <kbd>${formatKeyCode(binds.ship)}</kbd> Ship · <kbd>${formatKeyCode(binds.mech)}</kbd> Mech · <kbd>${formatKeyCode(binds.choice1)}</kbd><kbd>${formatKeyCode(binds.choice2)}</kbd><kbd>${formatKeyCode(binds.choice3)}</kbd> upgrades`;
+      helpAbil.innerHTML = `<kbd>${formatKeyCode(binds.dodge)}</kbd> Dodge · <kbd>${formatKeyCode(binds.repulsor)}</kbd> Repulsor · <kbd>${formatKeyCode(binds.ship)}</kbd> Ship · <kbd>${formatKeyCode(binds.mech)}</kbd> Mech · <kbd>${formatKeyCode(binds.choice1)}</kbd><kbd>${formatKeyCode(binds.choice2)}</kbd><kbd>${formatKeyCode(binds.choice3)}</kbd> upgrades`;
     }
     const helpPause = this.root.querySelector('#sv-help-pause');
     if (helpPause) {
@@ -276,15 +289,15 @@ export class SurvivorHud {
     set('sv-kills', String(state.kills));
     set('sv-lvl-inline', `LVL ${state.level}`);
 
-    const remain = Math.max(0, 480 - state.time);
-    const m = Math.floor(remain / 60);
-    const s = Math.floor(remain % 60);
-    set(
-      'sv-timer',
-      state.boss.active && state.boss.state !== 'dead'
-        ? `BOSS P${state.boss.phase}`
-        : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-    );
+    set('sv-timer', formatSurvivalTime(state.time));
+    const inbound = this.root.querySelector('#sv-inbound');
+    if (inbound) inbound.classList.toggle('hidden', state.inboundBanner <= 0);
+    const ba = this.root.querySelector('#sv-bosses-active');
+    const nBoss = aliveBossCount(state);
+    if (ba) {
+      ba.classList.toggle('hidden', nBoss < 2);
+      if (nBoss >= 2) ba.textContent = `BOSSES ACTIVE: ${nBoss}`;
+    }
 
     const p = state.player;
     const hp = this.root.querySelector<HTMLElement>('#sv-hp');
@@ -322,6 +335,33 @@ export class SurvivorHud {
 
   private publishAbilities(state: SurvivorState): void {
     const p = state.player;
+    const dEl = this.root.querySelector('#sv-ab-dodge');
+    const dState = this.root.querySelector('#sv-dodge-state');
+    const dReady = p.dodgeCd <= 0 && p.form !== 'ship' && p.alive && p.dodgeActive <= 0;
+    dEl?.classList.toggle('ready', dReady);
+    dEl?.classList.toggle('pulse-ready', dReady);
+    dEl?.classList.toggle('blocked', p.form === 'ship');
+    dEl?.classList.toggle('cooling', p.dodgeCd > 0);
+    if (dState) {
+      if (p.form === 'ship') dState.textContent = 'SHIP';
+      else if (p.dodgeActive > 0) dState.textContent = 'DASH';
+      else if (p.dodgeCd > 0) dState.textContent = this.formatCd(p.dodgeCd);
+      else dState.textContent = 'READY';
+    }
+    this.setCooldownOverlay(dEl, p.dodgeCd, SURVIVOR.dodge.cooldown);
+
+    // Mech ready flourish
+    if (p.mechCharge >= 1 && !p.mechReadyAnnounced && p.form === 'astronaut' && state.phase === 'playing') {
+      p.mechReadyAnnounced = true;
+      const toast = this.root.querySelector('#sv-mech-toast');
+      if (toast) {
+        toast.classList.remove('hidden');
+        window.setTimeout(() => toast.classList.add('hidden'), 1400);
+      }
+      this.root.querySelector('#sv-ab-r')?.classList.add('mech-flourish');
+      window.setTimeout(() => this.root.querySelector('#sv-ab-r')?.classList.remove('mech-flourish'), 900);
+    }
+
     const qEl = this.root.querySelector('#sv-ab-q');
     const eEl = this.root.querySelector('#sv-ab-e');
     const rEl = this.root.querySelector('#sv-ab-r');
@@ -400,15 +440,16 @@ export class SurvivorHud {
   }
 
   private publishBossBars(state: SurvivorState): void {
+    const pb = primaryBoss(state);
     const boss = this.root.querySelector('#sv-boss');
     if (boss) {
-      boss.classList.toggle('hidden', !state.boss.active || state.boss.state === 'dead');
+      boss.classList.toggle('hidden', !pb);
       const bh = this.root.querySelector<HTMLElement>('#sv-boss-hp');
-      if (bh && state.boss.maxHealth > 0) {
-        bh.style.width = `${(state.boss.health / state.boss.maxHealth) * 100}%`;
+      if (bh && pb && pb.maxHealth > 0) {
+        bh.style.width = `${(pb.health / pb.maxHealth) * 100}%`;
       }
       const phase = this.root.querySelector('#sv-boss-phase');
-      if (phase) phase.textContent = String(state.boss.phase);
+      if (phase && pb) phase.textContent = String(pb.phase);
     }
     const mb = this.root.querySelector('#sv-miniboss');
     if (mb) {
@@ -423,21 +464,37 @@ export class SurvivorHud {
   }
 
   private publishWeapons(state: SurvivorState): void {
-    const key = state.weapons.map((w) => `${w.weaponId}:${w.level}`).join('|');
+    const key =
+      state.weapons.map((w) => `${w.weaponId}:${w.level}`).join('|') +
+      '|' +
+      Object.entries(state.passives)
+        .map(([k, v]) => `${k}:${v}`)
+        .join('|') +
+      '|' +
+      state.tempBuffs.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|');
     if (key === this.lastWeaponsKey) return;
     this.lastWeaponsKey = key;
-    const weapons = this.root.querySelector('#sv-weapons');
-    if (!weapons) return;
-    weapons.innerHTML = state.weapons
+    const build = this.root.querySelector('#sv-build');
+    if (!build) return;
+    const weps = state.weapons
       .map((w) => {
         const fam = WEAPONS[w.weaponId];
-        return `<div class="sv-wep" style="--wep:${fam.color}">
-          <span class="sv-wep-dot"></span>
-          <span>${fam.name}</span>
-          <strong>L${w.level}</strong>
-        </div>`;
+        return `<div class="sv-build-item" style="--wep:${fam.color}"><span>${fam.name}</span><strong>L${w.level}</strong></div>`;
       })
       .join('');
+    const pass = Object.entries(state.passives)
+      .map(([id, lv]) => {
+        const def = PASSIVES.find((p) => p.id === id);
+        return `<div class="sv-build-item passive"><span>${def?.name ?? id}</span><strong>L${lv}</strong></div>`;
+      })
+      .join('');
+    const temps = state.tempBuffs
+      .map(
+        (t) =>
+          `<div class="sv-build-item temp"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.ceil(t.remaining)}s</strong></div>`,
+      )
+      .join('');
+    build.innerHTML = `<div class="eyebrow">BUILD</div>${weps}${pass}${temps}`;
   }
 
   private publishPause(state: SurvivorState): void {
@@ -490,16 +547,43 @@ export class SurvivorHud {
   private publishEnd(state: SurvivorState): void {
     const end = this.root.querySelector('#sv-end');
     if (!end) return;
-    const done = state.phase === 'victory' || state.phase === 'defeat';
+    const done = state.phase === 'defeat';
     end.classList.toggle('hidden', !done);
     if (done) {
+      if (!state.runRecorded) {
+        const summary = makeRunSummary({
+          survivalTime: state.time,
+          kills: state.kills,
+          level: state.level,
+          bossesDefeated: state.bossesDefeated,
+          heroId: state.heroId,
+          weapons: state.weapons,
+          passives: state.passives,
+        });
+        const result = recordRun(summary);
+        state.runRecorded = true;
+        (this as { _lastRecord?: typeof result })._lastRecord = result;
+      }
+      const rec = (this as { _lastRecord?: ReturnType<typeof recordRun> })._lastRecord;
       const set = (id: string, text: string) => {
         const el = this.root.querySelector(`#${id}`);
         if (el) el.textContent = text;
       };
-      set('sv-end-eye', state.phase === 'victory' ? 'CONTAINMENT HELD' : 'CREW DOWN');
-      set('sv-end-title', state.phase === 'victory' ? 'Protocol Complete' : 'Protocol Failed');
-      set('sv-end-body', `Level ${state.level} · ${state.kills} kills · ${Math.floor(state.time)}s`);
+      set('sv-end-eye', 'CREW DOWN');
+      set('sv-end-title', 'Run Complete');
+      const prev = rec?.previousBest ?? 0;
+      set(
+        'sv-end-body',
+        `Survived ${formatSurvivalTime(state.time)} · Best ${formatSurvivalTime(prev)} · L${state.level} · ${state.kills} kills · ${state.bossesDefeated} bosses`,
+      );
+      const nr = this.root.querySelector('#sv-end-record');
+      if (nr) nr.classList.toggle('hidden', !(rec?.isNewOverall || rec?.isNewHeroBest));
+      const eb = this.root.querySelector('#sv-end-build');
+      if (eb) {
+        eb.innerHTML = state.weapons
+          .map((w) => `${WEAPONS[w.weaponId].name} L${w.level}`)
+          .join(' · ');
+      }
     }
   }
 
@@ -529,7 +613,8 @@ export class SurvivorHud {
       node.classList.remove('hidden');
       node.className = `sv-dmg sv-dmg-${ev.kind}`;
       node.textContent = String(ev.amount);
-      node.style.transform = `translate(-50%, -50%) translate(${scr.x + Math.sin(ev.id * 1.7) * 10}px, ${scr.y - drift}px) scale(${pop})`;
+      const sizeScale = SURVIVOR.damageNumbers.sizeScale;
+      node.style.transform = `translate(-50%, -50%) translate(${scr.x + Math.sin(ev.id * 1.7) * 10}px, ${scr.y - drift}px) scale(${pop * sizeScale})`;
       node.style.opacity = String(Math.max(0, 1 - t * 1.05));
     }
   }

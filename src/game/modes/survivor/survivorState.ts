@@ -133,16 +133,28 @@ export interface SurvivorEffect {
   width?: number;
 }
 
+export type UpgradeChoiceKind = 'weapon' | 'passive' | 'new-weapon' | 'temp';
+
 export interface UpgradeChoice {
-  kind: 'weapon' | 'passive' | 'new-weapon';
+  kind: UpgradeChoiceKind;
   id: string;
   title: string;
   body: string;
   weaponId?: WeaponId;
   passiveId?: PassiveId;
+  tempId?: import('./survivorContent').TempBuffId;
+}
+
+export interface ActiveTempBuff {
+  id: import('./survivorContent').TempBuffId;
+  remaining: number;
+  stacks: number;
 }
 
 export interface SurvivorBoss {
+  id: number;
+  /** 1-based schedule index */
+  index: number;
   active: boolean;
   x: number;
   z: number;
@@ -160,6 +172,14 @@ export interface SurvivorBoss {
   phase: BossPhase;
   repulsorCd: number;
   phaseAnnounced: number;
+  healthMul: number;
+  damageMul: number;
+  recoveryMul: number;
+  moveMul: number;
+  fanAdd: number;
+  summonAdd: number;
+  /** Extra power from breach stacks while this boss lives */
+  breachEmpower: number;
 }
 
 export interface SurvivorMiniboss {
@@ -209,25 +229,41 @@ export interface SurvivorState {
     shipDuration: number;
     repulsorCd: number;
     shipCd: number;
+    dodgeCd: number;
+    dodgeActive: number;
+    dodgeDirX: number;
+    dodgeDirZ: number;
     wakeTimer: number;
     bodyHitCd: number;
     exhaustTickCd: number;
     invuln: number;
     hitFlash: number;
     alive: boolean;
+    barrierHits: number;
+    damageMul: number;
+    mechReadyAnnounced: boolean;
   };
   weapons: SurvivorWeaponSlot[];
   passives: Partial<Record<PassiveId, number>>;
+  tempBuffs: ActiveTempBuff[];
   enemies: SurvivorEnemy[];
   projectiles: SurvivorProjectile[];
   hazards: SurvivorHazard[];
   pickups: SurvivorPickup[];
   effects: SurvivorEffect[];
   rails: Array<{ x0: number; z0: number; x1: number; z1: number; life: number; color: string }>;
+  /** Concurrent bosses (cap SURVIVOR.maxSimultaneousBosses). */
+  bosses: SurvivorBoss[];
+  /** Owed bosses that could not spawn due to cap — never silently dropped. */
+  breachStacks: number;
+  nextBossIndex: number;
+  nextBossTime: number;
+  bossesSpawned: number;
+  bossesDefeated: number;
+  /** @deprecated Prefer bosses[]; kept as primary-boss mirror for gradual migration. */
   boss: SurvivorBoss;
   miniboss: SurvivorMiniboss;
   damageEvents: DamageEvent[];
-  /** Pending damage aggregation buffer. */
   damageAgg: Map<
     string,
     { amount: number; x: number; z: number; kind: DamageEvent['kind']; timer: number; pop: number }
@@ -242,6 +278,9 @@ export interface SurvivorState {
   nextId: number;
   enemyCap: number;
   muted: boolean;
+  /** Set once when defeat is recorded to local high scores. */
+  runRecorded: boolean;
+  inboundBanner: number;
   metrics: {
     fps: number;
     frameMs: number;
@@ -249,6 +288,64 @@ export interface SurvivorState {
     projectiles: number;
     pickups: number;
   };
+}
+
+export function emptyBoss(): SurvivorBoss {
+  return {
+    id: 0,
+    index: 0,
+    active: false,
+    x: 0,
+    z: 0,
+    health: 0,
+    maxHealth: 0,
+    state: 'idle',
+    pattern: null,
+    timer: 0,
+    facingX: -1,
+    facingZ: 0,
+    telegraphR: 0,
+    chargeX: 0,
+    chargeZ: 0,
+    hitFlash: 0,
+    phase: 1,
+    repulsorCd: 0,
+    phaseAnnounced: 1,
+    healthMul: 1,
+    damageMul: 1,
+    recoveryMul: 1,
+    moveMul: 1,
+    fanAdd: 0,
+    summonAdd: 0,
+    breachEmpower: 0,
+  };
+}
+
+/** Newest alive boss, or null. */
+export function primaryBoss(state: SurvivorState): SurvivorBoss | null {
+  for (let i = state.bosses.length - 1; i >= 0; i -= 1) {
+    const b = state.bosses[i]!;
+    if (b.active && b.state !== 'dead') return b;
+  }
+  return null;
+}
+
+export function aliveBossCount(state: SurvivorState): number {
+  let n = 0;
+  for (const b of state.bosses) {
+    if (b.active && b.state !== 'dead') n += 1;
+  }
+  return n;
+}
+
+/** Sync deprecated state.boss mirror from primary. */
+export function syncPrimaryBossMirror(state: SurvivorState): void {
+  const p = primaryBoss(state);
+  if (p) {
+    state.boss = p;
+  } else if (!state.boss.active || state.boss.state === 'dead') {
+    // leave last dead stats for HUD fade if needed
+  }
 }
 
 export function mulberry32(seed: number): () => number {
@@ -322,40 +419,36 @@ export function createSurvivorState(
       shipDuration: 0,
       repulsorCd: 0,
       shipCd: 0,
+      dodgeCd: 0,
+      dodgeActive: 0,
+      dodgeDirX: 1,
+      dodgeDirZ: 0,
       wakeTimer: 0,
       bodyHitCd: 0,
       exhaustTickCd: 0,
       invuln: 1.2,
       hitFlash: 0,
       alive: true,
+      barrierHits: 0,
+      damageMul: 1,
+      mechReadyAnnounced: false,
     },
     weapons: [{ weaponId: starter, level: 1, cooldown: 0.4 }],
     passives: {},
+    tempBuffs: [],
     enemies: [],
     projectiles: [],
     hazards: [],
     pickups: [],
     effects: [],
     rails: [],
-    boss: {
-      active: false,
-      x: 0,
-      z: 0,
-      health: 0,
-      maxHealth: 0,
-      state: 'idle',
-      pattern: null,
-      timer: 0,
-      facingX: -1,
-      facingZ: 0,
-      telegraphR: 0,
-      chargeX: 0,
-      chargeZ: 0,
-      hitFlash: 0,
-      phase: 1,
-      repulsorCd: 0,
-      phaseAnnounced: 1,
-    },
+    bosses: [],
+    breachStacks: 0,
+    nextBossIndex: 1,
+    nextBossTime: SURVIVOR.bossInterval,
+    bossesSpawned: 0,
+    bossesDefeated: 0,
+    boss: emptyBoss(),
     miniboss: {
       spawned: false,
       alive: false,
@@ -376,6 +469,8 @@ export function createSurvivorState(
     nextId: 1,
     enemyCap: SURVIVOR.enemyCap,
     muted: false,
+    runRecorded: false,
+    inboundBanner: 0,
     metrics: { fps: 60, frameMs: 16, enemies: 0, projectiles: 0, pickups: 0 },
   };
 
@@ -421,17 +516,19 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.player.mechCharge = 1;
     state.time = 120;
   } else if (fixture === 'survivor-boss') {
-    state.time = SURVIVOR.bossTime;
+    // Just before first endless boss at 2:00 with a representative mid-run build
+    state.time = SURVIVOR.bossInterval - 0.05;
+    state.nextBossIndex = 1;
+    state.nextBossTime = SURVIVOR.bossInterval;
     grantBuild(
       state,
       [
-        { id: heroStarterWeapon(state.heroId), level: 4 },
-        { id: 'pulse', level: 3 },
+        { id: heroStarterWeapon(state.heroId), level: 3 },
+        { id: 'pulse', level: 2 },
         { id: 'microdrone', level: 2 },
-        { id: 'rail', level: 2 },
       ],
-      { 'max-health': 2, 'weapon-haste': 2, area: 2, 'move-speed': 1 },
-      12,
+      { 'max-health': 1, 'weapon-haste': 1, area: 1, 'move-speed': 1 },
+      8,
     );
     state.player.health = state.player.maxHealth;
     state.player.mechCharge = 0.85;
@@ -449,8 +546,10 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.player.invuln = 5;
     grantBuild(state, [{ id: 'pulse', level: 4 }, { id: 'bioplasma', level: 3 }], {}, 5);
   } else if (fixture === 'survivor-miniboss') {
-    // Start just past the spawn threshold so the first sim step can ensure it
-    state.time = SURVIVOR.minibossTime;
+    // Legacy fixture: treat as second-boss window (~4:00) with a solid build
+    state.time = SURVIVOR.bossInterval * 2 - 0.05;
+    state.nextBossIndex = 2;
+    state.nextBossTime = SURVIVOR.bossInterval * 2;
     state.player.invuln = 4;
     grantBuild(
       state,

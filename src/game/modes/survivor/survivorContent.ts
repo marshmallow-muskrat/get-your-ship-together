@@ -13,11 +13,16 @@ import {
   type EnemyDef,
 } from '../../content/enemies';
 
-/** Centralized Containment Protocol tuning. */
+/** Balance/game version stamped into local high scores. */
+export const SURVIVOR_BALANCE_VERSION = 'endless-1.0.0';
+
+/** Centralized Containment Protocol tuning (endless high-score mode). */
 export const SURVIVOR = {
-  runDuration: 480,
-  bossTime: 480,
-  minibossTime: 240,
+  /** Endless — no run-length victory. */
+  endless: true,
+  bossInterval: 120, // every 2 minutes
+  maxSimultaneousBosses: 3,
+  firstBossBaseHealth: 2200,
   arenaHalf: 32, // 64×64 playable
   cameraHalf: 12,
   actorScale: {
@@ -38,31 +43,39 @@ export const SURVIVOR = {
   pickupCap: 120,
   hazardCap: 80,
   damageEventCap: 48,
+  maxWeaponSlots: 5,
   fixedDt: 1 / 60,
   repairDropChance: 0.04,
-  regenPerLevel: 0.45, // Nanite Bleed — reduced so late run isn't trivial
+  regenPerLevel: 0.45,
+  dodge: {
+    cooldown: 10,
+    duration: 0.24,
+    invuln: 0.24,
+    distance: 4.5,
+  },
   mech: {
     duration: 14,
     chargePerKill: 0.012,
     chargePerElite: 0.08,
     chargePerMiniboss: 0.35,
+    chargePerBoss: 0.25,
     damageTakenMul: 0.65,
   },
   repulsor: {
-    /** Major panic ability — 30s CD, tripled radius/push vs original 4.5 / 4.0 */
+    /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
-    radius: 13.5,
-    damage: 18,
-    push: 12.0,
+    radius: 17.955,
+    damage: 20,
+    push: 15.96,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
     mechRadiusMul: 1.25,
     mechDamageMul: 1.35,
     mechPushMul: 1.2,
-    knockbackDuration: 0.42,
+    knockbackDuration: 0.48,
     bossStagger: 0.55,
     bossInternalCd: 6.5,
-    effectLife: 0.55,
+    effectLife: 0.72,
   },
   ship: {
     duration: 2.5,
@@ -71,20 +84,21 @@ export const SURVIVOR = {
     damageTakenMul: 0.6,
     wakeInterval: 0.14,
     wakeLife: 1.25,
-    wakeRadius: 1.0,
+    wakeRadius: 1.15,
     wakeDamage: 10,
     wakeTickCd: 0.28,
     bodyDamage: 8,
     bodyPush: 1.2,
     bodyTickCd: 0.35,
     radius: 0.7,
-    /** Continuous rear exhaust jet */
-    exhaustLength: 3.4,
-    exhaustWidth: 1.35,
-    exhaustDamage: 14,
+    /** Continuous rear exhaust jet — more visible */
+    exhaustLength: 4.6,
+    exhaustWidth: 1.75,
+    exhaustDamage: 16,
     exhaustTickCd: 0.24,
     exhaustEliteMul: 0.55,
     exhaustBossMul: 0.4,
+    exhaustVisualScale: 1.65,
   },
   damageNumbers: {
     aggregateWindow: 0.15,
@@ -92,6 +106,16 @@ export const SURVIVOR = {
     heavyLife: 1.05,
     largeThreshold: 36,
     heavyThreshold: 55,
+    /** Multiplier applied to rendered font sizes (1.5× prior). */
+    sizeScale: 1.5,
+  },
+  tempBuff: {
+    overchargeDuration: 20,
+    overchargeDamageMul: 1.35,
+    thrusterDuration: 12,
+    thrusterSpeedMul: 1.35,
+    barrierHits: 1,
+    repairAmount: 40,
   },
 } as const;
 
@@ -377,111 +401,95 @@ export type BossPhase = 1 | 2 | 3;
 
 export const SURVIVOR_BOSS = {
   ...BOSS_DEMON,
-  maxHealth: 7600,
+  /** Base health for first endless boss; scaled by bossDifficultyFor(n). */
+  maxHealth: 2200,
   phase2Threshold: 0.65,
   phase3Threshold: 0.35,
   patterns: {
-    pulse: { windup: 1.0, active: 0.7, recovery: 0.85, damage: 20, maxRadius: 8 },
-    line: { windup: 0.9, active: 0.45, recovery: 0.95, damage: 26, length: 20, width: 1.25 },
-    fan: { windup: 0.75, active: 0.15, recovery: 0.9, damage: 14, count: 7, speed: 14 },
-    summon: { windup: 0.95, active: 0.12, recovery: 1.15, count: 6 },
+    pulse: { windup: 1.0, active: 0.7, recovery: 0.85, damage: 16, maxRadius: 8 },
+    line: { windup: 0.9, active: 0.45, recovery: 0.95, damage: 20, length: 20, width: 1.25 },
+    fan: { windup: 0.75, active: 0.15, recovery: 0.9, damage: 12, count: 6, speed: 14 },
+    summon: { windup: 0.95, active: 0.12, recovery: 1.15, count: 5 },
   },
   phaseMods: {
-    1: { recoveryMul: 1.0, damageMul: 1.0, fanCountAdd: 0, summonCount: 4, idleGap: 0.55 },
-    2: { recoveryMul: 0.72, damageMul: 1.2, fanCountAdd: 2, summonCount: 7, idleGap: 0.38 },
-    3: { recoveryMul: 0.55, damageMul: 1.4, fanCountAdd: 4, summonCount: 10, idleGap: 0.22 },
+    1: { recoveryMul: 1.0, damageMul: 1.0, fanCountAdd: 0, summonCount: 3, idleGap: 0.55 },
+    2: { recoveryMul: 0.72, damageMul: 1.2, fanCountAdd: 2, summonCount: 5, idleGap: 0.38 },
+    3: { recoveryMul: 0.55, damageMul: 1.4, fanCountAdd: 3, summonCount: 7, idleGap: 0.22 },
   },
 } as const;
 
-export interface DifficultyTier {
-  t0: number;
-  t1: number;
-  populationMin: number;
-  populationMax: number;
+export interface EndlessDifficulty {
   healthMul: number;
   damageMul: number;
   speedMul: number;
+  attackRateMul: number;
+  targetActive: number;
+  eliteChance: number;
   spawnRate: number;
+  populationMin: number;
+  populationMax: number;
 }
 
-/** Time-based difficulty director (pure). */
-export function difficultyAt(time: number): DifficultyTier {
-  if (time < 60) {
-    return {
-      t0: 0,
-      t1: 60,
-      populationMin: 15,
-      populationMax: 25,
-      healthMul: 1.0,
-      damageMul: 1.0,
-      speedMul: 1.0,
-      spawnRate: 1.6,
-    };
-  }
-  if (time < 180) {
-    return {
-      t0: 60,
-      t1: 180,
-      populationMin: 30,
-      populationMax: 50,
-      healthMul: 1.1,
-      damageMul: 1.1,
-      speedMul: 1.02,
-      spawnRate: 2.4,
-    };
-  }
-  if (time < 300) {
-    return {
-      t0: 180,
-      t1: 300,
-      populationMin: 55,
-      populationMax: 80,
-      healthMul: 1.3,
-      damageMul: 1.2,
-      speedMul: 1.04,
-      spawnRate: 3.2,
-    };
-  }
-  if (time < 420) {
-    return {
-      t0: 300,
-      t1: 420,
-      populationMin: 80,
-      populationMax: 120,
-      healthMul: 1.55,
-      damageMul: 1.35,
-      speedMul: 1.07,
-      spawnRate: 4.0,
-    };
-  }
-  if (time < 480) {
-    return {
-      t0: 420,
-      t1: 480,
-      populationMin: 120,
-      populationMax: 160,
-      healthMul: 1.8,
-      damageMul: 1.5,
-      speedMul: 1.1,
-      spawnRate: 4.8,
-    };
-  }
-  // Boss window — reduced pressure
+/** Unbounded endless enemy difficulty (pure). m = minutes elapsed. */
+export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
+  const m = Math.max(0, timeSec / 60);
+  const late = Math.max(0, m - 8);
+  const healthMul = 1 + 0.12 * m + 0.02 * late * late;
+  const damageMul = 1 + 0.08 * m + 0.05 * Math.max(0, m - 10);
+  const speedMul = Math.min(1.3, 1 + 0.015 * m);
+  const attackRateMul = Math.min(1.7, 1 + 0.025 * m);
+  const targetActive = Math.min(SURVIVOR.enemyCap, Math.floor(18 + 8 * m));
+  const eliteChance = Math.min(0.45, 0.02 + 0.015 * m);
+  const spawnRate = Math.min(6.5, 1.4 + 0.35 * m);
   return {
-    t0: 480,
-    t1: 9999,
-    populationMin: 25,
-    populationMax: 55,
-    healthMul: 1.85,
-    damageMul: 1.55,
-    speedMul: 1.08,
-    spawnRate: 1.4,
+    healthMul,
+    damageMul,
+    speedMul,
+    attackRateMul,
+    targetActive,
+    eliteChance,
+    spawnRate,
+    populationMin: Math.max(8, Math.floor(targetActive * 0.7)),
+    populationMax: targetActive,
   };
 }
 
-/** Spawn intensity 0–1 over run time (legacy helper; director prefers difficultyAt). */
+/** @deprecated Use endlessDifficultyAt — kept for tests compatibility. */
+export function difficultyAt(time: number): EndlessDifficulty {
+  return endlessDifficultyAt(time);
+}
+
 export function spawnPressure(t: number): number {
-  return difficultyAt(t).spawnRate / 4.8;
+  return endlessDifficultyAt(t).spawnRate / 6.5;
+}
+
+export interface BossDifficulty {
+  index: number;
+  healthMul: number;
+  damageMul: number;
+  recoveryMul: number;
+  moveMul: number;
+  fanAdd: number;
+  summonAdd: number;
+}
+
+/** Boss index n begins at 1. */
+export function bossDifficultyFor(index: number): BossDifficulty {
+  const n = Math.max(1, Math.floor(index));
+  return {
+    index: n,
+    healthMul: Math.pow(1.55, n - 1),
+    damageMul: Math.pow(1.18, n - 1),
+    recoveryMul: Math.max(0.45, Math.pow(0.94, n - 1)),
+    moveMul: Math.min(1.3, 1 + 0.035 * (n - 1)),
+    fanAdd: Math.min(8, Math.floor((n - 1) * 0.75)),
+    summonAdd: Math.min(8, Math.floor((n - 1) * 0.5)),
+  };
+}
+
+/** Schedule time for boss index n (1-based): 120, 240, 360… */
+export function bossTimeForIndex(index: number): number {
+  return Math.max(1, Math.floor(index)) * SURVIVOR.bossInterval;
 }
 
 export function compositionAt(t: number): Array<{ id: string; weight: number }> {
@@ -500,9 +508,9 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
       { id: 'ghost', weight: 2 },
       { id: 'bee', weight: 2 },
       { id: 'bruiser', weight: 1 },
-      { id: 'elite', weight: 0.4 },
+      { id: 'elite', weight: 0.5 },
     ];
-  if (t < 420)
+  if (t < 480)
     return [
       { id: 'basic', weight: 3 },
       { id: 'fast', weight: 3 },
@@ -510,19 +518,41 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
       { id: 'flyer', weight: 2 },
       { id: 'ghost', weight: 2 },
       { id: 'bruiser', weight: 2 },
-      { id: 'elite', weight: 1 },
+      { id: 'elite', weight: 1.2 },
     ];
+  // Late endless — heavy elites and mixed pressure forever
   return [
     { id: 'basic', weight: 2 },
     { id: 'fast', weight: 3 },
     { id: 'spiky', weight: 2 },
     { id: 'flyer', weight: 2 },
     { id: 'ghost', weight: 2 },
-    { id: 'bruiser', weight: 2 },
-    { id: 'elite', weight: 1.5 },
+    { id: 'bruiser', weight: 3 },
+    { id: 'elite', weight: 2 },
     { id: 'bee', weight: 1 },
   ];
 }
+
+export type TempBuffId =
+  | 'emergency-repair'
+  | 'weapon-overcharge'
+  | 'cooldown-flush'
+  | 'emergency-barrier'
+  | 'thruster-surge';
+
+export interface TempBuffDef {
+  id: TempBuffId;
+  title: string;
+  body: string;
+}
+
+export const TEMP_BUFFS: TempBuffDef[] = [
+  { id: 'emergency-repair', title: 'Emergency Repair', body: 'Restore integrity immediately.' },
+  { id: 'weapon-overcharge', title: 'Weapon Overcharge', body: 'Temporary damage boost (~20s).' },
+  { id: 'cooldown-flush', title: 'Cooldown Flush', body: 'Reduce Dodge, Repulsor, and Ship cooldowns.' },
+  { id: 'emergency-barrier', title: 'Emergency Barrier', body: 'Absorb the next hit.' },
+  { id: 'thruster-surge', title: 'Thruster Surge', body: 'Temporary move-speed boost.' },
+];
 
 export function bossPhaseFromHealth(health: number, maxHealth: number): BossPhase {
   if (maxHealth <= 0) return 1;

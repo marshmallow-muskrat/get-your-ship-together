@@ -7,6 +7,7 @@ export type ActionId =
   | 'moveDown'
   | 'moveLeft'
   | 'moveRight'
+  | 'dodge'
   | 'repulsor'
   | 'ship'
   | 'mech'
@@ -23,6 +24,7 @@ export const ACTION_LABELS: Record<ActionId, string> = {
   moveDown: 'Move Down',
   moveLeft: 'Move Left',
   moveRight: 'Move Right',
+  dodge: 'Dodge',
   repulsor: 'Repulsor Burst',
   ship: 'Afterburner',
   mech: 'Mech Overdrive',
@@ -38,6 +40,7 @@ export const DEFAULT_KEYBINDS: KeybindMap = {
   moveDown: 'KeyS',
   moveLeft: 'KeyA',
   moveRight: 'KeyD',
+  dodge: 'Space',
   repulsor: 'KeyQ',
   ship: 'KeyE',
   mech: 'KeyR',
@@ -201,6 +204,7 @@ export const REBINDABLE_ACTIONS: ActionId[] = [
   'moveDown',
   'moveLeft',
   'moveRight',
+  'dodge',
   'repulsor',
   'ship',
   'mech',
