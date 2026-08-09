@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.1';
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.08;
@@ -515,6 +515,34 @@ export type BossPatternId =
   | 'spore-bloom'
   | 'gravity-collapse'
   | 'cataclysm';
+
+/** Authoritative list for exhaustive tests/handlers. */
+export const ALL_BOSS_PATTERNS: readonly BossPatternId[] = [
+  'pulse',
+  'line',
+  'fan',
+  'summon',
+  'breach-orb',
+  'contamination',
+  'rupture-ring',
+  'cryo-lanes',
+  'ravage-charge',
+  'sweeping-beam',
+  'aerial-strafe',
+  'spore-bloom',
+  'gravity-collapse',
+  'cataclysm',
+] as const;
+
+export const MEGA_ONLY_PATTERNS: readonly BossPatternId[] = ['gravity-collapse', 'cataclysm'] as const;
+
+export function isMegaOnlyPattern(id: BossPatternId): boolean {
+  return id === 'gravity-collapse' || id === 'cataclysm';
+}
+
+export function assertNever(x: never): never {
+  throw new Error(`Unhandled boss pattern: ${String(x)}`);
+}
 
 
 export const BOSS_DEFS: BossDef[] = [

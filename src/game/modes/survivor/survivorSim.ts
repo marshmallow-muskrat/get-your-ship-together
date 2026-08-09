@@ -43,6 +43,12 @@ import {
   bossFocusChance,
 } from './survivorTargeting';
 import {
+  updateOneBoss as updateOneBossPatterns,
+  forceBossPattern,
+  cancelBossPattern,
+  type BossSimApi,
+} from './survivorBossPatterns';
+import {
   aliveBossCount,
   emptyBoss,
   emptyEnemy,
@@ -532,6 +538,7 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     vz: 0,
     damage: 0,
     radius: 0.2,
+    visualRadius: 0.2,
     life: 0,
     pierce: 0,
     homing: false,
@@ -546,6 +553,9 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     bounceLeft: 0,
     splitOnHit: 0,
     active: false,
+    sourceBossId: 0,
+    hitPlayer: false,
+    splitDone: false,
   };
   state.projectiles.push(p);
   return p;
@@ -591,6 +601,7 @@ function spawnHazard(
   life: number,
   damage: number,
   color: string,
+  opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd'>>,
 ): void {
   const h = acquireHazard(state);
   if (!h) return;
@@ -604,9 +615,9 @@ function spawnHazard(
   h.damage = damage;
   h.color = color;
   h.active = true;
-  h.owner = 'player';
-  h.tickCd = 0;
-  h.armTimer = 0;
+  h.owner = opts?.owner ?? 'player';
+  h.tickCd = opts?.tickCd ?? 0;
+  h.armTimer = opts?.armTimer ?? 0;
 }
 
 function nearestEnemy(state: SurvivorState, x: number, z: number, maxR: number): SurvivorEnemy | null {
@@ -1181,6 +1192,10 @@ function resetProj(
   proj.bounceLeft = opts.bounceLeft ?? 0;
   proj.splitOnHit = opts.splitOnHit ?? 0;
   proj.active = true;
+  proj.visualRadius = opts.visualRadius ?? opts.radius ?? 0.2;
+  proj.sourceBossId = opts.sourceBossId ?? 0;
+  proj.hitPlayer = opts.hitPlayer ?? false;
+  proj.splitDone = opts.splitDone ?? false;
 }
 
 function fireBioGlob(
@@ -1309,6 +1324,7 @@ function damageBoss(
 }
 
 function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
+  cancelBossPattern(state, b);
   b.state = 'dead';
   b.timer = 1.2;
   b.active = false;
@@ -1353,6 +1369,32 @@ function rebuildHash(state: SurvivorState): void {
 function updateProjectiles(state: SurvivorState, dt: number): void {
   for (const proj of state.projectiles) {
     if (!proj.active) continue;
+    if (proj.kind === 'boss-orb' || proj.kind === 'boss-fan') {
+      proj.life -= dt;
+      proj.x += proj.vx * dt;
+      proj.z += proj.vz * dt;
+      // Arena soft bounds
+      if (Math.abs(proj.x) > SURVIVOR.arenaHalf + 2 || Math.abs(proj.z) > SURVIVOR.arenaHalf + 2) {
+        proj.active = false;
+        continue;
+      }
+      if (proj.life <= 0) {
+        proj.active = false;
+        continue;
+      }
+      const p = state.player;
+      if (p.alive && !proj.hitPlayer && p.dodgeActive <= 0) {
+        const dx = p.x - proj.x;
+        const dz = p.z - proj.z;
+        if (dx * dx + dz * dz <= (proj.radius + SURVIVOR.playerRadius) ** 2) {
+          damagePlayer(state, proj.damage, 'boss');
+          proj.hitPlayer = true;
+          if (proj.kind === 'boss-orb') proj.active = false;
+        }
+      }
+      continue;
+    }
+
     if (proj.kind === 'rocket' || proj.kind === 'orbital-marker') {
       proj.armTimer -= dt;
       proj.life -= dt;
@@ -1519,10 +1561,28 @@ function updateHazards(state: SurvivorState, dt: number): void {
   for (const h of state.hazards) {
     if (!h.active) continue;
     h.life -= dt;
+    if (h.armTimer > 0) h.armTimer = Math.max(0, h.armTimer - dt);
+    if (h.tickCd > 0) h.tickCd = Math.max(0, h.tickCd - dt);
     if (h.life <= 0) {
       h.active = false;
       continue;
     }
+    // Armed delay: not damaging yet
+    if (h.armTimer > 0) continue;
+
+    if (h.owner === 'enemy') {
+      const p = state.player;
+      if (!p.alive || p.invuln > 0 || p.dodgeActive > 0) continue;
+      if (h.tickCd > 0) continue;
+      const dx = p.x - h.x;
+      const dz = p.z - h.z;
+      if (dx * dx + dz * dz <= (h.radius + SURVIVOR.playerRadius) ** 2) {
+        damagePlayer(state, h.damage, 'boss');
+        h.tickCd = 0.45;
+      }
+      continue;
+    }
+
     for (const e of state.enemies) {
       if (!e.alive || e.hazardHitCd > 0) continue;
       const dx = e.x - h.x;
@@ -1537,7 +1597,7 @@ function updateHazards(state: SurvivorState, dt: number): void {
         if (!b.active || b.state === 'dead' || b.hitFlash > 0.02) continue;
         const dx = b.x - h.x;
         const dz = b.z - h.z;
-        if (dx * dx + dz * dz <= (h.radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
+        if (dx * dx + dz * dz <= (h.radius + b.colliderRadius) ** 2) {
           damageBoss(state, h.damage * 0.7, { boss: b });
         }
       }
@@ -2629,10 +2689,27 @@ function fireProtocolRocket(state: SurvivorState): void {
   pushEffect(state, 'telegraph', tx, tz, arm, '#ff8a4a', 1.8, { radius: 1.8 });
 }
 
+function makeBossApi(): BossSimApi {
+  return {
+    rng,
+    pushEffect,
+    damagePlayer,
+    spawnEnemy,
+    acquireProjectile,
+    resetProj: (proj, state, kind, weaponId, x, z, vx, vz, opts) =>
+      resetProj(proj, state, kind, weaponId, x, z, vx, vz, opts),
+    spawnHazard,
+    clampArena,
+    segmentHit,
+  };
+}
+
+const bossApi = makeBossApi();
+
 function updateBosses(state: SurvivorState, dt: number): void {
   if (state.inboundBanner > 0) state.inboundBanner = Math.max(0, state.inboundBanner - dt);
   for (const b of state.bosses) {
-    updateOneBoss(state, b, dt);
+    updateOneBossPatterns(state, b, dt, bossApi);
   }
   // Prune long-dead bosses to keep list bounded
   if (state.bosses.length > 8) {
@@ -2641,159 +2718,13 @@ function updateBosses(state: SurvivorState, dt: number): void {
   syncPrimaryBossMirror(state);
 }
 
-function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number): void {
-  if (!b.active && b.state === 'dead') {
-    if (b.timer > 0) b.timer -= dt;
-    return;
-  }
-  if (!b.active || b.state === 'dead') return;
-  if (b.hitFlash > 0) b.hitFlash = Math.max(0, b.hitFlash - dt);
-  if (b.repulsorCd > 0) b.repulsorCd = Math.max(0, b.repulsorCd - dt);
-  const p = state.player;
-  const dx = p.x - b.x;
-  const dz = p.z - b.z;
-  const dist = Math.hypot(dx, dz) || 1;
-  b.facingX = dx / dist;
-  b.facingZ = dz / dist;
-  b.timer -= dt;
+/** Test/fixture helper: force a boss into a specific pattern lifecycle. */
+export function forceBossIntoPattern(state: SurvivorState, boss: SurvivorBoss, pattern: import('./survivorContent').BossPatternId): void {
+  forceBossPattern(state, boss, pattern, bossApi);
+}
 
-  const phase = bossPhaseFromHealth(b.health, b.maxHealth);
-  b.phase = phase;
-  const mod = SURVIVOR_BOSS.phaseMods[phase];
-  const dmgScale = b.damageMul * mod.damageMul * (1 + b.breachEmpower);
-  const recScale = b.recoveryMul * mod.recoveryMul;
-
-  if (b.state === 'idle') {
-    if (dist > 5) {
-      const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * (1 + (phase - 1) * 0.08);
-      b.x += b.facingX * spd * dt;
-      b.z += b.facingZ * spd * dt;
-      const c = clampArena(b.x, b.z, SURVIVOR_BOSS.colliderRadius);
-      b.x = c.x;
-      b.z = c.z;
-    }
-    if (b.timer <= 0) {
-      const def = bossDefForIndex(b.index);
-      const prefs = def.preferredPatterns;
-      const roll = Math.floor(rng(state) * prefs.length);
-      b.pattern = prefs[roll] ?? (rng(state) < 0.26 ? 'pulse' : roll < 0.52 ? 'line' : roll < 0.78 ? 'fan' : 'summon');
-      b.state = 'windup';
-      if (b.pattern === 'pulse') {
-        const pulse = SURVIVOR_BOSS.patterns.pulse;
-        b.timer = pulse.windup * (phase === 3 ? 0.85 : 1);
-        pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ffaa33', pulse.maxRadius, {
-          radius: pulse.maxRadius,
-        });
-      } else if (b.pattern === 'line') {
-        const line = SURVIVOR_BOSS.patterns.line;
-        b.timer = line.windup * (phase === 3 ? 0.85 : 1);
-        b.chargeX = b.facingX;
-        b.chargeZ = b.facingZ;
-        pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ff4455', 1, {
-          facingX: b.chargeX,
-          facingZ: b.chargeZ,
-          length: line.length,
-          width: line.width,
-        });
-      } else if (b.pattern === 'fan') {
-        b.timer = SURVIVOR_BOSS.patterns.fan.windup * (phase === 3 ? 0.8 : 1);
-      } else {
-        b.timer = SURVIVOR_BOSS.patterns.summon.windup;
-      }
-    }
-    return;
-  }
-
-  if (b.state === 'windup') {
-    if (b.timer <= 0 && b.pattern) {
-      b.state = 'active';
-      b.timer = SURVIVOR_BOSS.patterns[b.pattern].active;
-    }
-    return;
-  }
-
-  if (b.state === 'active' && b.pattern) {
-    if (b.pattern === 'pulse') {
-      const pulse = SURVIVOR_BOSS.patterns.pulse;
-      const t = 1 - b.timer / pulse.active;
-      b.telegraphR = pulse.maxRadius * t;
-      const d = Math.hypot(p.x - b.x, p.z - b.z);
-      if (Math.abs(d - b.telegraphR) < 1.1) damagePlayer(state, pulse.damage * dmgScale * dt * 2.5, 'boss');
-      if (b.timer <= 0) {
-        b.state = 'recover';
-        b.timer = pulse.recovery * recScale;
-        b.pattern = null;
-        b.telegraphR = 0;
-      }
-    } else if (b.pattern === 'line') {
-      const line = SURVIVOR_BOSS.patterns.line;
-      if (
-        segmentHit(
-          b.x,
-          b.z,
-          b.x + b.chargeX * line.length,
-          b.z + b.chargeZ * line.length,
-          p.x,
-          p.z,
-          SURVIVOR.playerRadius + line.width * 0.5,
-        )
-      ) {
-        damagePlayer(state, line.damage * dmgScale, 'boss');
-      }
-      if (b.timer <= 0) {
-        b.state = 'recover';
-        b.timer = line.recovery * recScale;
-        b.pattern = null;
-        b.telegraphR = 0;
-      }
-    } else if (b.pattern === 'fan') {
-      const fan = SURVIVOR_BOSS.patterns.fan;
-      const count = fan.count + mod.fanCountAdd + b.fanAdd;
-      if (b.timer > fan.active * 0.7) {
-        for (let i = 0; i < count; i += 1) {
-          const a = Math.atan2(b.facingX, b.facingZ) + (i - (count - 1) / 2) * 0.26;
-          const proj = acquireProjectile(state);
-          if (!proj) break;
-          resetProj(proj, state, 'enemy', null, b.x, b.z, Math.sin(a) * fan.speed, Math.cos(a) * fan.speed, {
-            damage: fan.damage * dmgScale,
-            radius: 0.28,
-            life: 2.5,
-            owner: 'enemy',
-            color: phase >= 3 ? '#ff3366' : '#ff6688',
-          });
-          (proj as { fromBoss?: boolean }).fromBoss = true;
-        }
-      }
-      if (b.timer <= 0) {
-        b.state = 'recover';
-        b.timer = fan.recovery * recScale;
-        b.pattern = null;
-        b.telegraphR = 0;
-      }
-    } else if (b.pattern === 'summon') {
-      const summon = SURVIVOR_BOSS.patterns.summon;
-      if (b.timer > summon.active * 0.5) {
-        const n = Math.min(mod.summonCount + b.summonAdd, phase >= 3 ? 8 : 5);
-        for (let i = 0; i < n; i += 1) {
-          const ang = rng(state) * Math.PI * 2;
-          const id = phase >= 3 && rng(state) < 0.35 ? 'elite' : phase >= 2 ? 'spiky' : 'basic';
-          spawnEnemy(state, id, b.x + Math.cos(ang) * 3.5, b.z + Math.sin(ang) * 3.5);
-        }
-      }
-      if (b.timer <= 0) {
-        b.state = 'recover';
-        b.timer = summon.recovery * recScale;
-        b.pattern = null;
-        b.telegraphR = 0;
-      }
-    }
-    return;
-  }
-
-  if (b.state === 'recover' && b.timer <= 0) {
-    b.state = 'idle';
-    b.timer = mod.idleGap + rng(state) * 0.35;
-  }
+export function cancelBossCombat(state: SurvivorState, boss: SurvivorBoss): void {
+  cancelBossPattern(state, boss);
 }
 
 /** Prefill enemies for repulsor/damage fixtures. */

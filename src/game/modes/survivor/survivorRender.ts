@@ -370,9 +370,36 @@ export class SurvivorRenderer {
         this.projectiles.set(p.id, mesh);
         this.root.add(mesh);
       }
-      let s = p.kind === 'drone' ? 0.75 : p.kind === 'rocket' ? 1.3 : p.kind === 'bioplasma' ? 1.45 : 1;
+      let s =
+        p.kind === 'drone'
+          ? 0.75
+          : p.kind === 'rocket'
+            ? 1.3
+            : p.kind === 'bioplasma'
+              ? 1.45
+              : p.kind === 'boss-orb'
+                ? Math.max(2.8, (p.visualRadius || p.radius) * 4.2)
+                : p.kind === 'boss-fan'
+                  ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5)
+                  : 1;
       mesh.scale.setScalar(s);
-      mesh.position.set(p.x, p.kind === 'rocket' && p.armTimer > 0 ? 0.1 : p.kind === 'bioplasma' ? 0.85 : 1.0, p.z);
+      mesh.position.set(
+        p.x,
+        p.kind === 'rocket' && p.armTimer > 0
+          ? 0.1
+          : p.kind === 'bioplasma'
+            ? 0.85
+            : p.kind === 'boss-orb'
+              ? 1.15
+              : 1.0,
+        p.z,
+      );
+      if (mesh.material instanceof THREE.MeshStandardMaterial || mesh.material instanceof THREE.MeshBasicMaterial) {
+        // hostile projectiles stay bright
+        if (p.kind === 'boss-orb' || p.kind === 'boss-fan') {
+          (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.4;
+        }
+      }
       if (p.kind === 'rocket' && p.armTimer > 0) {
         mesh.scale.setScalar(p.explodeRadius * 1.4);
         (mesh.material as THREE.MeshStandardMaterial).opacity = 0.35;

@@ -47,7 +47,15 @@ export interface SurvivorEnemy {
   specialWindup: number;
 }
 
-export type ProjectileKind = 'bolt' | 'drone' | 'rocket' | 'enemy' | 'bioplasma' | 'boss-orb' | 'boss-fan' | 'orbital-marker';
+export type ProjectileKind =
+  | 'bolt'
+  | 'drone'
+  | 'rocket'
+  | 'enemy'
+  | 'bioplasma'
+  | 'boss-orb'
+  | 'boss-fan'
+  | 'orbital-marker';
 
 export interface SurvivorProjectile {
   id: number;
@@ -59,6 +67,8 @@ export interface SurvivorProjectile {
   vz: number;
   damage: number;
   radius: number;
+  /** Visual scale for rendering (may exceed collision radius). */
+  visualRadius: number;
   life: number;
   pierce: number;
   homing: boolean;
@@ -73,6 +83,11 @@ export interface SurvivorProjectile {
   bounceLeft: number;
   splitOnHit: number;
   active: boolean;
+  /** Boss that spawned this projectile (for cleanup). */
+  sourceBossId: number;
+  /** One-hit flag for orbs. */
+  hitPlayer: boolean;
+  splitDone: boolean;
 }
 
 export type HazardKind = 'wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
@@ -205,8 +220,26 @@ export interface SurvivorBoss {
   colliderRadius: number;
   visualScale: number;
   uniquePattern: import('./survivorContent').BossPatternId;
-  /** Cataclysm zone index / sweep angle progress */
+  /** Generic scalar for sweep progress / sequence index */
   patternParam: number;
+  /** One-shot action flag within active phase (fan volley, summon, etc.). */
+  patternTriggered: boolean;
+  /** Elapsed time in current pattern phase (windup/active). */
+  patternElapsed: number;
+  /** Per-pattern hit throttle for continuous beams/rings. */
+  patternHitCd: number;
+  /** Attacks completed since last unique-pattern use. */
+  attacksSinceUnique: number;
+  /** Attacks completed since last mega-only pattern. */
+  attacksSinceMega: number;
+  /** Previous completed pattern id for anti-repeat. */
+  previousPattern: import('./survivorContent').BossPatternId | null;
+  /** Total attack cycles completed this life. */
+  attacksCompleted: number;
+  /** Cataclysm / multi-zone payload (up to 5 zones). */
+  zones: Array<{ x: number; z: number; r: number; detonated: boolean }>;
+  /** Spore mine / sequence entity ids owned by this boss for cleanup. */
+  ownedMineIds: number[];
 }
 
 export interface SurvivorMiniboss {
@@ -400,6 +433,15 @@ export function emptyBoss(): SurvivorBoss {
     visualScale: 3.7,
     uniquePattern: 'rupture-ring',
     patternParam: 0,
+    patternTriggered: false,
+    patternElapsed: 0,
+    patternHitCd: 0,
+    attacksSinceUnique: 0,
+    attacksSinceMega: 0,
+    previousPattern: null,
+    attacksCompleted: 0,
+    zones: [],
+    ownedMineIds: [],
   };
 }
 

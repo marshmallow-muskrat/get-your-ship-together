@@ -14,6 +14,8 @@ import {
   thrusterPower,
   healthMagnetRadius,
   energyMagnetRadius,
+  forceBossIntoPattern,
+  cancelBossCombat,
   tryDodge,
   tryMech,
   tryRepulsor,
@@ -44,6 +46,9 @@ import {
   bossHealthMulFor,
   isMegaBossIndex,
   bossFocusBaseChance,
+  ALL_BOSS_PATTERNS,
+  isMegaOnlyPattern,
+  type BossPatternId,
 } from './survivorContent';
 import {
   DEFAULT_KEYBINDS,
@@ -67,6 +72,7 @@ import {
   makeRunSummary,
   recordRun,
 } from './survivorRecords';
+import { allPatternsHandled } from './survivorBossPatterns';
 import type { HeroId } from '../../content/heroes';
 
 function installMemoryStorage(): Map<string, string> {
@@ -753,5 +759,193 @@ describe('prototype unlock gates', () => {
     state.unlocks.arc = false;
     const choices = generateChoices(state);
     expect(choices.every((c) => c.weaponId !== 'arc')).toBe(true);
+  });
+});
+
+
+function spawnTestBoss(state: ReturnType<typeof createSurvivorState>, mega = false) {
+  // Step until a boss exists or force-spawn via schedule
+  state.time = mega ? SURVIVOR.bossInterval * 5 - 0.01 : SURVIVOR.bossInterval - 0.01;
+  state.nextBossIndex = mega ? 5 : 1;
+  state.nextBossTime = mega ? SURVIVOR.bossInterval * 5 : SURVIVOR.bossInterval;
+  for (let i = 0; i < 30; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+  const b = state.bosses.find((x) => x.active && x.state !== 'dead');
+  expect(b).toBeTruthy();
+  return b!;
+}
+
+function runPatternToIdle(
+  state: ReturnType<typeof createSurvivorState>,
+  pattern: BossPatternId,
+  maxSteps = 1200,
+): { boss: NonNullable<ReturnType<typeof spawnTestBoss>>; steps: number; sawRecover: boolean } {
+  const boss = spawnTestBoss(state, pattern === 'gravity-collapse' || pattern === 'cataclysm');
+  if ((pattern === 'gravity-collapse' || pattern === 'cataclysm') && !boss.isMega) {
+    boss.isMega = true;
+  }
+  forceBossIntoPattern(state, boss, pattern);
+  expect(boss.state).toBe('windup');
+  expect(boss.pattern).toBe(pattern);
+  let steps = 0;
+  let sawRecover = false;
+  let sawLeaveActive = false;
+  while (steps < maxSteps) {
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    steps += 1;
+    if (boss.state === 'recover') sawRecover = true;
+    if (boss.attacksCompleted >= 1 && boss.state !== 'active' && boss.state !== 'windup') {
+      sawLeaveActive = true;
+      // drain remaining recover into idle once
+      if (boss.state === 'recover') {
+        for (let j = 0; j < 300 && boss.state === 'recover'; j += 1) {
+          stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+          steps += 1;
+        }
+      }
+      break;
+    }
+    if (!boss.active && boss.state === 'dead') break;
+  }
+  expect(sawLeaveActive || sawRecover || boss.attacksCompleted >= 1).toBe(true);
+  return { boss, steps, sawRecover };
+}
+
+describe('boss pattern state machine', () => {
+  it('all pattern ids have config and are enumerated', () => {
+    expect(allPatternsHandled()).toBe(true);
+    expect(ALL_BOSS_PATTERNS.length).toBe(14);
+  });
+
+  it('breach-orb completes and returns to idle (was stuck bug)', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 101);
+    const { boss, steps } = runPatternToIdle(state, 'breach-orb');
+    expect(steps).toBeLessThan(900);
+    expect(boss.state).toBe('idle');
+    expect(boss.pattern).toBeNull();
+    expect(boss.attacksCompleted).toBeGreaterThanOrEqual(1);
+    // Should have fired at least one boss-orb projectile during life
+    // (may already be inactive)
+    expect(Number.isFinite(boss.x) && Number.isFinite(boss.timer)).toBe(true);
+  });
+
+  it.each(ALL_BOSS_PATTERNS)('pattern %s completes lifecycle without stuck active', (pattern) => {
+    const state = createSurvivorState('bee', 'survivor-boss', 200 + ALL_BOSS_PATTERNS.indexOf(pattern));
+    state.player.invuln = 999;
+    const { boss, steps, sawRecover } = runPatternToIdle(state, pattern);
+    expect(steps).toBeLessThan(1500);
+    expect(boss.state).not.toBe('active');
+    expect(boss.attacksCompleted).toBeGreaterThanOrEqual(1);
+    expect(sawRecover || boss.state === 'idle' || boss.state === 'recover').toBe(true);
+    // Not stuck: timer never goes permanently negative while active
+    for (let i = 0; i < 600; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      if (boss.state === 'active') {
+        expect(boss.timer).toBeGreaterThan(-0.6);
+        expect(boss.pattern).not.toBeNull();
+      }
+    }
+    expect(Number.isFinite(boss.timer)).toBe(true);
+    expect(Number.isFinite(boss.x)).toBe(true);
+    // Completed at least one full cycle and left active once
+    expect(boss.attacksCompleted).toBeGreaterThanOrEqual(1);
+  });
+
+  it('fan fires exactly one volley (not multi-frame spam)', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 55);
+    state.player.invuln = 999;
+    const boss = spawnTestBoss(state);
+    forceBossIntoPattern(state, boss, 'fan');
+    let enemyProj = 0;
+    const before = state.projectiles.filter((p) => p.active && (p.kind === 'boss-fan' || p.kind === 'enemy')).length;
+    // Through windup into active
+    for (let i = 0; i < 200; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      enemyProj = Math.max(
+        enemyProj,
+        state.projectiles.filter((p) => p.active && (p.kind === 'boss-fan' || p.owner === 'enemy')).length,
+      );
+    }
+    // One volley: should be bounded (~5-12), not dozens from multi-frame fire
+    expect(enemyProj).toBeGreaterThan(0);
+    expect(enemyProj).toBeLessThan(20);
+    expect(before).toBeLessThanOrEqual(enemyProj);
+  });
+
+  it('contamination creates enemy-owned puddle', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 66);
+    state.player.invuln = 999;
+    const boss = spawnTestBoss(state);
+    forceBossIntoPattern(state, boss, 'contamination');
+    for (let i = 0; i < 180; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const puddle = state.hazards.find((h) => h.active && h.owner === 'enemy' && h.kind === 'contamination');
+    expect(puddle).toBeTruthy();
+  });
+
+  it('summon produces enemies once', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 77);
+    state.player.invuln = 999;
+    state.enemies = [];
+    const boss = spawnTestBoss(state);
+    const before = state.enemies.filter((e) => e.alive).length;
+    forceBossIntoPattern(state, boss, 'summon');
+    for (let i = 0; i < 200; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const after = state.enemies.filter((e) => e.alive).length;
+    expect(after).toBeGreaterThan(before);
+    // Not absurd multi-frame spam
+    expect(after - before).toBeLessThan(15);
+  });
+
+  it('regular bosses never select mega-only patterns', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 88);
+    state.player.invuln = 999;
+    const boss = spawnTestBoss(state);
+    expect(boss.isMega).toBe(false);
+    const seen = new Set<string>();
+    for (let cycle = 0; cycle < 30; cycle += 1) {
+      for (let i = 0; i < 400; i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        if (boss.pattern) seen.add(boss.pattern);
+        if (!boss.active) break;
+      }
+    }
+    for (const p of seen) {
+      expect(isMegaOnlyPattern(p as BossPatternId)).toBe(false);
+    }
+  });
+
+  it('mega boss can run gravity-collapse and recover', () => {
+    const state = createSurvivorState('bee', 'survivor-mega', 99);
+    state.player.invuln = 999;
+    const { boss, sawRecover } = runPatternToIdle(state, 'gravity-collapse');
+    expect(boss.isMega).toBe(true);
+    expect(boss.attacksCompleted).toBeGreaterThanOrEqual(1);
+    expect(sawRecover || boss.state === 'idle' || boss.state === 'recover').toBe(true);
+    expect(boss.state).not.toBe('active');
+  });
+
+  it('pause does not advance boss pattern timer', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 11);
+    state.player.invuln = 999;
+    const boss = spawnTestBoss(state);
+    forceBossIntoPattern(state, boss, 'pulse');
+    const t0 = boss.timer;
+    state.phase = 'paused';
+    for (let i = 0; i < 60; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(boss.timer).toBeCloseTo(t0, 5);
+    expect(boss.state).toBe('windup');
+  });
+
+  it('boss death during pattern cleans up safely', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 12);
+    const boss = spawnTestBoss(state);
+    forceBossIntoPattern(state, boss, 'sweeping-beam');
+    boss.health = 0;
+    // simulate death path
+    cancelBossCombat(state, boss);
+    boss.state = 'dead';
+    boss.active = false;
+    expect(() => {
+      for (let i = 0; i < 30; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }).not.toThrow();
   });
 });

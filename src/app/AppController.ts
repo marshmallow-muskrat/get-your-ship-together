@@ -24,6 +24,11 @@ function parseLaunch(): {
     'survivor-damage',
     'survivor-miniboss',
     'survivor-pickups',
+    'survivor-arc',
+    'survivor-orbital',
+    'survivor-mega',
+    'survivor-cache',
+    'survivor-shield',
   ];
 
   const knownFixture =

@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.0.0`
+**Current balance line:** `endless-2.0.1`
 
 ## Purpose
 
@@ -209,3 +209,16 @@ npm run build
 ```
 
 Browser verification is required for changed gameplay, HUD, asset, and effect fixtures.
+
+
+## Boss pattern lifecycle (2.0.1)
+
+Every `BossPatternId` has an exhaustive windup → active → recover → idle state machine in `survivorBossPatterns.ts`. There is no silent fallback for unhandled patterns.
+
+Shared patterns: pulse, line, fan (one volley), summon (one spawn), breach-orb, contamination.
+
+Unique patterns are selected by cadence (within first few cycles, then every 3–5 attacks): rupture-ring, cryo-lanes, ravage-charge, sweeping-beam, aerial-strafe, spore-bloom.
+
+Mega-only: gravity-collapse, cataclysm — never used by regular bosses; forced early on Mega-Bosses.
+
+Fan and summon use a one-shot `patternTriggered` flag so they cannot multi-fire per frame.
