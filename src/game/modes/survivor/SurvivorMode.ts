@@ -491,7 +491,13 @@ export class SurvivorMode {
       this.state.metrics.attacks = pools.attacks;
       this.state.metrics.railPool = pools.railPool;
     }
-    SurvivorArena.followPlayer(this.camera, this.state.player.x, this.state.player.z);
+    SurvivorArena.followPlayer(
+      this.camera,
+      this.state.player.x,
+      this.state.player.z,
+      this.state.player.hitShake,
+      this.state.time,
+    );
     this.hud?.publish(this.state, this.showMetrics || this.fixture === 'survivor-horde', {
       settingsOpen: this.settingsOpen,
       rebinding: this.rebindingAction,

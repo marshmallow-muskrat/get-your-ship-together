@@ -217,13 +217,35 @@ export class SurvivorArena {
   }
 
   /** Track player with a fixed isometric offset (camera position = lookAt + offset). */
-  static followPlayer(cam: THREE.OrthographicCamera, x: number, z: number): void {
+  /**
+   * Track the player, with an optional restrained impulse on heavy hits.
+   *
+   * `shake` is seconds of remaining impulse (see `player.hitShake`), applied only for
+   * elite, miniboss and boss physical hits. The amplitude is deliberately small and
+   * decays fast: the point is to make a heavy hit *land*, not to make the arena
+   * unreadable at the moment the player most needs to see it. `t` drives a decaying
+   * oscillation rather than random jitter so the motion is smooth and deterministic.
+   */
+  static followPlayer(
+    cam: THREE.OrthographicCamera,
+    x: number,
+    z: number,
+    shake = 0,
+    t = 0,
+  ): void {
     const ox = 18;
     const oy = 22;
     const oz = 18;
+    let sx = 0;
+    let sz = 0;
+    if (shake > 0) {
+      const amp = Math.min(0.5, shake) * 0.65;
+      sx = Math.sin(t * 46) * amp;
+      sz = Math.cos(t * 37) * amp;
+    }
     cam.up.set(0, 1, 0);
-    cam.position.set(x + ox, oy, z + oz);
-    cam.lookAt(x, 0.6, z);
+    cam.position.set(x + ox + sx, oy, z + oz + sz);
+    cam.lookAt(x + sx * 0.5, 0.6, z + sz * 0.5);
     cam.updateProjectionMatrix();
   }
 
