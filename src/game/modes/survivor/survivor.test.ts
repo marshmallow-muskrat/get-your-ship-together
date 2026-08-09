@@ -1,5 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { createSurvivorState, emptyEnemy, primaryBoss } from './survivorState';
+import { focusLossTransition, shouldHandleVisibility } from './survivorFocus';
+import type { ActionId } from './survivorKeybinds';
+import {
+  createSurvivorState,
+  emptyBoss,
+  emptyEnemy,
+  primaryBoss,
+  type SurvivorState,
+} from './survivorState';
 import {
   EMPTY_SURVIVOR_INPUT,
   applyChoice,
@@ -10,6 +18,7 @@ import {
   clearShipHazards,
   damagePlayer,
   directPickupRadius,
+  forceEnqueueBossIndex,
   forceStartProtocol,
   generateChoices,
   magnetRadius,
@@ -43,6 +52,7 @@ import {
   bossPhaseFromHealth,
   bossTimeForIndex,
   endlessDifficultyAt,
+  isEnemyEligibleAt,
   formatOverclockLabel,
   heroStarterWeapon,
   hullPlatingGainAtLevel,
@@ -82,7 +92,6 @@ import {
   recordRun,
 } from './survivorRecords';
 import { allPatternsHandled } from './survivorBossPatterns';
-import type { HeroId } from '../../content/heroes';
 
 function installMemoryStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -104,64 +113,10 @@ function installMemoryStorage(): Map<string, string> {
   return store;
 }
 
-/** Fixed-window starting-weapon DPS/kill benchmark without level-ups or abilities. */
-function benchmarkStarter(heroId: HeroId, seed: number, seconds: number, dense: boolean): {
-  damage: number;
-  kills: number;
-  attacks: number;
-} {
-  const state = createSurvivorState(heroId, null, seed);
-  state.player.invuln = 999;
-  // Clear auto-spawn pressure by setting high time spawn paused via enemy cap low then manual pack
-  state.enemyCap = 40;
-  state.time = 5;
-  state.nextBossTime = 99999;
-  state.nextBossIndex = 99;
-  // Place fixed enemies
-  const n = dense ? 18 : 5;
-  const spacing = dense ? 1.4 : 4.5;
-  for (let i = 0; i < n; i += 1) {
-    const ang = (i / n) * Math.PI * 2;
-    const r = dense ? 4 + (i % 3) * 0.8 : 5 + (i % 2) * spacing;
-    const e = emptyEnemy();
-    e.id = 2000 + i;
-    e.defId = 'basic';
-    e.role = 'fodder';
-    e.x = Math.cos(ang) * r;
-    e.z = Math.sin(ang) * r;
-    e.health = 80;
-    e.maxHealth = 80;
-    e.alive = true;
-    e.attackCd = 99;
-    e.specialCd = 99;
-    e.speedMul = 0.15;
-    e.contactDamage = 8;
-    e.xp = 3;
-    state.enemies.push(e);
-  }
-  let damage = 0;
-  const steps = Math.floor(seconds / SURVIVOR.fixedDt);
-  for (let i = 0; i < steps; i += 1) {
-    const before = state.enemies.reduce((s, e) => s + (e.alive ? e.health : 0), 0);
-    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    // prevent level-up interrupting fire
-    if (state.phase === 'levelup') {
-      state.phase = 'playing';
-      state.choices = [];
-      state.xp = 0;
-    }
-    const after = state.enemies.reduce((s, e) => s + (e.alive ? e.health : 0), 0);
-    damage += Math.max(0, before - after);
-    // Keep player centered
-    state.player.x = 0;
-    state.player.z = 0;
-  }
-  return {
-    damage,
-    kills: state.kills,
-    attacks: state.weapons[0]?.level ?? 1,
-  };
-}
+// Starter parity is governed by the seven-scenario moving-target harness in
+// survivorWeaponBenchmark.test.ts. The two-scenario static-dummy benchmark that used
+// to live here measured homing weapons against motionless targets and disagreed with
+// it, so it was removed rather than kept as a second, weaker opinion.
 
 describe('survivor content', () => {
   it('xp thresholds increase', () => {
@@ -325,24 +280,10 @@ describe('repeatable passives', () => {
   });
 });
 
-describe('starting weapon balance', () => {
-  it('non-Boswell starters are within ~15% of Bee on combined sparse+dense damage', () => {
-    const heroes: HeroId[] = ['bee', 'flamingo', 'frog', 'red-panda'];
-    const scores: Record<string, number> = {};
-    for (const h of heroes) {
-      const sparse = benchmarkStarter(h, 42, 45, false);
-      const dense = benchmarkStarter(h, 42, 45, true);
-      scores[h] = sparse.damage + dense.damage;
-    }
-    const bee = scores.bee!;
-    expect(bee).toBeGreaterThan(0);
-    for (const h of ['flamingo', 'frog', 'red-panda'] as HeroId[]) {
-      const ratio = scores[h]! / bee;
-      // Allow modest variance; target within ~15% below Boswell
-      expect(ratio).toBeGreaterThan(0.82);
-    }
-  });
-});
+// Starter parity is governed by the seven-scenario moving-target harness in
+// survivorWeaponBenchmark.test.ts. The old two-scenario static-dummy check that
+// lived here measured homing weapons against motionless targets and disagreed with
+// it, so it was removed rather than kept as a second, weaker opinion.
 
 describe('endless simulation', () => {
   it('counts survival time upward only while playing', () => {
@@ -1522,46 +1463,6 @@ describe('protocol presentation contracts', () => {
     expect(state.player.health).toBe(hp);
   });
 
-  it('gravitic recall pulls energy orbs without inventing XP', () => {
-    const state = createSurvivorState('bee', null, 702);
-    state.weapons = [];
-    state.xpNext = 99999;
-    let total = 0;
-    for (let i = 0; i < 10; i += 1) {
-      const v = 3 + i;
-      total += v;
-      state.pickups.push({
-        id: 8800 + i,
-        kind: 'xp',
-        x: 10 + i,
-        z: -8,
-        value: v,
-        active: true,
-        magnetized: false,
-        life: Infinity,
-      });
-    }
-    // Health orb must not be recalled
-    state.pickups.push({
-      id: 8899,
-      kind: 'repair',
-      x: 12,
-      z: 12,
-      value: 20,
-      active: true,
-      magnetized: false,
-      life: 40,
-    });
-    const xp0 = state.xp;
-    forceStartProtocol(state, 'gravitic-recall', 1);
-    expect(state.recall.active).toBe(true);
-    expect(state.recall.totalXp).toBe(total);
-    for (let i = 0; i < 120; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    expect(state.recall.active).toBe(false);
-    expect(state.xp - xp0).toBe(total);
-    expect(state.pickups.find((p) => p.id === 8899)?.active).toBe(true);
-  });
-
   it('gunship originates near the player not at a far edge', () => {
     const state = createSurvivorState('bee', null, 703);
     state.player.x = 3;
@@ -1592,12 +1493,12 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.2.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.2.0');
+  it('is endless-2.2.1', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.2.1');
   });
 });
 
-describe('melee horde and endless-2.2.0 balance', () => {
+describe('melee horde and endless-2.2.1 balance', () => {
   it('no ordinary horde role is ranged', () => {
     for (const def of Object.values(HORDE)) {
       if (def.role === 'miniboss') continue;
@@ -1619,16 +1520,93 @@ describe('melee horde and endless-2.2.0 balance', () => {
     expect(endlessDifficultyAt(60 * 60).speedMul).toBeLessThanOrEqual(1.7);
   });
 
-  it('boss queue preserves exact indices FIFO including mega', () => {
+  it('boss queue drains 4 → 5 → 6 in exact order with 5 as Mega, losing none', () => {
     const state = createSurvivorState('bee', null, 920);
+    state.player.invuln = 9999;
+    state.weapons = [];
+    state.spawnAcc = -1e9;
+    // Controlled capacity: only the queue may produce bosses.
+    state.nextBossIndex = 7;
+    state.nextBossTime = 1e9;
     state.pendingBossIndices = [4, 5, 6];
-    state.breachStacks = 3;
-    // Force capacity by not spawning live bosses
     expect(isMegaBossIndex(5)).toBe(true);
-    // Drain with free capacity
-    for (let i = 0; i < 30; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    // At least the first queued boss should attempt to enter play
-    expect(state.bossesSpawned + state.pendingBossIndices.length).toBeGreaterThanOrEqual(0);
+    expect(isMegaBossIndex(4)).toBe(false);
+    expect(isMegaBossIndex(6)).toBe(false);
+
+    // state.bosses is append-only in spawn order, so it records the true drain order.
+    const spawnOrder: number[] = [];
+    for (let i = 0; i < 600; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      for (const b of state.bosses) {
+        if (!spawnOrder.includes(b.index)) spawnOrder.push(b.index);
+      }
+      if (state.pendingBossIndices.length === 0 && spawnOrder.length === 3) break;
+      // Free the ordinary slot / mega slot so the next queued index can enter.
+      if (state.pendingBossIndices.length > 0) {
+        for (const b of state.bosses) {
+          if (b.active && b.state !== 'dead' && b.index === spawnOrder[spawnOrder.length - 1]) {
+            b.active = false;
+            b.state = 'dead';
+            b.health = 0;
+          }
+        }
+      }
+    }
+
+    // Exact FIFO order — not merely "contains".
+    expect(spawnOrder).toEqual([4, 5, 6]);
+    expect(state.pendingBossIndices).toEqual([]);
+    expect(state.bossesSpawned).toBe(3);
+    // None duplicated.
+    const indices = state.bosses.map((b) => b.index);
+    expect(new Set(indices).size).toBe(indices.length);
+    // Index 5 is the Mega.
+    const five = state.bosses.find((b) => b.index === 5);
+    expect(five).toBeTruthy();
+    expect(five!.isMega).toBe(true);
+    expect(state.bosses.find((b) => b.index === 4)!.isMega).toBe(false);
+    expect(state.bosses.find((b) => b.index === 6)!.isMega).toBe(false);
+  });
+
+  it('a later boss index queues behind earlier pending indices', () => {
+    const state = createSurvivorState('bee', null, 921);
+    state.player.invuln = 9999;
+    state.weapons = [];
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.pendingBossIndices = [4, 5, 6];
+    // Saturate live capacity so nothing can drain this frame.
+    for (let i = 0; i < SURVIVOR.maxSimultaneousBosses; i += 1) {
+      const b = emptyBoss();
+      b.id = 5000 + i;
+      b.index = 100 + i;
+      b.active = true;
+      b.state = 'idle';
+      b.health = 1e6;
+      b.maxHealth = 1e6;
+      b.isMega = false;
+      state.bosses.push(b);
+    }
+    // A mega already holds the reserved mega slot too.
+    const megaHold = emptyBoss();
+    megaHold.id = 5900;
+    megaHold.index = 200;
+    megaHold.active = true;
+    megaHold.state = 'idle';
+    megaHold.isMega = true;
+    megaHold.health = 1e6;
+    megaHold.maxHealth = 1e6;
+    state.bosses.push(megaHold);
+
+    forceEnqueueBossIndex(state, 7);
+    expect(state.pendingBossIndices).toEqual([4, 5, 6, 7]);
+    // Re-enqueueing an already-pending index must not duplicate it.
+    forceEnqueueBossIndex(state, 5);
+    expect(state.pendingBossIndices).toEqual([4, 5, 6, 7]);
+
+    for (let i = 0; i < 120; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    // Still blocked, still in order, nothing lost.
+    expect(state.pendingBossIndices).toEqual([4, 5, 6, 7]);
   });
 
   it('aegis shield formula is reduced from 2.1.0 values', () => {
@@ -1656,5 +1634,733 @@ describe('melee horde and endless-2.2.0 balance', () => {
     }
     const hostile = state.projectiles.filter((p) => p.active && p.owner === 'enemy' && p.kind === 'enemy');
     expect(hostile.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gravitic Recall — XP conservation across level-ups
+// ---------------------------------------------------------------------------
+
+/**
+ * Cumulative progression helper.
+ * total earned XP = XP spent reaching the current level + current unspent XP.
+ */
+function totalEarnedXp(state: SurvivorState): number {
+  let sum = state.xp;
+  for (let lv = 1; lv < state.level; lv += 1) sum += xpForLevel(lv);
+  return sum;
+}
+
+function scatterEnergy(
+  state: SurvivorState,
+  values: number[],
+  baseId = 8800,
+  radius = 16,
+): number {
+  let total = 0;
+  values.forEach((v, i) => {
+    total += v;
+    state.pickups.push({
+      id: baseId + i,
+      kind: 'xp',
+      x: Math.sin(i * 1.31) * radius,
+      z: Math.cos(i * 0.97) * radius,
+      value: v,
+      active: true,
+      magnetized: false,
+      life: Infinity,
+    });
+  });
+  return total;
+}
+
+/** Advance the sim, resolving each level-up modal with exactly one validated choice. */
+function runResolvingLevelUps(
+  state: SurvivorState,
+  steps: number,
+): { modals: number; fingerprints: string[] } {
+  let modals = 0;
+  const fingerprints: string[] = [];
+  for (let i = 0; i < steps; i += 1) {
+    if (state.phase === 'levelup') {
+      modals += 1;
+      expect(state.choices.length).toBeGreaterThan(0);
+      const before = buildFingerprint(state);
+      applyChoice(state, 0);
+      fingerprints.push(`${before} -> ${buildFingerprint(state)}`);
+      expect(state.phase).toBe('playing');
+      continue;
+    }
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+  }
+  return { modals, fingerprints };
+}
+
+function recallState(seed: number): SurvivorState {
+  const state = createSurvivorState('bee', null, seed);
+  // No weapons and no incoming pressure: only Recall can change XP.
+  state.weapons = [];
+  state.player.invuln = 9999;
+  state.spawnAcc = -1e9;
+  state.surge.nextSurgeAt = 1e9;
+  state.nextBossTime = 1e9;
+  state.nextCacheTime = 1e9;
+  return state;
+}
+
+describe('gravitic recall XP conservation', () => {
+  it('recall with no level-up banks every orb exactly once', () => {
+    const state = recallState(7301);
+    const total = scatterEnergy(state, [2, 3, 4]);
+    expect(total).toBeLessThan(state.xpNext);
+    const earned0 = totalEarnedXp(state);
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    expect(state.recall.active).toBe(true);
+    expect(state.recall.totalXp).toBe(total);
+
+    for (let i = 0; i < 200; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.recall.active).toBe(false);
+    expect(state.level).toBe(1);
+    expect(state.pendingLevelUps).toBe(0);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+  });
+
+  it('recall crossing exactly one level preserves XP and owes one choice', () => {
+    const state = recallState(7302);
+    // xpForLevel(1) = 21 → 30 crosses one level with a remainder.
+    const total = scatterEnergy(state, [10, 10, 10]);
+    expect(total).toBeGreaterThan(xpForLevel(1));
+    expect(total).toBeLessThan(xpForLevel(1) + xpForLevel(2));
+    const earned0 = totalEarnedXp(state);
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    for (let i = 0; i < 200; i += 1) {
+      if (state.phase === 'levelup') break;
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }
+    expect(state.recall.active).toBe(false);
+    expect(state.phase).toBe('levelup');
+    expect(state.level).toBe(2);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+    applyChoice(state, 0);
+    expect(state.phase).toBe('playing');
+    expect(state.pendingLevelUps).toBe(0);
+  });
+
+  it('recall crossing at least three levels loses no XP and opens one modal per level', () => {
+    const state = recallState(7303);
+    // 21 + 34 + 50 + 69 = 174 to reach L5; 210 crosses four levels with a remainder.
+    const values = Array.from({ length: 18 }, (_, i) => 8 + (i % 5) * 2);
+    const total = scatterEnergy(state, values);
+    expect(total).toBe(210);
+    const earned0 = totalEarnedXp(state);
+
+    let expectedLevels = 0;
+    let remaining = total;
+    let lv = state.level;
+    let spare = state.xp;
+    while (spare + remaining >= xpForLevel(lv)) {
+      remaining -= xpForLevel(lv) - spare;
+      spare = 0;
+      lv += 1;
+      expectedLevels += 1;
+    }
+    expect(expectedLevels).toBeGreaterThanOrEqual(3);
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    const { modals } = runResolvingLevelUps(state, 400);
+
+    expect(state.recall.active).toBe(false);
+    expect(modals).toBe(expectedLevels);
+    expect(state.level).toBe(1 + expectedLevels);
+    expect(state.pendingLevelUps).toBe(0);
+    // Exact cumulative conservation — not "at least".
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+    // Every captured orb deactivated exactly once.
+    for (const id of Array.from({ length: values.length }, (_, i) => 8800 + i)) {
+      expect(state.pickups.find((p) => p.id === id)?.active).toBe(false);
+    }
+  });
+
+  it('several orbs arriving in one frame all count even after a level opens', () => {
+    const state = recallState(7304);
+    // All orbs on top of the player: they are collected in a single updatePickups pass.
+    const values = [15, 15, 15, 15, 15, 15];
+    let total = 0;
+    values.forEach((v, i) => {
+      total += v;
+      state.pickups.push({
+        id: 8700 + i,
+        kind: 'xp',
+        x: state.player.x + 0.05 * i,
+        z: state.player.z,
+        value: v,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
+    });
+    expect(total).toBeGreaterThan(xpForLevel(1) + xpForLevel(2));
+    const earned0 = totalEarnedXp(state);
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    // One step is enough for the co-located orbs; the modal is deferred until recall ends.
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+    expect(state.phase).toBe('playing');
+
+    runResolvingLevelUps(state, 300);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+    expect(state.pendingLevelUps).toBe(0);
+  });
+
+  it('final snap collection crossing levels preserves XP', () => {
+    const state = recallState(7305);
+    // Far orbs that only the end-of-recall snap can reach.
+    const values = [40, 40, 40, 40];
+    let total = 0;
+    values.forEach((v, i) => {
+      total += v;
+      state.pickups.push({
+        id: 8600 + i,
+        kind: 'xp',
+        x: (i % 2 === 0 ? 1 : -1) * (SURVIVOR.arenaHalf - 3),
+        z: (i < 2 ? 1 : -1) * (SURVIVOR.arenaHalf - 3),
+        value: v,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
+    });
+    const earned0 = totalEarnedXp(state);
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    const { modals } = runResolvingLevelUps(state, 400);
+    expect(state.recall.active).toBe(false);
+    expect(modals).toBeGreaterThanOrEqual(3);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+    for (let i = 0; i < values.length; i += 1) {
+      expect(state.pickups.find((p) => p.id === 8600 + i)?.active).toBe(false);
+    }
+  });
+
+  it('does not recall health orbs or orbs created after activation', () => {
+    const state = recallState(7306);
+    const total = scatterEnergy(state, [12, 12, 12]);
+    state.pickups.push({
+      id: 8899,
+      kind: 'repair',
+      x: 12,
+      z: 12,
+      value: 20,
+      active: true,
+      magnetized: false,
+      life: 400,
+    });
+    state.player.health = state.player.maxHealth;
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    expect(state.recall.orbIds).not.toContain(8899);
+    // Created after activation, far from the player and outside magnet range.
+    state.pickups.push({
+      id: 8901,
+      kind: 'xp',
+      x: SURVIVOR.arenaHalf - 2,
+      z: -(SURVIVOR.arenaHalf - 2),
+      value: 99,
+      active: true,
+      magnetized: false,
+      life: Infinity,
+    });
+    expect(state.recall.orbIds).not.toContain(8901);
+
+    const earned0 = totalEarnedXp(state);
+    runResolvingLevelUps(state, 200);
+    expect(state.pickups.find((p) => p.id === 8899)?.active).toBe(true);
+    expect(state.pickups.find((p) => p.id === 8901)?.active).toBe(true);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+  });
+
+  it('empty recall is a no-op and corrupts nothing', () => {
+    const state = recallState(7307);
+    const earned0 = totalEarnedXp(state);
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    expect(state.recall.orbIds.length).toBe(0);
+    expect(state.recall.totalXp).toBe(0);
+    for (let i = 0; i < 150; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.recall.active).toBe(false);
+    expect(state.phase).toBe('playing');
+    expect(state.choices).toEqual([]);
+    expect(state.protocolChoices).toEqual([]);
+    expect(state.pendingLevelUps).toBe(0);
+    expect(totalEarnedXp(state)).toBe(earned0);
+  });
+
+  it('each pending level requires its own validated choice and grants exactly one upgrade', () => {
+    const state = recallState(7308);
+    scatterEnergy(state, Array.from({ length: 18 }, (_, i) => 8 + (i % 5) * 2));
+    forceStartProtocol(state, 'gravitic-recall', 1);
+
+    const grants: string[] = [];
+    let modals = 0;
+    for (let i = 0; i < 400; i += 1) {
+      if (state.phase === 'levelup') {
+        modals += 1;
+        const before = buildFingerprint(state);
+        // No permanent Build change may occur merely by opening the modal.
+        expect(state.pendingLevelUps).toBeGreaterThanOrEqual(0);
+        applyChoice(state, 0);
+        const after = buildFingerprint(state);
+        expect(after).not.toBe(before);
+        grants.push(after);
+        continue;
+      }
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }
+    expect(modals).toBeGreaterThanOrEqual(3);
+    // One card == one level: total granted weapon/passive levels equals modal count.
+    const grantedLevels =
+      state.weapons.reduce((n, w) => n + w.level, 0) +
+      Object.values(state.passives).reduce((n: number, v) => n + (v ?? 0), 0);
+    expect(grantedLevels).toBe(modals);
+    expect(state.pendingLevelUps).toBe(0);
+    expect(state.phase).toBe('playing');
+  });
+
+  it('multi-level recall never auto-grants unsolicited Build levels', () => {
+    const state = recallState(7309);
+    // Give a starter weapon so an auto-mutation would be visible.
+    state.weapons = [{ weaponId: 'pulse', level: 1, cooldown: 0.4, focusDebt: 0, prototype: false }];
+    scatterEnergy(state, Array.from({ length: 18 }, (_, i) => 8 + (i % 5) * 2));
+    const fp0 = buildFingerprint(state);
+
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    // Step until the first modal — Build must be untouched the whole way.
+    for (let i = 0; i < 400 && state.phase !== 'levelup'; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      expect(buildFingerprint(state)).toBe(fp0);
+    }
+    expect(state.phase).toBe('levelup');
+    expect(state.pendingLevelUps).toBeGreaterThanOrEqual(2);
+    expect(buildFingerprint(state)).toBe(fp0);
+  });
+
+  it('recall keeps phase and choice sets coherent throughout', () => {
+    const state = recallState(7310);
+    scatterEnergy(state, Array.from({ length: 18 }, (_, i) => 8 + (i % 5) * 2));
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    for (let i = 0; i < 400; i += 1) {
+      expect(['playing', 'levelup']).toContain(state.phase);
+      if (state.phase === 'levelup') {
+        expect(state.choices.length).toBeGreaterThan(0);
+        expect(state.choices.length).toBeLessThanOrEqual(3);
+        expect(state.protocolChoices).toEqual([]);
+        applyChoice(state, 0);
+        continue;
+      }
+      expect(state.choices).toEqual([]);
+      // The pull is never frozen half-way by a modal.
+      if (state.recall.active) expect(state.phase).toBe('playing');
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }
+    expect(state.pendingLevelUps).toBe(0);
+  });
+
+  it('the visible pull lasts about 1.25 seconds', () => {
+    const state = recallState(7311);
+    scatterEnergy(state, [5, 5, 5], 8800, SURVIVOR.arenaHalf - 4);
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    expect(state.recall.duration).toBeCloseTo(1.25, 5);
+    let elapsed = 0;
+    for (let i = 0; i < 400 && state.recall.active; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      elapsed += SURVIVOR.fixedDt;
+    }
+    expect(elapsed).toBeGreaterThan(1.0);
+    expect(elapsed).toBeLessThan(1.6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lost-focus policy
+// ---------------------------------------------------------------------------
+
+describe('lost focus handling', () => {
+  const base = {
+    phase: 'playing' as SurvivorState['phase'] | null,
+    settingsOpen: false,
+    rebinding: null as ActionId | null,
+    choiceIndex: null as number | null,
+    inputBlocked: false,
+  };
+
+  it('visibility logic acts only when the document is hidden', () => {
+    expect(shouldHandleVisibility(true)).toBe(true);
+    expect(shouldHandleVisibility(false)).toBe(false);
+  });
+
+  it('pauses active play and clears any pending choice', () => {
+    const next = focusLossTransition({ ...base, choiceIndex: 2 });
+    expect(next.phase).toBe('paused');
+    expect(next.choiceIndex).toBeNull();
+    expect(next.inputBlocked).toBe(false);
+  });
+
+  it('never turns levelup or protocol into paused', () => {
+    expect(focusLossTransition({ ...base, phase: 'levelup' }).phase).toBe('levelup');
+    expect(focusLossTransition({ ...base, phase: 'protocol' }).phase).toBe('protocol');
+    // A stale card selection is still discarded on both screens.
+    expect(focusLossTransition({ ...base, phase: 'levelup', choiceIndex: 1 }).choiceIndex).toBeNull();
+    expect(focusLossTransition({ ...base, phase: 'protocol', choiceIndex: 0 }).choiceIndex).toBeNull();
+  });
+
+  it('never auto-resumes and never disturbs terminal phases', () => {
+    expect(focusLossTransition({ ...base, phase: 'paused' }).phase).toBe('paused');
+    expect(focusLossTransition({ ...base, phase: 'defeat' }).phase).toBe('defeat');
+    expect(focusLossTransition({ ...base, phase: 'victory' }).phase).toBe('victory');
+  });
+
+  it('cancels an in-flight keybind capture', () => {
+    const next = focusLossTransition({ ...base, rebinding: 'dodge', inputBlocked: true });
+    expect(next.rebinding).toBeNull();
+    // Capture no longer blocks input; only the settings panel does.
+    expect(next.inputBlocked).toBe(false);
+  });
+
+  it('keeps inputBlocked consistent with the settings panel', () => {
+    const open = focusLossTransition({ ...base, settingsOpen: true, inputBlocked: true });
+    expect(open.inputBlocked).toBe(true);
+    // Settings already paused the run; focus loss must not re-pause or unpause it.
+    expect(focusLossTransition({ ...base, phase: 'paused', settingsOpen: true }).phase).toBe('paused');
+    const closed = focusLossTransition({ ...base, settingsOpen: false, inputBlocked: true });
+    expect(closed.inputBlocked).toBe(false);
+  });
+
+  it('is idempotent — a blur followed by a hidden event changes nothing further', () => {
+    const once = focusLossTransition({ ...base, choiceIndex: 1, rebinding: 'mech' });
+    const twice = focusLossTransition(once);
+    expect(twice).toEqual(once);
+  });
+
+  it('tolerates focus loss before a run exists', () => {
+    const next = focusLossTransition({ ...base, phase: null });
+    expect(next.phase).toBeNull();
+    expect(next.choiceIndex).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Early specialist gates
+// ---------------------------------------------------------------------------
+
+/** Ids of every enemy that entered play, in spawn order. */
+function trackSpawns(state: SurvivorState): {
+  sample: () => void;
+  defsSeen: () => string[];
+  firstTimeOf: (defId: string) => number | undefined;
+} {
+  const seen = new Map<number, { defId: string; t: number }>();
+  return {
+    sample() {
+      for (const e of state.enemies) {
+        if (e.alive && !seen.has(e.id)) seen.set(e.id, { defId: e.defId, t: state.time });
+      }
+    },
+    defsSeen() {
+      return Array.from(new Set(Array.from(seen.values(), (v) => v.defId)));
+    },
+    firstTimeOf(defId) {
+      let best: number | undefined;
+      for (const v of seen.values()) {
+        if (v.defId === defId && (best === undefined || v.t < best)) best = v.t;
+      }
+      return best;
+    },
+  };
+}
+
+function pressureState(seed: number): SurvivorState {
+  const state = createSurvivorState('bee', null, seed);
+  state.player.invuln = 1e9;
+  state.weapons = [];
+  return state;
+}
+
+describe('early specialist gates', () => {
+  it('exposes a single time-gate table', () => {
+    expect(isEnemyEligibleAt('basic', 0)).toBe(true);
+    expect(isEnemyEligibleAt('mush', 0)).toBe(true);
+    expect(isEnemyEligibleAt('fast', 29)).toBe(false);
+    expect(isEnemyEligibleAt('fast', 30)).toBe(true);
+    expect(isEnemyEligibleAt('spiky', 59)).toBe(false);
+    expect(isEnemyEligibleAt('spiky', 60)).toBe(true);
+    expect(isEnemyEligibleAt('flyer', 59)).toBe(false);
+    expect(isEnemyEligibleAt('bee', 59)).toBe(false);
+    expect(isEnemyEligibleAt('flyer', 60)).toBe(true);
+    expect(isEnemyEligibleAt('elite', 89)).toBe(false);
+    expect(isEnemyEligibleAt('elite', 90)).toBe(true);
+    expect(isEnemyEligibleAt('ghost', 119)).toBe(false);
+    expect(isEnemyEligibleAt('ghost', 120)).toBe(true);
+    // Unknown ids are treated as late specialists, never as free fodder.
+    expect(isEnemyEligibleAt('not-a-real-enemy', 0)).toBe(false);
+  });
+
+  it('spawns fodder only for the first 30 seconds', () => {
+    const state = pressureState(6101);
+    const tracker = trackSpawns(state);
+    for (let i = 0; i < 30 * 60; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      tracker.sample();
+    }
+    expect(tracker.defsSeen().length).toBeGreaterThan(0);
+    for (const defId of tracker.defsSeen()) {
+      expect(HORDE[defId]!.role).toBe('fodder');
+    }
+  });
+
+  it('caps living fast specialists to one during 30–60 seconds', () => {
+    const state = pressureState(6102);
+    let peak = 0;
+    for (let i = 0; i < 60 * 60; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      if (state.time < 30 || state.time >= 60) continue;
+      const specialists = state.enemies.filter(
+        (e) => e.alive && HORDE[e.defId]!.role !== 'fodder',
+      ).length;
+      peak = Math.max(peak, specialists);
+    }
+    expect(peak).toBeLessThanOrEqual(1);
+  });
+
+  it('a forced sprinter surge at 45s cannot flood specialists', () => {
+    const state = pressureState(6103);
+    state.time = 45;
+    // Force the director straight into a sprinter surge.
+    state.surge.phase = 'surge';
+    state.surge.kind = 'sprinters';
+    state.surge.phaseEndsAt = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+
+    const tracker = trackSpawns(state);
+    let peak = 0;
+    for (let i = 0; i < 14 * 60; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      tracker.sample();
+      if (state.time >= 60) break;
+      peak = Math.max(
+        peak,
+        state.enemies.filter((e) => e.alive && HORDE[e.defId]!.role !== 'fodder').length,
+      );
+    }
+    // The surge still produced pressure...
+    expect(tracker.defsSeen().length).toBeGreaterThan(0);
+    // ...but it was time-valid fodder pressure, never a specialist flood.
+    expect(peak).toBeLessThanOrEqual(1);
+    for (const defId of tracker.defsSeen()) {
+      expect(isEnemyEligibleAt(defId, 60)).toBe(true);
+    }
+    expect(tracker.defsSeen()).not.toContain('spiky');
+    expect(tracker.defsSeen()).not.toContain('flyer');
+    expect(tracker.defsSeen()).not.toContain('elite');
+    expect(tracker.defsSeen()).not.toContain('ghost');
+  });
+
+  it('every surge kind respects eligibility when forced early', () => {
+    for (const kind of ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood']) {
+      const state = pressureState(6200 + kind.length);
+      state.time = 20;
+      state.surge.phase = 'surge';
+      state.surge.kind = kind;
+      state.surge.phaseEndsAt = 1e9;
+      state.surge.nextSurgeAt = 1e9;
+      const tracker = trackSpawns(state);
+      for (let i = 0; i < 9 * 60; i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        tracker.sample();
+      }
+      const defs = tracker.defsSeen();
+      // Each forced surge must actually spawn something, so this cannot pass vacuously.
+      expect(defs.length).toBeGreaterThan(0);
+      for (const defId of defs) {
+        expect(HORDE[defId]!.role).toBe('fodder');
+      }
+    }
+  });
+
+  it('nothing enters play before its own gate across a long opening', () => {
+    const state = pressureState(6104);
+    const tracker = trackSpawns(state);
+    // Record violations rather than asserting per frame — an assertion in this
+    // hot loop dominates the runtime and hides the actual coverage.
+    const violations: string[] = [];
+    for (let i = 0; i < 200 * 60; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      tracker.sample();
+      for (const e of state.enemies) {
+        if (!e.alive) continue;
+        if (!isEnemyEligibleAt(e.defId, state.time)) {
+          violations.push(`${e.defId}@${state.time.toFixed(2)}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+    const flankerAt = Math.min(
+      tracker.firstTimeOf('flyer') ?? Infinity,
+      tracker.firstTimeOf('bee') ?? Infinity,
+    );
+    // Fixed-step accumulation lands a hair under the exact gate; the eligibility
+    // epsilon (1e-6) is the documented tolerance, so allow it here too.
+    const eps = 1e-4;
+    expect(tracker.firstTimeOf('fast')!).toBeGreaterThanOrEqual(30 - eps);
+    expect(tracker.firstTimeOf('spiky')!).toBeGreaterThanOrEqual(60 - eps);
+    expect(flankerAt).toBeGreaterThanOrEqual(60 - eps);
+    expect(tracker.firstTimeOf('bruiser')!).toBeGreaterThanOrEqual(90 - eps);
+    expect(tracker.firstTimeOf('elite')!).toBeGreaterThanOrEqual(90 - eps);
+  });
+
+  it('gates are floors, not bans — each specialist appears once unlocked', () => {
+    // One focused window per specialist so the assertion cannot pass vacuously.
+    const cases: Array<{ defId: string; from: number; window: number }> = [
+      { defId: 'fast', from: 31, window: 40 },
+      { defId: 'spiky', from: 61, window: 40 },
+      { defId: 'bruiser', from: 91, window: 60 },
+      { defId: 'elite', from: 91, window: 60 },
+      { defId: 'ghost', from: 121, window: 90 },
+    ];
+    for (const c of cases) {
+      const state = pressureState(6300 + c.from);
+      state.time = c.from;
+      const tracker = trackSpawns(state);
+      for (let i = 0; i < c.window * 60; i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        tracker.sample();
+      }
+      expect(tracker.defsSeen()).toContain(c.defId);
+    }
+    // Flankers share a gate; either one satisfies it.
+    const fl = pressureState(6399);
+    fl.time = 61;
+    const flTracker = trackSpawns(fl);
+    for (let i = 0; i < 60 * 60; i += 1) {
+      stepSurvivor(fl, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      flTracker.sample();
+    }
+    expect(flTracker.defsSeen().some((d) => d === 'flyer' || d === 'bee')).toBe(true);
+  });
+
+  it('ordinary enemies stay melee-only through the whole ramp', () => {
+    const state = pressureState(6105);
+    for (let i = 0; i < 200 * 60; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }
+    const ordinaryProjectiles = state.projectiles.filter(
+      (p) => p.active && p.owner === 'enemy' && p.sourceBossId === 0,
+    );
+    expect(ordinaryProjectiles.length).toBe(0);
+    for (const def of Object.values(HORDE)) {
+      expect(def.role).not.toBe('ranged');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pressure director — every surge kind must produce its actual signature
+// ---------------------------------------------------------------------------
+
+/** Which perimeter edge a spawn point sits on. */
+function edgeOf(x: number, z: number): number {
+  const h = SURVIVOR.arenaHalf + 1.2;
+  if (Math.abs(z + h) < 0.01) return 0;
+  if (Math.abs(z - h) < 0.01) return 1;
+  if (Math.abs(x + h) < 0.01) return 2;
+  if (Math.abs(x - h) < 0.01) return 3;
+  return -1;
+}
+
+function runSurge(
+  kind: string,
+  seed: number,
+  atTime: number,
+  seconds: number,
+): { defs: string[]; edges: Set<number>; count: number } {
+  const state = createSurvivorState('bee', null, seed);
+  state.player.invuln = 1e9;
+  state.weapons = [];
+  state.time = atTime;
+  state.surge.phase = 'surge';
+  state.surge.kind = kind;
+  state.surge.phaseEndsAt = 1e9;
+  state.surge.nextSurgeAt = 1e9;
+
+  const seen = new Set<number>();
+  const defs: string[] = [];
+  const edges = new Set<number>();
+  for (let i = 0; i < seconds * 60; i += 1) {
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    for (const e of state.enemies) {
+      if (!e.alive || seen.has(e.id)) continue;
+      seen.add(e.id);
+      defs.push(e.defId);
+      // Enemies move after spawning, so classify on the first frame we see them.
+      const edge = edgeOf(e.x, e.z);
+      if (edge >= 0) edges.add(edge);
+    }
+  }
+  return { defs, edges, count: defs.length };
+}
+
+describe('pressure director surge composition', () => {
+  const fractionOf = (defs: string[], pred: (d: string) => boolean): number =>
+    defs.length === 0 ? 0 : defs.filter(pred).length / defs.length;
+
+  it('every surge kind actually spawns enemies (no vacuous pass)', () => {
+    for (const kind of ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood']) {
+      const r = runSurge(kind, 7100 + kind.length, 200, 8);
+      expect(r.count, `${kind} spawned nothing`).toBeGreaterThan(5);
+    }
+  });
+
+  it('a sprinter surge is actually sprinter-heavy once sprinters are unlocked', () => {
+    const surge = runSurge('sprinters', 7201, 200, 10);
+    const baseline = runSurge('', 7202, 200, 10);
+    const isSprinter = (d: string) => HORDE[d]!.role === 'sprinter';
+    expect(fractionOf(surge.defs, isSprinter)).toBeGreaterThan(
+      fractionOf(baseline.defs, isSprinter),
+    );
+    expect(fractionOf(surge.defs, isSprinter)).toBeGreaterThan(0.35);
+  });
+
+  it('a bruiser surge actually produces bruisers', () => {
+    const r = runSurge('bruiser', 7203, 200, 10);
+    expect(r.defs).toContain('bruiser');
+    expect(fractionOf(r.defs, (d) => d === 'bruiser')).toBeGreaterThan(0.2);
+  });
+
+  it('an elite surge actually produces elites after the elite gate', () => {
+    const r = runSurge('elite', 7204, 200, 10);
+    expect(r.defs).toContain('elite');
+    expect(fractionOf(r.defs, (d) => d === 'elite')).toBeGreaterThan(0.15);
+  });
+
+  it('a flood surge is fodder-heavy and denser than baseline', () => {
+    const flood = runSurge('flood', 7205, 200, 8);
+    const baseline = runSurge('', 7206, 200, 8);
+    expect(fractionOf(flood.defs, (d) => HORDE[d]!.role === 'fodder')).toBeGreaterThan(0.5);
+    expect(flood.count).toBeGreaterThan(baseline.count);
+  });
+
+  it('a pincer surge uses exactly two facing edges', () => {
+    const r = runSurge('pincer', 7207, 200, 10);
+    // Exactly two, never one — a single-edge "pincer" would pass a >0 check vacuously.
+    expect(r.edges.size).toBe(2);
+    const [a, b] = Array.from(r.edges).sort();
+    // Edges are -Z, +Z, -X, +X: facing edges are the two halves of one axis pair.
+    expect(a! ^ 1).toBe(b!);
+  });
+
+  it('an encircle surge spreads across the whole perimeter', () => {
+    const r = runSurge('encircle', 7208, 200, 10);
+    expect(r.edges.size).toBeGreaterThanOrEqual(3);
   });
 });

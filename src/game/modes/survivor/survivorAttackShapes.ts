@@ -177,57 +177,14 @@ export function circleAt(x: number, z: number, radius: number): AttackShape {
   return { kind: 'circle', x, z, radius };
 }
 
-/** Pattern → authoritative shape factory used by sim + telegraph sizing. */
-export function patternShape(
-  pattern: string,
-  ctx: {
-    x: number;
-    z: number;
-    lockFx: number;
-    lockFz: number;
-    lockX: number;
-    lockZ: number;
-    telegraphR: number;
-    length?: number;
-    width?: number;
-    maxRadius?: number;
-    radius?: number;
-    halfAngle?: number;
-  },
-): AttackShape | null {
-  switch (pattern) {
-    case 'pulse':
-    case 'rupture-ring':
-    case 'gravity-collapse':
-      return expandingRing(ctx.x, ctx.z, ctx.telegraphR, pattern === 'pulse' ? 0.85 : 0.9);
-    case 'line':
-    case 'ravage-charge':
-    case 'cryo-lanes':
-    case 'sweeping-beam':
-    case 'aerial-strafe':
-      return facingLine(
-        ctx.x,
-        ctx.z,
-        ctx.lockFx,
-        ctx.lockFz,
-        ctx.length ?? 20,
-        (ctx.width ?? 1.2) * 0.5,
-      );
-    case 'contamination':
-    case 'spore-bloom':
-    case 'cataclysm':
-      return circleAt(ctx.lockX || ctx.x, ctx.lockZ || ctx.z, ctx.radius ?? 3);
-    case 'fan':
-      return {
-        kind: 'cone',
-        x: ctx.x,
-        z: ctx.z,
-        facingX: ctx.lockFx,
-        facingZ: ctx.lockFz,
-        length: ctx.length ?? 12,
-        halfAngle: ctx.halfAngle ?? 0.55,
-      };
-    default:
-      return null;
-  }
+/** Cone wedge from an origin along a facing direction. */
+export function facingCone(
+  x: number,
+  z: number,
+  facingX: number,
+  facingZ: number,
+  length: number,
+  halfAngle: number,
+): AttackShape {
+  return { kind: 'cone', x, z, facingX, facingZ, length, halfAngle };
 }

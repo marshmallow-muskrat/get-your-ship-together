@@ -1,6 +1,13 @@
 /**
  * Exhaustive boss pattern state machine.
- * Every BossPatternId has windup → active → recover → idle lifecycle.
+ *
+ * Every pattern owns simulation-side attack entities (see `survivorAttacks.ts`).
+ * Each entity carries the one authoritative `AttackShape` that the renderer draws
+ * and that collision tests — telegraphs are never hand-built alongside a separate
+ * damage check, so what is shown and what hurts cannot drift apart.
+ *
+ * Every entity is stamped with `sourceBossId`, so cancellation, phase change and
+ * death only ever clean up that boss's own attacks.
  */
 import {
   ALL_BOSS_PATTERNS,
@@ -20,11 +27,21 @@ import type {
   SurvivorState,
 } from './survivorState';
 import {
+  circleAt,
   expandingRing,
+  facingCone,
   facingLine,
-  pointHitsShape,
   type AttackShape,
 } from './survivorAttackShapes';
+import {
+  activateBossAttacks,
+  attackHitsPlayer,
+  bossAttacksOfPattern,
+  clearBossAttacks,
+  fadeBossAttacks,
+  spawnAttack,
+  type SurvivorAttack,
+} from './survivorAttacks';
 
 export type BossSimApi = {
   rng: (state: SurvivorState) => number;
@@ -75,9 +92,30 @@ export type BossSimApi = {
   ) => boolean;
 };
 
-function hitsShape(state: SurvivorState, shape: AttackShape): boolean {
-  return pointHitsShape(state.player.x, state.player.z, SURVIVOR.playerRadius, shape);
-}
+/**
+ * Hostile palette per pattern — every damaging boss warning reads red/magenta so
+ * "this will hurt" is legible at a glance. Element identity (ice slow, corrosion,
+ * charge dust) is carried by the impact effects, not by the danger footprint.
+ */
+const PATTERN_COLOR: Record<BossPatternId, string> = {
+  pulse: '#ff5533',
+  line: '#ff4455',
+  fan: '#ff6688',
+  summon: '#ff4466',
+  'breach-orb': '#ff2244',
+  contamination: '#cc44ff',
+  'rupture-ring': '#ff2244',
+  'cryo-lanes': '#ff5599',
+  'ravage-charge': '#ff5566',
+  'sweeping-beam': '#ff3366',
+  'aerial-strafe': '#ff44aa',
+  'spore-bloom': '#ff7755',
+  'gravity-collapse': '#ff66aa',
+  cataclysm: '#ff88cc',
+};
+
+/** Explicitly non-damaging indicator colour — never part of the hostile palette. */
+const MARKER_COLOR = '#ffb066';
 
 type PatternCfg = {
   windup: number;
@@ -97,6 +135,18 @@ function pat(id: BossPatternId): PatternCfg {
   return SURVIVOR_BOSS.patterns[id] as PatternCfg;
 }
 
+/** Angular spread between adjacent fan projectiles. */
+const FAN_SPREAD = 0.28;
+/** Fan projectile collision radius (visual radius matches exactly). */
+const FAN_PROJ_RADIUS = 0.42;
+/** Breach orb collision radius (visual radius matches exactly). */
+const ORB_RADIUS = 0.65;
+/** Aerial strafe impact radius — telegraph, visual and damage all use this. */
+const STRAFE_IMPACT_RADIUS = 1.35;
+const STRAFE_DROPS = 6;
+/** Extra clearance beyond the boss collider that a charge body actually sweeps. */
+const CHARGE_BODY_PAD = 0.4;
+
 function dmgScale(b: SurvivorBoss): number {
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
   const mod = SURVIVOR_BOSS.phaseMods[phase];
@@ -108,7 +158,35 @@ function recScale(b: SurvivorBoss): number {
   return b.recoveryMul * SURVIVOR_BOSS.phaseMods[phase].recoveryMul;
 }
 
-function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number, api: BossSimApi): void {
+/** Spawn one attack entity owned by this boss. */
+function addAttack(
+  state: SurvivorState,
+  b: SurvivorBoss,
+  pattern: BossPatternId,
+  shape: AttackShape,
+  duration: number,
+  opts?: { slot?: number; style?: 'hostile' | 'marker'; color?: string },
+): SurvivorAttack | null {
+  return spawnAttack(state, {
+    sourceBossId: b.id,
+    patternId: pattern,
+    shape,
+    duration,
+    slot: opts?.slot ?? 0,
+    style: opts?.style ?? 'hostile',
+    color:
+      opts?.color ?? (opts?.style === 'marker' ? MARKER_COLOR : PATTERN_COLOR[pattern]),
+  });
+}
+
+/** This boss's live entities for the pattern it is currently running. */
+function currentAttacks(state: SurvivorState, b: SurvivorBoss): SurvivorAttack[] {
+  return b.pattern ? bossAttacksOfPattern(state, b.id, b.pattern) : [];
+}
+
+function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number): void {
+  // Scoped to this boss only — simultaneous bosses never clean each other's attacks.
+  fadeBossAttacks(state, b.id);
   b.state = 'recover';
   b.timer = recovery * recScale(b);
   b.previousPattern = b.pattern;
@@ -121,14 +199,10 @@ function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number, 
   b.attacksCompleted += 1;
   b.attacksSinceUnique += 1;
   b.attacksSinceMega += 1;
-  // clear gravity pull leftover
-  if (state.player.slowMul < 0.99 && state.player.slowTimer <= 0) {
-    /* leave cryo slow alone */
-  }
 }
 
-function beginRecover(state: SurvivorState, b: SurvivorBoss, id: BossPatternId, api: BossSimApi): void {
-  finishPattern(state, b, pat(id).recovery, api);
+function beginRecover(state: SurvivorState, b: SurvivorBoss, id: BossPatternId): void {
+  finishPattern(state, b, pat(id).recovery);
 }
 
 export function selectBossPattern(state: SurvivorState, b: SurvivorBoss, api: BossSimApi): BossPatternId {
@@ -209,6 +283,12 @@ function predictPlayer(state: SurvivorState, lead = 0.45): { x: number; z: numbe
   };
 }
 
+/**
+ * Windup.
+ *
+ * Each entity is created with the exact footprint that is about to become dangerous,
+ * and is explicitly non-damaging until `activateBossPattern` promotes it.
+ */
 function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPatternId, api: BossSimApi): void {
   b.pattern = pattern;
   b.state = 'windup';
@@ -218,120 +298,158 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
   b.patternParam = 0;
   b.zones = [];
   b.telegraphR = 0;
+  // A new pattern never inherits the previous one's entities.
+  clearBossAttacks(state, b.id);
   const cfg = pat(pattern);
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
   b.timer = cfg.windup * (phase === 3 ? 0.9 : 1);
+  const warn = b.timer;
 
   const p = state.player;
-  const accent = '#ff4466';
 
   switch (pattern) {
     case 'pulse':
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ffaa33', cfg.maxRadius ?? 8, {
-        radius: cfg.maxRadius ?? 8,
-      });
+      // Footprint of the whole pulse; becomes the expanding band on activation.
+      addAttack(state, b, pattern, circleAt(b.x, b.z, cfg.maxRadius ?? 8), warn);
       break;
-    case 'line':
+
+    case 'line': {
       lockFacing(b);
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ff4455', 1, {
-        facingX: b.lockFx,
-        facingZ: b.lockFz,
-        length: cfg.length ?? 20,
-        width: (cfg.width ?? 1.25) * 1.15,
-      });
-      break;
-    case 'fan': {
-      lockFacing(b);
-      // Cone preview via 3 telegraph lanes
-      const base = Math.atan2(b.lockFx, b.lockFz);
-      for (let i = -2; i <= 2; i += 1) {
-        const a = base + i * 0.22;
-        api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ff6688', 1, {
-          facingX: Math.sin(a),
-          facingZ: Math.cos(a),
-          length: 12,
-          width: 0.85,
-        });
-      }
+      // Preview halfWidth is exactly the collision halfWidth.
+      addAttack(
+        state,
+        b,
+        pattern,
+        facingLine(b.x, b.z, b.lockFx, b.lockFz, cfg.length ?? 20, (cfg.width ?? 1.25) * 0.5),
+        warn,
+      );
       break;
     }
+
+    case 'fan': {
+      lockFacing(b);
+      // Lock the volley size now so the previewed wedge is the wedge that fires.
+      const mod = SURVIVOR_BOSS.phaseMods[phase];
+      const count = (cfg.count ?? 5) + mod.fanCountAdd + b.fanAdd;
+      b.patternParam = count;
+      const halfAngle = ((count - 1) / 2) * FAN_SPREAD + Math.atan2(FAN_PROJ_RADIUS, 4);
+      const speed = cfg.speed ?? 10;
+      addAttack(
+        state,
+        b,
+        pattern,
+        facingCone(b.x, b.z, b.lockFx, b.lockFz, Math.min(cfg.length ?? 14, speed * 1.4), halfAngle),
+        warn,
+      );
+      break;
+    }
+
     case 'summon':
+      // Explicitly non-damaging spawn markers.
       for (let i = 0; i < 4; i += 1) {
         const a = (i / 4) * Math.PI * 2;
-        api.pushEffect(state, 'telegraph', b.x + Math.cos(a) * 3.2, b.z + Math.sin(a) * 3.2, b.timer, '#ff9944', 1.4, {
-          radius: 1.2,
-        });
+        addAttack(
+          state,
+          b,
+          pattern,
+          circleAt(b.x + Math.cos(a) * 3.5, b.z + Math.sin(a) * 3.5, 1.2),
+          warn,
+          { slot: i, style: 'marker' },
+        );
       }
       break;
+
     case 'breach-orb': {
       const pred = predictPlayer(state, 0.55);
       const len = Math.hypot(pred.x - b.x, pred.z - b.z) || 1;
       b.lockFx = (pred.x - b.x) / len;
       b.lockFz = (pred.z - b.z) / len;
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, accent, 1, {
-        facingX: b.lockFx,
-        facingZ: b.lockFz,
-        length: 14,
-        width: 1.4,
-      });
+      // Launch corridor is exactly as wide as the orb that will travel it.
+      addAttack(
+        state,
+        b,
+        pattern,
+        facingLine(b.x, b.z, b.lockFx, b.lockFz, 14, ORB_RADIUS),
+        warn,
+      );
       break;
     }
+
     case 'contamination': {
       const pred = predictPlayer(state, 0.7);
       const c = api.clampArena(pred.x, pred.z, 1);
       b.lockX = c.x;
       b.lockZ = c.z;
-      api.pushEffect(state, 'telegraph', b.lockX, b.lockZ, b.timer, '#cc44ff', cfg.radius ?? 3, {
-        radius: cfg.radius ?? 3,
-      });
+      addAttack(state, b, pattern, circleAt(b.lockX, b.lockZ, cfg.radius ?? 3), warn);
       break;
     }
+
     case 'rupture-ring':
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ff2244', cfg.maxRadius ?? 10, {
-        radius: cfg.maxRadius ?? 10,
-      });
+      addAttack(state, b, pattern, circleAt(b.x, b.z, cfg.maxRadius ?? 10), warn);
       break;
+
     case 'cryo-lanes': {
-      // Three fixed lane angles from boss
       lockFacing(b);
       const base = Math.atan2(b.lockFx, b.lockFz);
+      b.patternParam = base;
+      const len = cfg.length ?? 22;
+      const half = (cfg.width ?? 1.1) * 0.5;
       for (let i = -1; i <= 1; i += 1) {
         const a = base + i * 0.55;
-        api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#88ccff', 1, {
-          facingX: Math.sin(a),
-          facingZ: Math.cos(a),
-          length: cfg.length ?? 22,
-          width: (cfg.width ?? 1.1) * 1.2,
-        });
+        addAttack(
+          state,
+          b,
+          pattern,
+          facingLine(b.x, b.z, Math.sin(a), Math.cos(a), len, half),
+          warn,
+          { slot: i + 1 },
+        );
       }
-      // store base angle in patternParam
-      b.patternParam = base;
       break;
     }
+
     case 'ravage-charge':
       lockFacing(b);
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#7dff9a', 1, {
-        facingX: b.lockFx,
-        facingZ: b.lockFz,
-        length: cfg.length ?? 28,
-        width: (cfg.width ?? 1.4) * 1.2,
-      });
+      // Corridor halfWidth is the body sweep the charge actually applies.
+      addAttack(
+        state,
+        b,
+        pattern,
+        facingLine(
+          b.x,
+          b.z,
+          b.lockFx,
+          b.lockFz,
+          cfg.length ?? 28,
+          b.colliderRadius + CHARGE_BODY_PAD,
+        ),
+        warn,
+      );
       break;
+
     case 'sweeping-beam': {
       lockFacing(b);
       const start = Math.atan2(b.lockFx, b.lockFz) - 0.7;
       b.patternParam = start; // start angle
-      b.lockX = start + 1.4; // end angle stored in lockX as angle
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ff3366', 1, {
-        facingX: Math.sin(start),
-        facingZ: Math.cos(start),
-        length: cfg.length ?? 24,
-        width: (cfg.width ?? 1) * 1.25,
-      });
+      b.lockX = start + 1.4; // end angle
+      addAttack(
+        state,
+        b,
+        pattern,
+        facingLine(
+          b.x,
+          b.z,
+          Math.sin(start),
+          Math.cos(start),
+          cfg.length ?? 24,
+          (cfg.width ?? 1) * 0.5,
+        ),
+        warn,
+      );
       break;
     }
+
     case 'aerial-strafe': {
-      // Lock lane through player
       const len = Math.hypot(p.x - b.x, p.z - b.z) || 1;
       b.lockFx = (p.x - b.x) / len;
       b.lockFz = (p.z - b.z) / len;
@@ -339,43 +457,51 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
       b.lockZ = b.z - b.lockFz * 14;
       b.chargeX = b.x + b.lockFx * 14;
       b.chargeZ = b.z + b.lockFz * 14;
-      api.pushEffect(state, 'telegraph', (b.lockX + b.chargeX) / 2, (b.lockZ + b.chargeZ) / 2, b.timer, '#c080ff', 1, {
-        facingX: b.lockFx,
-        facingZ: b.lockFz,
-        length: 28,
-        width: (cfg.width ?? 1.6) * 1.15,
-      });
+      // Corridor is exactly as wide as the impact circles that will drop along it.
+      addAttack(
+        state,
+        b,
+        pattern,
+        {
+          kind: 'line',
+          x0: b.lockX,
+          z0: b.lockZ,
+          x1: b.chargeX,
+          z1: b.chargeZ,
+          halfWidth: STRAFE_IMPACT_RADIUS,
+        },
+        warn,
+        { style: 'marker' },
+      );
       break;
     }
-    case 'spore-bloom':
-      for (let i = 0; i < (cfg.count ?? 5); i += 1) {
-        const a = (i / (cfg.count ?? 5)) * Math.PI * 2 + api.rng(state);
-        const r = 3.5 + api.rng(state) * 3;
-        const mx = b.x + Math.cos(a) * r;
-        const mz = b.z + Math.sin(a) * r;
-        const c = api.clampArena(mx, mz, 0.5);
-        api.pushEffect(state, 'telegraph', c.x, c.z, b.timer, '#ffaa44', 1.2, { radius: 1.1 });
-        b.zones.push({ x: c.x, z: c.z, r: cfg.radius ?? 1.4, detonated: false });
+
+    case 'spore-bloom': {
+      const n = cfg.count ?? 5;
+      const r = cfg.radius ?? 1.4;
+      for (let i = 0; i < n; i += 1) {
+        const a = (i / n) * Math.PI * 2 + api.rng(state);
+        const dist = 3.5 + api.rng(state) * 3;
+        const c = api.clampArena(b.x + Math.cos(a) * dist, b.z + Math.sin(a) * dist, 0.5);
+        b.zones.push({ x: c.x, z: c.z, r, detonated: false });
+        addAttack(state, b, pattern, circleAt(c.x, c.z, r), warn, { slot: i });
       }
       break;
+    }
+
     case 'gravity-collapse':
       b.lockX = b.x;
       b.lockZ = b.z;
-      api.pushEffect(state, 'mega', b.x, b.z, b.timer, '#ff66aa', cfg.maxRadius ?? 11, {
-        radius: cfg.maxRadius ?? 11,
-      });
-      api.pushEffect(state, 'telegraph', b.x, b.z, b.timer, '#ff88cc', cfg.maxRadius ?? 11, {
-        radius: cfg.maxRadius ?? 11,
-      });
+      addAttack(state, b, pattern, circleAt(b.lockX, b.lockZ, cfg.maxRadius ?? 11), warn);
       break;
+
     case 'cataclysm': {
-      // 4 zones with guaranteed safe pocket near player opposite side
       const n = cfg.count ?? 4;
       const half = SURVIVOR.arenaHalf * 0.55;
       for (let i = 0; i < n; i += 1) {
         let x = (api.rng(state) * 2 - 1) * half;
         let z = (api.rng(state) * 2 - 1) * half;
-        // Keep player start position relatively safer: bias away from player
+        // Bias away from the player so a safe pocket always exists.
         if (Math.hypot(x - p.x, z - p.z) < 6) {
           x = -p.x * 0.6 + (api.rng(state) - 0.5) * 8;
           z = -p.z * 0.6 + (api.rng(state) - 0.5) * 8;
@@ -383,22 +509,61 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
         const c = api.clampArena(x, z, 2);
         const r = (cfg.radius ?? 3.2) * (0.9 + api.rng(state) * 0.2);
         b.zones.push({ x: c.x, z: c.z, r, detonated: false });
-        api.pushEffect(state, 'telegraph', c.x, c.z, b.timer + i * 0.35, '#ff66aa', r, { radius: r });
+        // Each circle stays visible until its own detonation slot.
+        const ownWindow = warn + (cfg.active / n) * (i + 1);
+        addAttack(state, b, pattern, circleAt(c.x, c.z, r), ownWindow, { slot: i });
       }
       break;
     }
+
     default:
       assertNever(pattern);
   }
 }
 
-function activateBossPattern(state: SurvivorState, b: SurvivorBoss, api: BossSimApi): void {
+/**
+ * Whether a pattern's windup entities become damaging the moment the active phase
+ * starts. Patterns that hand off to projectiles/hazards, and patterns that arm their
+ * zones on their own schedule, stay harmless until their own logic arms them.
+ */
+const DAMAGING_ON_ACTIVATE: Record<BossPatternId, boolean> = {
+  pulse: true,
+  line: true,
+  fan: false, // projectiles carry the damage
+  summon: false, // markers only
+  'breach-orb': false, // projectile carries the damage
+  contamination: false, // hazard carries the damage
+  'rupture-ring': true,
+  'cryo-lanes': true,
+  'ravage-charge': true,
+  'sweeping-beam': true,
+  'aerial-strafe': false, // per-drop circles arm themselves
+  'spore-bloom': false, // armed at detonation
+  'gravity-collapse': false, // armed when the shockwave starts
+  cataclysm: false, // each zone armed at its own slot
+};
+
+function activateBossPattern(state: SurvivorState, b: SurvivorBoss): void {
   if (!b.pattern) return;
   b.state = 'active';
   b.patternElapsed = 0;
   b.patternTriggered = false;
   b.patternHitCd = 0;
-  b.timer = pat(b.pattern).active;
+  const active = pat(b.pattern).active;
+  b.timer = active;
+  activateBossAttacks(state, b.id, active, { damaging: DAMAGING_ON_ACTIVATE[b.pattern] });
+}
+
+/** Move an existing line entity to a new segment without reallocating it. */
+function setLine(
+  a: SurvivorAttack,
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  halfWidth: number,
+): void {
+  a.shape = { kind: 'line', x0, z0, x1, z1, halfWidth };
 }
 
 function updateActive(
@@ -416,6 +581,7 @@ function updateActive(
   const cfg = pat(pattern);
   const scale = dmgScale(b);
   const p = state.player;
+  const attacks = currentAttacks(state, b);
   b.patternElapsed += dt;
   if (b.patternHitCd > 0) b.patternHitCd = Math.max(0, b.patternHitCd - dt);
 
@@ -424,43 +590,50 @@ function updateActive(
       const maxR = cfg.maxRadius ?? 8;
       const t = Math.min(1, b.patternElapsed / cfg.active);
       b.telegraphR = maxR * t;
-      // Shared expanding ring: same band as telegraph radius
-      if (b.patternHitCd <= 0 && hitsShape(state, expandingRing(b.x, b.z, b.telegraphR, 0.85))) {
-        api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
-        b.patternHitCd = 0.35;
-      }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
-      break;
-    }
-    case 'line': {
-      const len = cfg.length ?? 20;
-      const width = cfg.width ?? 1.25;
-      if (b.patternHitCd <= 0) {
-        const shape = facingLine(b.lockX || b.x, b.lockZ || b.z, b.lockFx, b.lockFz, len, width * 0.45);
-        if (hitsShape(state, shape)) {
+      const a = attacks[0];
+      if (a) {
+        // One authoritative expanding ring drives both the visual and the hit.
+        a.shape = expandingRing(b.x, b.z, b.telegraphR, 0.85);
+        if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
           api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
-          b.patternHitCd = 0.4;
+          b.patternHitCd = 0.35;
         }
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
+    case 'line': {
+      const a = attacks[0];
+      if (a && b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
+        api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
+        b.patternHitCd = 0.4;
+      }
+      if (b.timer <= 0) beginRecover(state, b, pattern);
+      break;
+    }
+
     case 'fan': {
       if (!b.patternTriggered) {
         b.patternTriggered = true;
-        const phase = bossPhaseFromHealth(b.health, b.maxHealth);
-        const mod = SURVIVOR_BOSS.phaseMods[phase];
-        const count = (cfg.count ?? 5) + mod.fanCountAdd + b.fanAdd;
+        // The cone was the warning; the projectiles carry the damage.
+        for (const a of attacks) {
+          a.damaging = false;
+          a.lifecycle = 'fade';
+          a.remaining = Math.min(a.remaining, 0.14);
+        }
+        const count = Math.max(1, Math.round(b.patternParam) || (cfg.count ?? 5));
         const speed = cfg.speed ?? 10;
         const base = Math.atan2(b.lockFx, b.lockFz);
         for (let i = 0; i < count; i += 1) {
-          const a = base + (i - (count - 1) / 2) * 0.28;
+          const a = base + (i - (count - 1) / 2) * FAN_SPREAD;
           const proj = api.acquireProjectile(state);
           if (!proj) break;
           api.resetProj(proj, state, 'boss-fan', null, b.x, b.z, Math.sin(a) * speed, Math.cos(a) * speed, {
             damage: (cfg.damage ?? 12) * scale,
-            radius: 0.38,
-            visualRadius: 0.6,
+            radius: FAN_PROJ_RADIUS,
+            // Visible size equals collision size.
+            visualRadius: FAN_PROJ_RADIUS,
             life: 2.6,
             owner: 'enemy',
             color: '#ff4466',
@@ -469,9 +642,10 @@ function updateActive(
         }
         api.pushEffect(state, 'muzzle', b.x, b.z, 0.2, '#ff6688', 1.5);
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
     case 'summon': {
       if (!b.patternTriggered) {
         b.patternTriggered = true;
@@ -479,18 +653,26 @@ function updateActive(
         const mod = SURVIVOR_BOSS.phaseMods[phase];
         const n = Math.min(mod.summonCount + b.summonAdd, phase >= 3 ? 8 : 5);
         for (let i = 0; i < n; i += 1) {
+          const marker = attacks[i % Math.max(1, attacks.length)];
           const ang = api.rng(state) * Math.PI * 2;
-          const id = phase >= 3 && api.rng(state) < 0.35 ? 'elite' : phase >= 2 ? 'spiky' : 'basic';
-          api.spawnEnemy(state, id, b.x + Math.cos(ang) * 3.5, b.z + Math.sin(ang) * 3.5);
-          api.pushEffect(state, 'transform', b.x + Math.cos(ang) * 3.5, b.z + Math.sin(ang) * 3.5, 0.35, '#ff9944', 1.2);
+          const sx = marker && marker.shape.kind === 'circle' ? marker.shape.x : b.x + Math.cos(ang) * 3.5;
+          const sz = marker && marker.shape.kind === 'circle' ? marker.shape.z : b.z + Math.sin(ang) * 3.5;
+          api.spawnEnemy(state, phase >= 3 ? 'elite' : phase >= 2 ? 'spiky' : 'basic', sx, sz);
+          api.pushEffect(state, 'transform', sx, sz, 0.35, '#ff9944', 1.2);
         }
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
     case 'breach-orb': {
       if (!b.patternTriggered) {
         b.patternTriggered = true;
+        for (const a of attacks) {
+          a.damaging = false;
+          a.lifecycle = 'fade';
+          a.remaining = Math.min(a.remaining, 0.14);
+        }
         const speed = cfg.speed ?? 7;
         const proj = api.acquireProjectile(state);
         if (proj) {
@@ -505,8 +687,8 @@ function updateActive(
             b.lockFz * speed,
             {
               damage: (cfg.damage ?? 18) * scale,
-              radius: 0.65,
-              visualRadius: 1.05,
+              radius: ORB_RADIUS,
+              visualRadius: ORB_RADIUS,
               life: 4.5,
               owner: 'enemy',
               color: '#ff2244',
@@ -515,7 +697,6 @@ function updateActive(
             },
           );
         }
-        // Phase 3 second orb offset
         if (bossPhaseFromHealth(b.health, b.maxHealth) >= 3 || b.isMega) {
           const side = Math.atan2(b.lockFx, b.lockFz) + 0.35;
           const proj2 = api.acquireProjectile(state);
@@ -531,8 +712,8 @@ function updateActive(
               Math.cos(side) * speed,
               {
                 damage: (cfg.damage ?? 18) * scale * 0.85,
-                radius: 0.6,
-                visualRadius: 0.95,
+                radius: ORB_RADIUS,
+                visualRadius: ORB_RADIUS,
                 life: 4.2,
                 owner: 'enemy',
                 color: '#ff4466',
@@ -543,84 +724,94 @@ function updateActive(
         }
         api.pushEffect(state, 'muzzle', b.x, b.z, 0.25, '#ff3355', 1.8);
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
     case 'contamination': {
       if (!b.patternTriggered) {
         b.patternTriggered = true;
-        // lob visual
-        api.pushEffect(state, 'impact', b.lockX, b.lockZ, 0.35, '#cc44ff', 1.5);
+        const a = attacks[0];
+        const r = a && a.shape.kind === 'circle' ? a.shape.radius : (cfg.radius ?? 3);
+        // The hazard inherits the telegraphed circle exactly.
         api.spawnHazard(
           state,
           'contamination',
           b.lockX,
           b.lockZ,
-          cfg.radius ?? 3,
+          r,
           cfg.life ?? 6,
           (cfg.damage ?? 10) * scale * 0.55,
           '#bb44ff',
           { owner: 'enemy', armTimer: 0.6, tickCd: 0, sourceBossId: b.id },
         );
+        // The lingering hazard now owns the visual; the telegraph steps aside.
+        for (const at of attacks) {
+          at.damaging = false;
+          at.lifecycle = 'fade';
+          at.remaining = Math.min(at.remaining, 0.2);
+        }
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
     case 'rupture-ring': {
       const maxR = cfg.maxRadius ?? 10;
       const t = Math.min(1, b.patternElapsed / cfg.active);
       b.telegraphR = maxR * t;
-      // Shared ring band — safe core inside (inner - playerRadius)
-      if (
-        b.patternHitCd <= 0 &&
-        b.telegraphR > 1.6 &&
-        hitsShape(state, expandingRing(b.x, b.z, b.telegraphR, 0.9))
-      ) {
-        api.damagePlayer(state, (cfg.damage ?? 18) * scale, 'boss');
-        b.patternHitCd = 0.4;
-      }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
-      break;
-    }
-    case 'cryo-lanes': {
-      if (!b.patternTriggered) {
-        b.patternTriggered = true;
-        const base = b.patternParam;
-        const len = cfg.length ?? 22;
-        const width = cfg.width ?? 1.1;
-        for (let i = -1; i <= 1; i += 1) {
-          const a = base + i * 0.55;
-          const fx = Math.sin(a);
-          const fz = Math.cos(a);
-          if (hitsShape(state, facingLine(b.x, b.z, fx, fz, len, width * 0.45))) {
-            api.damagePlayer(state, (cfg.damage ?? 14) * scale, 'boss');
-            // Bounded slow — never below 72%
-            p.slowMul = Math.max(0.72, 0.75);
-            p.slowTimer = Math.max(p.slowTimer, 1.5);
-            api.pushEffect(state, 'pulse', p.x, p.z, 0.35, '#88ccff', 1.2);
-          }
-          api.pushEffect(state, 'beam', b.x, b.z, 0.45, '#88ccff', 1, {
-            facingX: fx,
-            facingZ: fz,
-            length: len,
-            width,
-          });
+      const a = attacks[0];
+      if (a) {
+        // Real annulus: the core inside `inner` stays safe.
+        a.shape = expandingRing(b.x, b.z, b.telegraphR, 0.9);
+        // `damaging` is the whole truth: no second hidden guard beside it.
+        a.damaging = b.telegraphR > 1.6;
+        if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
+          api.damagePlayer(state, (cfg.damage ?? 18) * scale, 'boss');
+          b.patternHitCd = 0.4;
         }
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
+    case 'cryo-lanes': {
+      // Each lane damages once, tested against the very shape being rendered.
+      for (const a of attacks) {
+        if (a.hasHit) continue;
+        if (!attackHitsPlayer(state, a)) continue;
+        a.hasHit = true;
+        api.damagePlayer(state, (cfg.damage ?? 14) * scale, 'boss');
+        // Bounded slow — never below 72%
+        p.slowMul = Math.max(0.72, 0.75);
+        p.slowTimer = Math.max(p.slowTimer, 1.5);
+        api.pushEffect(state, 'pulse', p.x, p.z, 0.35, '#88ccff', 1.2);
+      }
+      if (b.timer <= 0) beginRecover(state, b, pattern);
+      break;
+    }
+
     case 'ravage-charge': {
       const len = cfg.length ?? 28;
       const spd = 22;
-      // Move along locked lane
       b.x += b.lockFx * spd * dt;
       b.z += b.lockFz * spd * dt;
       const c = api.clampArena(b.x, b.z, b.colliderRadius);
       b.x = c.x;
       b.z = c.z;
-      // Trail fissure periodically
-      if (!b.patternTriggered || b.patternElapsed % 0.12 < dt) {
+      const a = attacks[0];
+      if (a) {
+        // Corridor is exactly the path the body has swept so far.
+        setLine(a, b.lockX, b.lockZ, b.x, b.z, b.colliderRadius + CHARGE_BODY_PAD);
+        if (!a.hasHit && attackHitsPlayer(state, a)) {
+          a.hasHit = true;
+          b.patternTriggered = true;
+          api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
+        }
+      }
+      // Trail fissures at a fixed cadence rather than every frame.
+      if (b.patternHitCd <= 0) {
+        b.patternHitCd = 0.12;
         api.spawnHazard(state, 'fissure', b.x, b.z, 1.1, 2.2, (cfg.damage ?? 22) * scale * 0.25, '#66aa44', {
           owner: 'enemy',
           armTimer: 0.05,
@@ -628,19 +819,11 @@ function updateActive(
           sourceBossId: b.id,
         });
       }
-      if (!b.patternTriggered) {
-        // contact damage once
-        const d = Math.hypot(p.x - b.x, p.z - b.z);
-        if (d < b.colliderRadius + SURVIVOR.playerRadius + 0.4) {
-          api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
-          b.patternTriggered = true;
-        }
-      }
-      // End when traveled enough or timer
       const traveled = Math.hypot(b.x - b.lockX, b.z - b.lockZ);
-      if (b.timer <= 0 || traveled > len * 0.85) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0 || traveled > len * 0.85) beginRecover(state, b, pattern);
       break;
     }
+
     case 'sweeping-beam': {
       const start = b.patternParam;
       const end = b.lockX; // end angle
@@ -649,71 +832,95 @@ function updateActive(
       const fx = Math.sin(ang);
       const fz = Math.cos(ang);
       const len = cfg.length ?? 24;
-      const width = cfg.width ?? 1.0;
-      api.pushEffect(state, 'beam', b.x, b.z, dt * 2.5, '#ff3366', 1, {
-        facingX: fx,
-        facingZ: fz,
-        length: len,
-        width: width * 1.2,
-      });
-      if (b.patternHitCd <= 0 && hitsShape(state, facingLine(b.x, b.z, fx, fz, len, width * 0.4))) {
-        api.damagePlayer(state, (cfg.damage ?? 16) * scale, 'boss');
-        b.patternHitCd = 0.32;
+      const half = (cfg.width ?? 1) * 0.5;
+      const a = attacks[0];
+      if (a) {
+        // One moving line: the beam that is drawn is the beam that burns.
+        setLine(a, b.x, b.z, b.x + fx * len, b.z + fz * len, half);
+        if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
+          api.damagePlayer(state, (cfg.damage ?? 16) * scale, 'boss');
+          b.patternHitCd = 0.32;
+        }
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
     case 'aerial-strafe': {
       const u = Math.min(1, b.patternElapsed / cfg.active);
-      // Travel visual path
       b.x = b.lockX + (b.chargeX - b.lockX) * u;
       b.z = b.lockZ + (b.chargeZ - b.lockZ) * u;
-      // Drop impacts along lane at intervals
-      const drops = 6;
-      const dropIdx = Math.floor(u * drops);
-      if (dropIdx > b.patternParam && dropIdx < drops) {
+      const dropIdx = Math.floor(u * STRAFE_DROPS);
+      if (dropIdx > b.patternParam && dropIdx < STRAFE_DROPS) {
         b.patternParam = dropIdx;
-        const ix = b.lockX + (b.chargeX - b.lockX) * (dropIdx / drops);
-        const iz = b.lockZ + (b.chargeZ - b.lockZ) * (dropIdx / drops);
-        api.pushEffect(state, 'impact', ix, iz, 0.4, '#c080ff', 1.6, { radius: 1.4 });
-        const d = Math.hypot(p.x - ix, p.z - iz);
-        if (d < 1.35 + SURVIVOR.playerRadius) {
+        const ix = b.lockX + (b.chargeX - b.lockX) * (dropIdx / STRAFE_DROPS);
+        const iz = b.lockZ + (b.chargeZ - b.lockZ) * (dropIdx / STRAFE_DROPS);
+        // Each impact is its own circle entity whose radius is the damage radius.
+        const hit = spawnAttack(state, {
+          sourceBossId: b.id,
+          patternId: pattern,
+          slot: 10 + dropIdx,
+          shape: circleAt(ix, iz, STRAFE_IMPACT_RADIUS),
+          duration: 0.32,
+          lifecycle: 'active',
+          damaging: true,
+          style: 'hostile',
+          color: PATTERN_COLOR[pattern],
+        });
+        if (hit && attackHitsPlayer(state, hit)) {
+          hit.hasHit = true;
           api.damagePlayer(state, (cfg.damage ?? 14) * scale, 'boss');
         }
       }
-      if (b.timer <= 0) beginRecover(state, b, pattern, api);
+      if (b.timer <= 0) beginRecover(state, b, pattern);
       break;
     }
+
     case 'spore-bloom': {
-      // Arm during first half, detonate second half once
+      // Arm at the halfway point; each mine then detonates within its own circle.
       if (!b.patternTriggered && b.patternElapsed >= cfg.active * 0.55) {
         b.patternTriggered = true;
-        for (const z of b.zones) {
-          if (z.detonated) continue;
-          z.detonated = true;
-          api.pushEffect(state, 'impact', z.x, z.z, 0.4, '#ffaa44', z.r * 1.3, { radius: z.r });
-          const d = Math.hypot(p.x - z.x, p.z - z.z);
-          if (d < z.r * 0.9 + SURVIVOR.playerRadius) {
-            api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
-          }
-          api.spawnHazard(state, 'spore', z.x, z.z, z.r * 0.7, 2.5, (cfg.damage ?? 12) * scale * 0.3, '#ddaa44', {
+        for (const a of attacks) {
+          const zone = b.zones[a.slot];
+          if (!zone || zone.detonated) continue;
+          zone.detonated = true;
+          a.damaging = true;
+          api.pushEffect(state, 'impact', zone.x, zone.z, 0.3, PATTERN_COLOR[pattern], zone.r, {
+            radius: zone.r,
+          });
+          // The lingering hazard matches the detonation circle exactly.
+          api.spawnHazard(state, 'spore', zone.x, zone.z, zone.r, 2.5, (cfg.damage ?? 12) * scale * 0.3, '#ddaa44', {
             owner: 'enemy',
             armTimer: 0.1,
             sourceBossId: b.id,
           });
         }
       }
+      for (const a of attacks) {
+        if (!a.damaging || a.hasHit) continue;
+        if (attackHitsPlayer(state, a)) {
+          a.hasHit = true;
+          api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
+        }
+      }
       if (b.timer <= 0) {
         b.zones = [];
-        beginRecover(state, b, pattern, api);
+        beginRecover(state, b, pattern);
       }
       break;
     }
+
     case 'gravity-collapse': {
-      // Pull phase then shockwave
       const pullEnd = cfg.active * 0.55;
+      const a = attacks[0];
       if (b.patternElapsed < pullEnd) {
-        // Controllable pull — additive velocity toward core
+        // Pull core: harmless marker centred exactly where the shockwave will start.
+        if (a) {
+          a.shape = circleAt(b.lockX, b.lockZ, 2.2);
+          a.damaging = false;
+          a.style = 'marker';
+          a.color = MARKER_COLOR;
+        }
         const dx = b.lockX - p.x;
         const dz = b.lockZ - p.z;
         const d = Math.hypot(dx, dz) || 1;
@@ -723,54 +930,66 @@ function updateActive(
         const c = api.clampArena(p.x, p.z, SURVIVOR.playerRadius);
         p.x = c.x;
         p.z = c.z;
-        api.pushEffect(state, 'pulse', b.lockX, b.lockZ, 0.1, '#ff66aa', 2);
-      } else if (!b.patternTriggered) {
-        b.patternTriggered = true;
-        // Shockwave expand stored in telegraphR
-        b.telegraphR = 0;
-        api.pushEffect(state, 'mega', b.lockX, b.lockZ, 0.8, '#ff4488', cfg.maxRadius ?? 11, {
-          radius: cfg.maxRadius ?? 11,
-        });
       } else {
+        if (!b.patternTriggered) {
+          b.patternTriggered = true;
+          b.telegraphR = 0;
+          if (a) {
+            a.style = 'hostile';
+            a.color = PATTERN_COLOR[pattern];
+            a.damaging = true;
+          }
+        }
         const shockT = (b.patternElapsed - pullEnd) / (cfg.active - pullEnd);
         b.telegraphR = (cfg.maxRadius ?? 11) * Math.min(1, shockT);
-        // Shared expanding ring with safe core (inner band starts ~2.2)
-        if (
-          b.patternHitCd <= 0 &&
-          b.telegraphR > 2.2 &&
-          hitsShape(state, expandingRing(b.lockX, b.lockZ, b.telegraphR, 1.0))
-        ) {
-          api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
-          b.patternHitCd = 0.45;
+        if (a) {
+          // Same centre as the pull core — band and core stay coherent.
+          a.shape = expandingRing(b.lockX, b.lockZ, b.telegraphR, 1.0);
+          a.damaging = b.telegraphR > 2.2;
+          if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
+            api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
+            b.patternHitCd = 0.45;
+          }
         }
       }
       if (b.timer <= 0) {
         b.telegraphR = 0;
-        beginRecover(state, b, pattern, api);
+        beginRecover(state, b, pattern);
       }
       break;
     }
+
     case 'cataclysm': {
-      // Sequential detonation
       const n = b.zones.length || 1;
       const slot = cfg.active / n;
       const idx = Math.min(n - 1, Math.floor(b.patternElapsed / slot));
-      for (let i = 0; i <= idx; i += 1) {
-        const z = b.zones[i];
-        if (!z || z.detonated) continue;
-        z.detonated = true;
-        api.pushEffect(state, 'impact', z.x, z.z, 0.5, '#ff66aa', z.r * 1.2, { radius: z.r });
-        const d = Math.hypot(p.x - z.x, p.z - z.z);
-        if (d < z.r * 0.92 + SURVIVOR.playerRadius) {
+      for (const a of attacks) {
+        const zone = b.zones[a.slot];
+        if (a.slot > idx) {
+          // Not its turn yet: the circle stays visible and definitively harmless.
+          a.damaging = false;
+          continue;
+        }
+        if (zone && !zone.detonated) {
+          // Its own detonation arms this circle — and only this circle.
+          zone.detonated = true;
+          a.damaging = true;
+          api.pushEffect(state, 'impact', zone.x, zone.z, 0.4, PATTERN_COLOR[pattern], zone.r, {
+            radius: zone.r,
+          });
+        }
+        if (a.damaging && !a.hasHit && attackHitsPlayer(state, a)) {
+          a.hasHit = true;
           api.damagePlayer(state, (cfg.damage ?? 20) * scale, 'boss');
         }
       }
       if (b.timer <= 0) {
         b.zones = [];
-        beginRecover(state, b, pattern, api);
+        beginRecover(state, b, pattern);
       }
       break;
     }
+
     default:
       assertNever(pattern);
   }
@@ -792,6 +1011,10 @@ function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, ap
   }
 }
 
+/**
+ * Cancel this boss's combat — pattern interrupt, phase change or death.
+ * Only entities stamped with this boss's id are touched.
+ */
 export function cancelBossPattern(state: SurvivorState, b: SurvivorBoss): void {
   b.pattern = null;
   b.state = b.health <= 0 ? 'dead' : 'idle';
@@ -800,6 +1023,8 @@ export function cancelBossPattern(state: SurvivorState, b: SurvivorBoss): void {
   b.patternTriggered = false;
   b.patternElapsed = 0;
   b.zones = [];
+  // Pending warnings and live attack geometry vanish with the boss.
+  clearBossAttacks(state, b.id);
   // Deactivate projectiles owned by this boss (leave other bosses' projectiles alone).
   for (const proj of state.projectiles) {
     if (proj.active && proj.sourceBossId === b.id) {
@@ -813,13 +1038,6 @@ export function cancelBossPattern(state: SurvivorState, b: SurvivorBoss): void {
     if (h.active && h.sourceBossId === b.id) {
       h.damage = 0;
       h.life = Math.min(h.life, 0.35);
-    }
-  }
-  // Clear pending boss telegraphs near this boss (effects are global; lifetime-capped).
-  for (const e of state.effects) {
-    if (e.kind === 'telegraph' || e.kind === 'beam') {
-      const d = Math.hypot(e.x - b.x, e.z - b.z);
-      if (d < 28) e.life = Math.min(e.life, 0.12);
     }
   }
 }
@@ -873,12 +1091,13 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
     b.patternElapsed += dt;
     // Do not retarget locked patterns
     if (b.timer <= 0 && b.pattern) {
-      activateBossPattern(state, b, api);
+      activateBossPattern(state, b);
     }
     // Safety: if pattern missing, recover
     if (b.timer <= 0 && !b.pattern) {
       b.state = 'recover';
       b.timer = 0.5;
+      fadeBossAttacks(state, b.id);
     }
     return;
   }
@@ -888,12 +1107,13 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
     if (!b.pattern) {
       b.state = 'recover';
       b.timer = 0.4;
+      fadeBossAttacks(state, b.id);
       return;
     }
     updateActive(state, b, dt, api);
     // Absolute safety: if somehow still active with timer long expired
     if (b.state === 'active' && b.timer < -0.5) {
-      beginRecover(state, b, b.pattern, api);
+      beginRecover(state, b, b.pattern);
     }
     return;
   }
@@ -928,4 +1148,14 @@ export function allPatternsHandled(): boolean {
     if (!SURVIVOR_BOSS.patterns[id]) return false;
   }
   return ALL_BOSS_PATTERNS.length === 14;
+}
+
+/** Hostile colour contract for boss warnings (used by tests and the renderer). */
+export function bossPatternColor(id: BossPatternId): string {
+  return PATTERN_COLOR[id];
+}
+
+/** Colour used for explicitly harmless indicators. */
+export function bossMarkerColor(): string {
+  return MARKER_COLOR;
 }

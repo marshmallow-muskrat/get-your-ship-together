@@ -10,9 +10,134 @@ The version names below are retrospective product milestones unless a balance ve
 
 ### Remaining follow-up
 
-- Hard GPU draw-call / memory A/B metrics and code splitting under long browser sessions.
 - Full run-balance telemetry export (weapon DPS, death source, etc.).
-- Optional deeper cone telegraph mesh for fan patterns (collision already uses shared cone math).
+- Bundle code splitting (main chunk is ~800 kB before gzip).
+
+## [2.2.1] — 2026-08-09 — Containment Protocol repair release
+
+Balance line: `endless-2.2.1`. New leaderboard partition; `endless-2.2.0` and older records are
+retained in storage but the board defaults to the current partition only.
+
+This release repairs verified defects in `endless-2.2.0` rather than adding features.
+
+### 1. Gravitic Recall no longer loses XP
+
+- **Root cause:** `gainXp()` returned early whenever `state.phase !== 'playing'`. The first recalled
+  orb that crossed a level threshold opened the level-up modal and flipped the phase, so every
+  orb collected later in that same frame — and the whole end-of-recall snap collection — was
+  deactivated as collected but had its value discarded.
+- XP accumulation is now separated from presenting the modal. `gainXp()` always banks the full
+  amount; `settleXpLevels()` converts banked XP into levels and pending choices; and
+  `openPendingLevelUp()` opens **at most one** owed modal, only while the phase is safely
+  `playing`. Excess XP stays banked.
+- The first modal is deferred until the ~1.25s Recall pull finishes, so the animation is never
+  frozen half-way. Owed level-ups then present sequentially — one card grants exactly one level,
+  and no weapon or passive is ever mutated just because several levels are pending.
+- Recall still captures only the energy orbs alive at activation: health orbs are never pulled and
+  orbs created afterwards are never joined to an in-flight pull.
+- The `survivor-recall` fixture no longer sets `xpNext = 99999`; it now crosses four real levels.
+- Added cumulative-conservation tests (`total earned = XP spent reaching the level + unspent XP`)
+  covering no level-up, one level, four levels, several orbs in a single frame, the final snap,
+  health-orb exclusion, late orbs, empty Recall, and phase/choice coherence.
+
+### 2. Boss attack shapes are a live architecture
+
+- The simulation now owns attack entities (`survivorAttacks.ts`), each carrying one authoritative
+  `AttackShape`, a `windup → active → fade` lifecycle, a damaging flag, a style, and a
+  `sourceBossId`.
+- The renderer draws that exact shape through `shapeToRender()` and a buffer-reusing floor mesh;
+  collision tests that exact shape through `pointHitsShape()`. Neither side reconstructs its own
+  approximate geometry any more.
+- All 14 patterns were audited and corrected: line/cryo/beam telegraph widths now equal collision
+  width (they previously differed by up to 1.28×), fan shows a real cone matching the volley it
+  will fire, aerial-strafe impacts and spore/cataclysm detonations use one radius for warning,
+  visual and damage, rupture and gravity render a true annulus with a safe core, and ravage's
+  corridor is the body path it actually sweeps.
+- `damaging` is now the whole truth — rupture and gravity arm their ring from the shape itself
+  instead of a second hidden radius guard.
+- Summon markers, the strafe corridor and the gravity pull core are explicit non-damaging markers
+  in a separate palette; every damaging boss warning is red/magenta.
+- Boss-scoped cleanup: cancellation, phase change and death clear only that boss's entities.
+  The old proximity heuristic could clear a *different* boss's telegraphs within 28 units.
+- `patternShape()` was removed rather than left as a test-only abstraction; the remaining shape
+  helpers are all used in production.
+- Removed a per-frame `pushEffect` in sweeping-beam that allocated a new effect (and materials)
+  every frame.
+
+### 3. Weapon levels actually rebalanced
+
+- The previous suite accepted a 2×–7.5× L5/L1 window, which widened the acceptance range instead
+  of fixing the weapons. Measured growth was up to **15.4×**.
+- The benchmark was rebuilt around moving, live-like targets: enemies run their normal pursuit AI
+  at real role speeds while the player kites a circle for a whole number of laps, across seven
+  scenarios (single-boss, sparse, dense, mixed-elite, mobile-offaxis, lined-up, clustered).
+- Projectile-count growth is capped at 2× across L1–L5 and area growth was trimmed, so progression
+  comes from damage and cadence rather than from multiplying projectiles.
+- Measured intended-scenario **L5/L1 is now 3.17–3.37** for all eight weapons; per-level gains are
+  24–39% with exactly one declared mechanical breakpoint per weapon (41–50%).
+- Hero starters are within **±4%** of the mean (was −56% to +56% on the moving benchmark).
+- Authored per-shot damage never decreases, so every upgrade card reads as an increase.
+- Rutherford's ordinary Rocket Barrage is unchanged in role and retained.
+- Fixed **Orbital Lance never leading its target**: the delayed strike aimed where the target was,
+  so it cleanly missed anything that walked. It now leads by the strike delay.
+- `docs/WEAPON_BENCHMARK.md` is generated from the harness (`npm run bench:doc`); no number in it
+  is hand-written.
+
+### 4. Early specialist gates enforced
+
+- Added `isEnemyEligibleAt(defId, time)` plus a state-aware `canSpawnEnemyNow()` as the single
+  eligibility path for ordinary composition, surge substitutions, forced elites, director variants
+  and boss summons. A blocked specialist becomes time-valid fodder so pressure is preserved.
+- Gates: fodder 0s, fast 30s, spiky/flyer/bee 60s, bruiser/elite 90s, ghost 120s.
+- At most one living specialist before 60s, and specialist-heavy surges are held back until then —
+  a forced sprinter surge at 45s previously replaced ~55% of spawns with sprinters.
+
+### 5. False-positive tests replaced
+
+- Boss FIFO now proves the exact 4 → 5 → 6 drain order, that index 5 is the Mega, that nothing is
+  duplicated or lost, that the queue empties, and that index 7 waits behind earlier indices.
+- Gunship seeds explicit targets and asserts each outcome: ordinary and elite die, miniboss loses
+  ~80% max HP, the off-lane target is untouched, a regular boss loses ~7% and a Mega ~3.5%, each
+  target is struck once, the normal death/reward path runs, and exactly one damage number is
+  emitted per target.
+- Every surge kind is forced and its actual composition or spawn geometry asserted.
+- This caught two real director defects: **encircle never encircled** and **pincer used one edge**
+  (both keyed off a within-frame spawn index that was almost always 0), and `edgeB` was a
+  perpendicular edge rather than the facing one.
+
+### 6. Deprecated parallel state removed
+
+- `breachStacks` is gone entirely. `pendingBossIndices` is the only boss backlog, and the HUD now
+  derives its Breach Queue count from `state.pendingBossIndices.length`.
+- Deprecated Protocol `rocketProtocol` state, its initializer and its per-frame forced disable are
+  removed. Rutherford's ordinary Rocket weapon is untouched.
+- Removed the dead `beam` effect kind and the duplicated fixture list in `AppController`.
+- Lint is now `--max-warnings 0` with the configuration unchanged; the two unused boss-pattern
+  arguments were resolved by the attack-entity refactor.
+
+### 7. One Gunship damage number per target
+
+- The Gunship called `damageEnemy()` (which emits) and then `emitDamage()` again under a second
+  key, producing two numbers per target. It now uses the normal damage API with a `gunship`
+  presentation style — one large gold number, normal death and reward processing intact.
+
+### 8. Lost-focus handling completed
+
+- `window.blur` and `document.visibilitychange` have separate handlers; the visibility handler acts
+  only when `document.hidden === true` and returning to visible never auto-resumes.
+- Focus loss clears held keys and action edges, drops any pending upgrade selection, cancels an
+  in-flight keybind capture and resets the HUD rebinding state, and keeps `inputBlocked` tied to
+  the settings panel alone.
+- Pauses only from `playing`; `levelup` and `protocol` keep their own phase.
+- Listeners are registered and removed symmetrically, so a restart or remount cannot double-bind.
+
+### 9. GPU stability measured
+
+- Added a `survivor-stress` fixture (full enemy cap, five L5 weapons, all abilities ready, boss and
+  cache schedules primed) and a GPU overlay on **F3** showing geometries, textures, programs, draw
+  calls and pool sizes alongside FPS.
+- Attack shapes render from pre-allocated buffers that are rewritten in place, so an expanding ring
+  or sweeping beam never allocates per frame; the visual pool reaches a high-water mark and stays.
 
 ## [2.2.0] — 2026-08-09 — Containment Protocol balance and systems release
 

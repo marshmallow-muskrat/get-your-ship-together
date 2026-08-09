@@ -105,6 +105,7 @@ export class SurvivorHud {
           <strong id="sv-timer">00:00</strong>
           <div id="sv-inbound" class="sv-inbound hidden">CONTAINMENT BREACH</div>
           <div id="sv-bosses-active" class="sv-bosses-active hidden"></div>
+          <div id="sv-bosses-queued" class="sv-bosses-active hidden"></div>
         </div>
         <div class="sv-meta">
           <span>LVL <strong id="sv-level">1</strong></span>
@@ -457,6 +458,13 @@ export class SurvivorHud {
       ba.classList.toggle('hidden', nBoss < 2);
       if (nBoss >= 2) ba.textContent = `BOSSES ACTIVE: ${nBoss}`;
     }
+    // Boss backlog has exactly one source of truth.
+    const bq = this.root.querySelector('#sv-bosses-queued');
+    const nQueued = state.pendingBossIndices.length;
+    if (bq) {
+      bq.classList.toggle('hidden', nQueued < 1);
+      if (nQueued >= 1) bq.textContent = `BREACH QUEUE: ${nQueued}`;
+    }
 
     const p = state.player;
     const hp = this.root.querySelector<HTMLElement>('#sv-hp');
@@ -480,7 +488,12 @@ export class SurvivorHud {
     if (metrics) {
       metrics.classList.toggle('hidden', !showMetrics);
       if (showMetrics) {
-        metrics.textContent = `FPS ${state.metrics.fps.toFixed(0)} · ${state.metrics.frameMs.toFixed(1)}ms · E ${state.metrics.enemies} · P ${state.metrics.projectiles}`;
+        const m = state.metrics;
+        metrics.textContent =
+          `FPS ${m.fps.toFixed(0)} · ${m.frameMs.toFixed(1)}ms · ` +
+          `E ${m.enemies} · P ${m.projectiles} · K ${m.pickups}\n` +
+          `geo ${m.geometries} · tex ${m.textures} · prog ${m.programs} · draws ${m.drawCalls}\n` +
+          `fx ${m.effects} · atk ${m.attacks} · rail ${m.railPool}`;
       }
     }
 

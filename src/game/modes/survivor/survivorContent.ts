@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.2.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.2.1';
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.07;
@@ -70,6 +70,8 @@ export const SURVIVOR = {
   surgeRecovery: 10,
   /** Elite specialist earliest appearance (seconds). */
   eliteGateTime: 90,
+  /** Visible Gravitic Recall pull window (seconds). */
+  recallDuration: 1.25,
   /** Containment Collapse begins at this survival time (seconds). */
   collapseStart: 30 * 60,
   collapseStep: 120,
@@ -249,11 +251,13 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Auto-locks nearest hostiles with rapid bolts.',
     color: '#88d4ff',
     levels: [
+      // Structural growth is capped at 2x projectiles across L1-L5; the rest of the
+      // curve comes from per-shot damage and cadence, so L5 lands near 3.3x L1.
       { level: 1, label: 'Pulse Blaster I', damage: 14, cadence: 0.32, count: 1, speed: 26, pierce: 0, life: 1.0, radius: 0.2 },
-      { level: 2, label: 'Pulse Blaster II', damage: 18, cadence: 0.28, count: 1, speed: 28, pierce: 0, life: 1.0, radius: 0.22 },
-      { level: 3, label: 'Twin Pulse', damage: 18, cadence: 0.26, count: 2, speed: 28, pierce: 0, life: 1.0, radius: 0.22 },
-      { level: 4, label: 'Penetrator', damage: 22, cadence: 0.24, count: 2, speed: 30, pierce: 1, life: 1.1, radius: 0.24 },
-      { level: 5, label: 'Pulse Storm', damage: 26, cadence: 0.2, count: 3, speed: 32, pierce: 1, life: 1.15, radius: 0.26 },
+      { level: 2, label: 'Pulse Blaster II', damage: 16, cadence: 0.281, count: 1, speed: 27, pierce: 0, life: 1.0, radius: 0.21 },
+      { level: 3, label: 'Focused Pulse', damage: 18, cadence: 0.237, count: 1, speed: 28, pierce: 0, life: 1.05, radius: 0.22 },
+      { level: 4, label: 'Twin Pulse', damage: 20, cadence: 0.387, count: 2, speed: 29, pierce: 0, life: 1.1, radius: 0.23 },
+      { level: 5, label: 'Pulse Storm', damage: 22, cadence: 0.301, count: 2, speed: 31, pierce: 0, life: 1.15, radius: 0.25 },
     ],
   },
   microdrone: {
@@ -262,12 +266,13 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Homing drones that hunt nearby threats.',
     color: '#f5ae42',
     levels: [
-      // Reliability hero: higher raw shot power so homing does not also under-damage.
-      { level: 1, label: 'Microdrone I', damage: 48, cadence: 1.28, count: 3, speed: 14, life: 2.45, radius: 0.2 },
-      { level: 2, label: 'Microdrone II', damage: 54, cadence: 1.18, count: 4, speed: 14.5, life: 2.5, radius: 0.2 },
-      { level: 3, label: 'Swarm Cadre', damage: 58, cadence: 1.1, count: 5, speed: 15, life: 2.55, radius: 0.21 },
-      { level: 4, label: 'Hunter Net', damage: 66, cadence: 1.02, count: 6, speed: 15.5, life: 2.65, radius: 0.22 },
-      { level: 5, label: 'Hive Overdrive', damage: 76, cadence: 0.92, count: 8, speed: 16.5, life: 2.8, radius: 0.23 },
+      // Reliability hero: measured against moving, off-axis targets so homing is
+      // credited for what it actually does rather than for standing still.
+      { level: 1, label: 'Microdrone I', damage: 72, cadence: 0.599, count: 3, speed: 14, life: 2.45, radius: 0.2 },
+      { level: 2, label: 'Microdrone II', damage: 80, cadence: 0.672, count: 4, speed: 14.5, life: 2.5, radius: 0.2 },
+      { level: 3, label: 'Swarm Cadre', damage: 89, cadence: 0.57, count: 4, speed: 15, life: 2.55, radius: 0.21 },
+      { level: 4, label: 'Hunter Net', damage: 99, cadence: 0.64, count: 5, speed: 15.5, life: 2.65, radius: 0.22 },
+      { level: 5, label: 'Hive Overdrive', damage: 110, cadence: 0.591, count: 6, speed: 16.5, life: 2.8, radius: 0.23 },
     ],
   },
   rail: {
@@ -276,12 +281,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Piercing line that cuts through dense packs.',
     color: '#ff7ab8',
     levels: [
-      // L1: reliable early pierce; L3/L5 add rails as major breakpoints.
-      { level: 1, label: 'Rail Lance I', damage: 110, cadence: 1.48, count: 1, width: 0.72, length: 16 },
-      { level: 2, label: 'Rail Lance II', damage: 128, cadence: 1.38, count: 1, width: 0.78, length: 16.5 },
-      { level: 3, label: 'Twin Rails', damage: 118, cadence: 1.3, count: 2, width: 0.68, length: 17 },
-      { level: 4, label: 'Wide Beam', damage: 138, cadence: 1.22, count: 2, width: 0.9, length: 17.5 },
-      { level: 5, label: 'Lance Battery', damage: 152, cadence: 1.1, count: 3, width: 0.8, length: 18.5 },
+      // Twin Rails at L4 is the explicit breakpoint; L3 widens instead of adding a rail.
+      { level: 1, label: 'Rail Lance I', damage: 110, cadence: 1.885, count: 1, width: 0.72, length: 16 },
+      { level: 2, label: 'Rail Lance II', damage: 122, cadence: 1.6288, count: 1, width: 0.78, length: 16.5 },
+      { level: 3, label: 'Focused Lance', damage: 129, cadence: 1.3568, count: 1, width: 0.8, length: 17 },
+      { level: 4, label: 'Wide Beam', damage: 152, cadence: 1.254, count: 1, width: 0.9, length: 17.5 },
+      { level: 5, label: 'Lance Battery', damage: 182, cadence: 2.1183, count: 2, width: 0.82, length: 18 },
     ],
   },
   gravity: {
@@ -290,11 +295,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Circular field that damages and slows.',
     color: '#9b7bff',
     levels: [
+      // Area grows steadily; the second well is held back to L5 as the breakpoint.
       { level: 1, label: 'Gravity Pulse I', damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 0.35 },
-      { level: 2, label: 'Gravity Pulse II', damage: 56, cadence: 2.05, count: 1, radius: 3.1, life: 0.4 },
-      { level: 3, label: 'Deep Well', damage: 66, cadence: 1.9, count: 1, radius: 3.55, life: 0.45 },
-      { level: 4, label: 'Double Pulse', damage: 64, cadence: 1.75, count: 2, radius: 3.4, life: 0.4 },
-      { level: 5, label: 'Event Horizon', damage: 82, cadence: 1.55, count: 2, radius: 4.1, life: 0.5 },
+      { level: 2, label: 'Gravity Pulse II', damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 0.38 },
+      { level: 3, label: 'Gravity Pulse III', damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 0.42 },
+      { level: 4, label: 'Deep Well', damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 0.45 },
+      { level: 5, label: 'Event Horizon', damage: 67, cadence: 2.605, count: 2, radius: 3.1, life: 0.5 },
     ],
   },
   rocket: {
@@ -303,12 +309,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Delayed area strikes on dense clusters.',
     color: '#ff8a4a',
     levels: [
-      // Cluster specialist: delayed arm tradeoff; strong in packs, fair on singles.
-      { level: 1, label: 'Rocket Barrage I', damage: 52, cadence: 2.1, count: 3, radius: 1.5, life: 0.36 },
-      { level: 2, label: 'Rocket Barrage II', damage: 60, cadence: 1.95, count: 4, radius: 1.6, life: 0.34 },
-      { level: 3, label: 'Salvo', damage: 66, cadence: 1.8, count: 5, radius: 1.7, life: 0.32 },
-      { level: 4, label: 'Cluster', damage: 74, cadence: 1.65, count: 6, radius: 1.8, life: 0.3 },
-      { level: 5, label: 'Carpet Fire', damage: 86, cadence: 1.48, count: 8, radius: 1.95, life: 0.28 },
+      // Cluster specialist: salvo size doubles across the span, blast radius grows gently.
+      { level: 1, label: 'Rocket Barrage I', damage: 42, cadence: 2.1404, count: 3, radius: 1.5, life: 0.36 },
+      { level: 2, label: 'Rocket Barrage II', damage: 47, cadence: 2.4, count: 4, radius: 1.54, life: 0.34 },
+      { level: 3, label: 'Salvo', damage: 52, cadence: 2.0224, count: 4, radius: 1.58, life: 0.32 },
+      { level: 4, label: 'Cluster', damage: 58, cadence: 2.1216, count: 5, radius: 1.63, life: 0.3 },
+      { level: 5, label: 'Carpet Fire', damage: 61, cadence: 1.8936, count: 6, radius: 1.68, life: 0.28 },
     ],
   },
   bioplasma: {
@@ -317,11 +323,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Toxic green globs that splash and leave corrosive residue.',
     color: '#5dff6a',
     levels: [
+      // Impact and corrosion scale together so the residue identity never falls behind.
       {
         level: 1,
         label: 'Bio-Plasma Glob I',
         damage: 34,
-        cadence: 0.82,
+        cadence: 0.626,
         count: 1,
         speed: 20,
         radius: 0.32,
@@ -334,58 +341,58 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 2,
         label: 'Bio-Plasma Glob II',
-        damage: 40,
-        cadence: 0.76,
+        damage: 38,
+        cadence: 0.487,
         count: 1,
         speed: 21,
         radius: 0.34,
         life: 1.5,
-        splash: 1.7,
-        puddleRadius: 1.4,
-        puddleLife: 1.6,
-        puddleDamage: 5.5,
+        splash: 1.6,
+        puddleRadius: 1.35,
+        puddleLife: 1.55,
+        puddleDamage: 5.0,
       },
       {
         level: 3,
         label: 'Corrosive Glob',
-        damage: 46,
-        cadence: 0.72,
+        damage: 42,
+        cadence: 0.401,
         count: 1,
         speed: 21.5,
         radius: 0.36,
         life: 1.55,
-        splash: 1.85,
-        puddleRadius: 1.6,
-        puddleLife: 1.9,
-        puddleDamage: 7,
+        splash: 1.65,
+        puddleRadius: 1.4,
+        puddleLife: 1.7,
+        puddleDamage: 5.6,
       },
       {
         level: 4,
         label: 'Twin Globs',
-        damage: 42,
-        cadence: 0.68,
+        damage: 47,
+        cadence: 0.648,
         count: 2,
         speed: 22,
         radius: 0.34,
         life: 1.55,
-        splash: 1.7,
-        puddleRadius: 1.45,
+        splash: 1.65,
+        puddleRadius: 1.4,
         puddleLife: 1.7,
-        puddleDamage: 6,
+        puddleDamage: 6.2,
       },
       {
         level: 5,
         label: 'Virulent Cascade',
-        damage: 50,
-        cadence: 0.62,
+        damage: 52,
+        cadence: 0.897,
         count: 2,
         speed: 22.5,
         radius: 0.36,
         life: 1.6,
-        splash: 1.95,
-        puddleRadius: 1.75,
-        puddleLife: 2.1,
-        puddleDamage: 8.5,
+        splash: 1.72,
+        puddleRadius: 1.5,
+        puddleLife: 1.8,
+        puddleDamage: 6.9,
         bounce: 1,
         split: 1,
       },
@@ -400,11 +407,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     prototype: true,
     unlockTime: 300,
     levels: [
+      // Chain count doubles across the span; L5 adds the splash breakpoint.
       { level: 1, label: 'Arc Conductor I', damage: 34, cadence: 1.15, count: 1, radius: 3.2, pierce: 2 },
-      { level: 2, label: 'Arc Conductor II', damage: 42, cadence: 1.05, count: 1, radius: 3.6, pierce: 2 },
-      { level: 3, label: 'Arc Conductor III', damage: 48, cadence: 0.95, count: 1, radius: 4.0, pierce: 3 },
-      { level: 4, label: 'Arc Conductor IV', damage: 56, cadence: 0.88, count: 1, radius: 4.4, pierce: 3 },
-      { level: 5, label: 'Arc Storm', damage: 68, cadence: 0.78, count: 1, radius: 5.0, pierce: 4, splash: 1.2 },
+      { level: 2, label: 'Arc Conductor II', damage: 38, cadence: 0.974, count: 1, radius: 3.5, pierce: 2 },
+      { level: 3, label: 'Arc Conductor III', damage: 42, cadence: 1.051, count: 1, radius: 3.8, pierce: 3 },
+      { level: 4, label: 'Arc Conductor IV', damage: 47, cadence: 0.931, count: 1, radius: 4.1, pierce: 3 },
+      { level: 5, label: 'Arc Storm', damage: 52, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
     ],
   },
   orbital: {
@@ -415,11 +423,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     prototype: true,
     unlockTime: 900,
     levels: [
+      // Second lance is the explicit breakpoint at L4.
       { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 1.6, life: 0.85 },
-      { level: 2, label: 'Orbital Lance II', damage: 170, cadence: 3.9, count: 1, radius: 1.85, life: 0.8 },
-      { level: 3, label: 'Orbital Lance III', damage: 190, cadence: 3.6, count: 2, radius: 1.75, life: 0.75 },
-      { level: 4, label: 'Orbital Lance IV', damage: 220, cadence: 3.35, count: 2, radius: 2.0, life: 0.7 },
-      { level: 5, label: 'Judgment Array', damage: 260, cadence: 3.0, count: 3, radius: 2.15, life: 0.65 },
+      { level: 2, label: 'Orbital Lance II', damage: 144, cadence: 2.8918, count: 1, radius: 1.68, life: 0.8 },
+      { level: 3, label: 'Orbital Lance III', damage: 168, cadence: 3.1804, count: 1, radius: 1.76, life: 0.78 },
+      { level: 4, label: 'Sustained Lance', damage: 179, cadence: 3.0329, count: 1, radius: 1.92, life: 0.72 },
+      { level: 5, label: 'Judgment Array', damage: 266, cadence: 4.5363, count: 2, radius: 1.88, life: 0.68 },
     ],
   },
 
@@ -929,6 +938,54 @@ export const HORDE: Record<string, HordeEnemyDef> = {
   },
 };
 
+/**
+ * Earliest survival time (seconds) at which each horde definition may enter play.
+ *
+ * Single source of truth for the opening ramp: ordinary composition, pressure-director
+ * surges, forced elite spawns and boss summons all resolve through `isEnemyEligibleAt`,
+ * so no path can introduce a specialist before its gate.
+ */
+export const ENEMY_GATE_TIME: Readonly<Record<string, number>> = {
+  basic: 0,
+  mush: 0,
+  // Sprinters
+  fast: 30,
+  spiky: 60,
+  // Flankers
+  flyer: 60,
+  bee: 60,
+  // Heavies
+  bruiser: 90,
+  elite: 90,
+  // Hunters
+  ghost: 120,
+  miniboss: 120,
+};
+
+/** Gate for a horde definition; unknown ids are treated as late specialists. */
+export function enemyGateTime(defId: string): number {
+  const gate = ENEMY_GATE_TIME[defId];
+  return gate === undefined ? 120 : gate;
+}
+
+/** Central time eligibility check used by every spawn path. */
+export function isEnemyEligibleAt(defId: string, time: number): boolean {
+  // Small epsilon so a gate boundary reached by fixed-step accumulation still qualifies.
+  return time + 1e-6 >= enemyGateTime(defId);
+}
+
+/** Fodder is always eligible and is the substitute for a gated request. */
+export function isFodderEnemy(defId: string): boolean {
+  return HORDE[defId]?.role === 'fodder';
+}
+
+/**
+ * During the first minute a specialist is a rare event, not a wave.
+ * At most this many specialists may be alive at once before 60s.
+ */
+export const FIRST_MINUTE_SPECIALIST_WINDOW = 60;
+export const FIRST_MINUTE_SPECIALIST_CAP = 1;
+
 export const MINIBOSS = {
   id: 'miniboss',
   name: 'Containment Warden',
@@ -1302,6 +1359,7 @@ export type SurvivorFixture =
   | 'survivor-shield'
   | 'survivor-recall'
   | 'survivor-gunship'
+  | 'survivor-stress'
   | null;
 
 export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
@@ -1322,4 +1380,5 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-shield',
   'survivor-recall',
   'survivor-gunship',
+  'survivor-stress',
 ];

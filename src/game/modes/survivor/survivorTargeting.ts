@@ -1,4 +1,4 @@
-import { bossFocusBaseChance } from './survivorContent';
+import { HORDE, bossFocusBaseChance } from './survivorContent';
 import type { SurvivorBoss, SurvivorEnemy, SurvivorState, SurvivorWeaponSlot } from './survivorState';
 import { aliveBossCount } from './survivorState';
 
@@ -106,4 +106,31 @@ export function targetPosition(t: AimTarget): { x: number; z: number } | null {
   if (!t) return null;
   if (t.kind === 'boss') return { x: t.boss.x, z: t.boss.z };
   return { x: t.enemy.x, z: t.enemy.z };
+}
+
+/**
+ * Aim point for delayed strikes, led by the target's current motion.
+ *
+ * Without this an orbital strike lands where the target *was*, which against anything
+ * that walks is a clean miss — the reason the weapon measured near zero on moving
+ * targets while looking fine against a stationary dummy.
+ */
+export function leadTargetPosition(
+  t: AimTarget,
+  delaySec: number,
+): { x: number; z: number } | null {
+  if (!t) return null;
+  if (t.kind === 'boss') {
+    // Bosses close on the player along their facing at their move speed.
+    return { x: t.boss.x, z: t.boss.z };
+  }
+  // Enemy movement is integrated straight into x/z, so derive velocity from the
+  // maintained facing and the role's live speed rather than from a stale vx/vz.
+  const e = t.enemy;
+  const speed = (HORDE[e.defId]?.baseSpeed ?? 4) * e.speedMul;
+  const fl = Math.hypot(e.facingX, e.facingZ) || 1;
+  return {
+    x: e.x + (e.facingX / fl) * speed * delaySec,
+    z: e.z + (e.facingZ / fl) * speed * delaySec,
+  };
 }

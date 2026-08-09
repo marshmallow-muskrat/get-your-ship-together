@@ -1,7 +1,10 @@
 import type { HeroId } from '../game/content/heroes';
 import { isHeroId } from '../game/content/heroes';
 import { SurvivorMode } from '../game/modes/survivor/SurvivorMode';
-import type { SurvivorFixture } from '../game/modes/survivor/survivorContent';
+import {
+  ALL_SURVIVOR_FIXTURES,
+  type SurvivorFixture,
+} from '../game/modes/survivor/survivorContent';
 import { CrewSelectScreen } from '../screens/CrewSelectScreen';
 
 function parseLaunch(): {
@@ -13,28 +16,9 @@ function parseLaunch(): {
   const fixtureParam = params.get('fixture');
   const modeParam = params.get('mode');
 
-  const survivorFixtures: SurvivorFixture[] = [
-    'survivor-start',
-    'survivor-levelup',
-    'survivor-horde',
-    'survivor-mech',
-    'survivor-boss',
-    'survivor-repulsor',
-    'survivor-ship',
-    'survivor-damage',
-    'survivor-miniboss',
-    'survivor-pickups',
-    'survivor-arc',
-    'survivor-orbital',
-    'survivor-mega',
-    'survivor-cache',
-    'survivor-shield',
-    'survivor-recall',
-    'survivor-gunship',
-  ];
-
+  // Single source of truth — a new fixture is routable the moment it is declared.
   const knownFixture =
-    fixtureParam && (survivorFixtures as string[]).includes(fixtureParam)
+    fixtureParam && (ALL_SURVIVOR_FIXTURES as string[]).includes(fixtureParam)
       ? (fixtureParam as SurvivorFixture)
       : null;
 

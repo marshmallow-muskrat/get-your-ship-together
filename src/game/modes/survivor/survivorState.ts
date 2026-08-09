@@ -166,7 +166,6 @@ export interface SurvivorEffect {
     | 'orbital'
     | 'cache'
     | 'mega'
-    | 'beam'
     | 'gunship';
   x: number;
   z: number;
@@ -271,7 +270,17 @@ export interface SurvivorMiniboss {
 }
 
 /** Presentation-only damage event (does not affect sim authority). */
-export type DamageNumberKind = 'enemy' | 'player' | 'boss' | 'large' | 'ability' | 'kill' | 'heal' | 'absorb';
+export type DamageNumberKind =
+  | 'enemy'
+  | 'player'
+  | 'boss'
+  | 'large'
+  | 'ability'
+  | 'kill'
+  | 'heal'
+  | 'absorb'
+  /** Orbital Gunship strike — one large gold number per target. */
+  | 'gunship';
 
 export interface DamageEvent {
   id: number;
@@ -346,6 +355,12 @@ export interface SurvivorState {
     /** Geometry hint for spawns (edge index / pair). */
     edgeA: number;
     edgeB: number;
+    /**
+     * Rotating perimeter cursor for geometry surges.
+     * Encircle must step around the arena across frames — using the within-frame
+     * spawn index alone left it pinned to a single edge.
+     */
+    edgeCursor: number;
   };
   /** Ordered FIFO of deferred boss schedule indices (1-based). */
   pendingBossIndices: number[];
@@ -401,8 +416,6 @@ export interface SurvivorState {
     /** Temporary spawn suppression after corridor clear. */
     spawnSuppress: number;
   };
-  /** @deprecated Protocol rocket removed; ordinary weapon rocket remains. */
-  rocketProtocol: { active: boolean; remaining: number; fireCd: number; potency: number };
   /** Gravitic Recall: energy orb ids mid-pull. */
   recall: {
     active: boolean;
@@ -417,12 +430,14 @@ export interface SurvivorState {
   hazards: SurvivorHazard[];
   pickups: SurvivorPickup[];
   effects: SurvivorEffect[];
+  /**
+   * Boss attack/telegraph entities. Each owns the one authoritative AttackShape that
+   * both the renderer and collision read — see survivorAttacks.ts.
+   */
+  attacks: import('./survivorAttacks').SurvivorAttack[];
   rails: Array<{ x0: number; z0: number; x1: number; z1: number; life: number; color: string }>;
   /** Concurrent bosses (cap SURVIVOR.maxSimultaneousBosses). */
   bosses: SurvivorBoss[];
-  /** Owed bosses that could not spawn due to cap — never silently dropped. */
-  /** @deprecated Use pendingBossIndices. Kept 0 for migration safety. */
-  breachStacks: number;
   nextBossIndex: number;
   nextBossTime: number;
   bossesSpawned: number;
@@ -438,6 +453,11 @@ export interface SurvivorState {
   level: number;
   xp: number;
   xpNext: number;
+  /**
+   * Levels earned but not yet resolved by a validated choice card.
+   * XP accumulation raises this; only `openPendingLevelUp` consumes it, one modal at a time.
+   */
+  pendingLevelUps: number;
   kills: number;
   choices: UpgradeChoice[];
   spawnAcc: number;
@@ -454,6 +474,14 @@ export interface SurvivorState {
     enemies: number;
     projectiles: number;
     pickups: number;
+    /** Renderer resource counters, published by the runtime for the F3 overlay. */
+    geometries: number;
+    textures: number;
+    programs: number;
+    drawCalls: number;
+    effects: number;
+    attacks: number;
+    railPool: number;
   };
 }
 
@@ -649,7 +677,9 @@ export function createSurvivorState(
       phaseEndsAt: 0,
       nextSurgeAt: SURVIVOR.surgeInterval,
       edgeA: 0,
-      edgeB: 2,
+      // Facing edge of the same axis pair (-Z/+Z), matching the director's pairing.
+      edgeB: 1,
+      edgeCursor: 0,
     },
     pendingBossIndices: [],
     cache: {
@@ -691,16 +721,15 @@ export function createSurvivorState(
       hitIds: [],
       spawnSuppress: 0,
     },
-    rocketProtocol: { active: false, remaining: 0, fireCd: 0, potency: 1 },
-    recall: { active: false, t: 0, duration: 1.25, orbIds: [], totalXp: 0 },
+    recall: { active: false, t: 0, duration: SURVIVOR.recallDuration, orbIds: [], totalXp: 0 },
     enemies: [],
     projectiles: [],
     hazards: [],
     pickups: [],
     effects: [],
+    attacks: [],
     rails: [],
     bosses: [],
-    breachStacks: 0,
     nextBossIndex: 1,
     nextBossTime: SURVIVOR.bossInterval,
     bossesSpawned: 0,
@@ -719,6 +748,7 @@ export function createSurvivorState(
     level: 1,
     xp: 0,
     xpNext: xpForLevel(1),
+    pendingLevelUps: 0,
     kills: 0,
     choices: [],
     spawnAcc: 0,
@@ -728,7 +758,20 @@ export function createSurvivorState(
     muted: false,
     runRecorded: false,
     inboundBanner: 0,
-    metrics: { fps: 60, frameMs: 16, enemies: 0, projectiles: 0, pickups: 0 },
+    metrics: {
+      fps: 60,
+      frameMs: 16,
+      enemies: 0,
+      projectiles: 0,
+      pickups: 0,
+      geometries: 0,
+      textures: 0,
+      programs: 0,
+      drawCalls: 0,
+      effects: 0,
+      attacks: 0,
+      railPool: 0,
+    },
   };
 
   applyFixture(state, fixture);
@@ -815,25 +858,35 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.time = 90;
     state.player.invuln = 30;
     state.weapons = [];
-    state.xpNext = 99999;
-    // Scatter energy across the arena for Gravitic Recall.
+    // Real level thresholds: this payload crosses four levels so Recall conservation is
+    // exercised for real instead of being hidden behind an unreachable xpNext.
     for (let i = 0; i < 18; i += 1) {
       state.pickups.push({
         id: 9200 + i,
         kind: 'xp',
         x: Math.sin(i * 1.7) * 18,
         z: Math.cos(i * 1.3) * 18,
-        value: 4 + (i % 5),
+        value: 8 + (i % 5) * 2,
         active: true,
         magnetized: false,
         life: Infinity,
       });
     }
+    // One health orb proves Recall never pulls repair pickups.
+    state.pickups.push({
+      id: 9299,
+      kind: 'repair',
+      x: 14,
+      z: -14,
+      value: 25,
+      active: true,
+      magnetized: false,
+      life: Infinity,
+    });
   } else if (fixture === 'survivor-gunship') {
     state.time = 90;
     state.player.invuln = 30;
     state.weapons = [];
-    state.xpNext = 99999;
     state.player.x = 0;
     state.player.z = 0;
     state.player.facingX = 0;
@@ -870,6 +923,64 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       hitIds: [],
       spawnSuppress: 0,
     };
+  } else if (fixture === 'survivor-stress') {
+    // Worst-case presentation load: full enemy cap, every weapon at L5, all abilities
+    // ready and the boss schedule already deep. Used for the GPU stability procedure
+    // in docs/CONTAINMENT_PROTOCOL.md.
+    state.time = 10 * 60;
+    state.enemyCap = SURVIVOR.enemyCap;
+    state.player.invuln = 1e9;
+    state.nextBossIndex = 5;
+    state.nextBossTime = state.time + 1.5;
+    state.nextCacheTime = state.time + 3;
+    state.surge.nextSurgeAt = state.time + 2;
+    grantBuild(
+      state,
+      [
+        { id: heroStarterWeapon(state.heroId), level: 5 },
+        { id: 'pulse', level: 5 },
+        { id: 'rail', level: 5 },
+        { id: 'gravity', level: 5 },
+        { id: 'bioplasma', level: 5 },
+      ],
+      { 'weapon-haste': 3, area: 3, 'max-health': 3, 'pickup-radius': 3 },
+      20,
+    );
+    state.unlocks.arc = true;
+    state.unlocks.orbital = true;
+    state.player.mechCharge = 1;
+    state.player.repulsorCd = 0;
+    state.player.shipCd = 0;
+    // Prime the arena so the first frames are already at load.
+    for (let i = 0; i < 90; i += 1) {
+      const a = (i / 90) * Math.PI * 2;
+      const r = 6 + (i % 7) * 2.2;
+      const e = emptyEnemy();
+      e.id = 9500 + i;
+      e.alive = true;
+      e.defId = i % 9 === 0 ? 'elite' : i % 3 === 0 ? 'bruiser' : 'basic';
+      e.role = i % 9 === 0 ? 'elite' : i % 3 === 0 ? 'bruiser' : 'fodder';
+      e.isElite = i % 9 === 0;
+      e.x = Math.cos(a) * r;
+      e.z = Math.sin(a) * r;
+      e.health = 900;
+      e.maxHealth = 900;
+      e.radius = 0.5;
+      e.xp = 4;
+      state.enemies.push(e);
+    }
+    for (let i = 0; i < 40; i += 1) {
+      state.pickups.push({
+        id: 9700 + i,
+        kind: 'xp',
+        x: Math.sin(i * 1.9) * 20,
+        z: Math.cos(i * 1.4) * 20,
+        value: 6,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
+    }
   } else if (fixture === 'survivor-boss') {
     // Just before first endless boss at 2:00 with a representative mid-run build
     state.time = SURVIVOR.bossInterval - 0.05;

@@ -12,6 +12,10 @@ import {
   bossTimeForIndex,
   compositionAt,
   endlessDifficultyAt,
+  isEnemyEligibleAt,
+  isFodderEnemy,
+  FIRST_MINUTE_SPECIALIST_WINDOW,
+  FIRST_MINUTE_SPECIALIST_CAP,
   formatOverclockLabel,
   hullPlatingGainAtLevel,
   isPassiveAvailable,
@@ -38,9 +42,11 @@ import {
 import {
   livingBosses,
   nearestBoss,
+  leadTargetPosition,
   selectWeaponTarget,
   targetPosition,
 } from './survivorTargeting';
+import { updateAttacks } from './survivorAttacks';
 import {
   updateOneBoss as updateOneBossPatterns,
   forceBossPattern,
@@ -337,7 +343,7 @@ function flushDamageAgg(state: SurvivorState, dt: number): void {
     if (kind === 'enemy' && agg.amount >= SURVIVOR.damageNumbers.heavyThreshold) kind = 'large';
     else if (kind === 'enemy' && agg.amount >= SURVIVOR.damageNumbers.largeThreshold) kind = 'large';
     const life =
-      kind === 'large' || kind === 'ability' || kind === 'boss'
+      kind === 'large' || kind === 'ability' || kind === 'boss' || kind === 'gunship'
         ? SURVIVOR.damageNumbers.heavyLife
         : SURVIVOR.damageNumbers.life;
     if (state.damageEvents.length >= SURVIVOR.damageEventCap) {
@@ -371,7 +377,45 @@ function acquireEnemySlot(state: SurvivorState): SurvivorEnemy | null {
   return e;
 }
 
+/** Living non-fodder enemies — the quantity the first-minute cap bounds. */
+function livingSpecialistCount(state: SurvivorState): number {
+  let n = 0;
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    if (!isFodderEnemy(e.defId)) n += 1;
+  }
+  return n;
+}
+
+/**
+ * Central spawn eligibility: the time gate plus the first-minute specialist cap.
+ * Every spawn path funnels through here — surges cannot bypass it.
+ */
+export function canSpawnEnemyNow(state: SurvivorState, defId: string): boolean {
+  if (!HORDE[defId]) return false;
+  if (!isEnemyEligibleAt(defId, state.time)) return false;
+  if (isFodderEnemy(defId)) return true;
+  if (state.time < FIRST_MINUTE_SPECIALIST_WINDOW) {
+    return livingSpecialistCount(state) < FIRST_MINUTE_SPECIALIST_CAP;
+  }
+  // Past the first minute the time gates alone govern eligibility.
+  return true;
+}
+
+/**
+ * Resolve a requested definition to one that is valid right now.
+ * A blocked specialist becomes time-valid fodder so early pressure is preserved
+ * rather than silently dropped.
+ */
+function resolveEligibleDef(state: SurvivorState, defId: string): string {
+  if (canSpawnEnemyNow(state, defId)) return defId;
+  return rng(state) < 0.72 ? 'basic' : 'mush';
+}
+
 function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): SurvivorEnemy | null {
+  if (!HORDE[defId]) return null;
+  // Sole choke point for the opening ramp — includes boss summons and director variants.
+  defId = resolveEligibleDef(state, defId);
   const def = HORDE[defId];
   if (!def) return null;
   const slot = acquireEnemySlot(state);
@@ -612,7 +656,8 @@ function damageEnemy(
   e.hitFlash = 0.1;
   const killed = e.health <= 0;
   let kind: DamageEvent['kind'] = opts?.kind ?? (e.isMiniboss ? 'boss' : 'enemy');
-  if (killed && kind !== 'player') kind = 'kill';
+  // An explicit presentation style (e.g. Gunship gold) survives the kill upgrade.
+  if (killed && kind !== 'player' && kind !== 'gunship') kind = 'kill';
   emitDamage(state, `e:${e.id}`, e.x, e.z + 0.5, dmg, kind, opts?.pop ?? (killed ? 0.9 : 0.5));
   if (e.isMiniboss) {
     state.miniboss.health = Math.max(0, e.health);
@@ -1314,7 +1359,8 @@ function fireOrbitalLance(
 ): void {
   const p = state.player;
   const aim = selectWeaponTarget(state, slot, p.x, p.z, 32, { forceBoss: true });
-  let pos = targetPosition(aim);
+  // Lead the aim by the strike delay so a walking target is still under the beam.
+  let pos = leadTargetPosition(aim, def.life ?? 0.8);
   if (!pos) {
     const dense = densestPoint(state, p.x, p.z);
     pos = dense;
@@ -2135,15 +2181,46 @@ function updatePickups(state: SurvivorState, dt: number): void {
 
 }
 
-function gainXp(state: SurvivorState, amount: number): void {
-  if (state.phase !== 'playing') return;
-  state.xp += amount;
-  while (state.xp >= state.xpNext && state.phase === 'playing') {
+/**
+ * Convert accumulated XP at/over threshold into levels and pending level-up modals.
+ *
+ * Deliberately phase-independent: a level-up modal opened earlier in the same frame must
+ * never cause later collections to be discarded. Only `openPendingLevelUp` reads `phase`.
+ */
+function settleXpLevels(state: SurvivorState): void {
+  // Bounded so a corrupt xpNext can never spin the frame.
+  for (let guard = 0; guard < 512; guard += 1) {
+    if (!(state.xpNext > 0)) break;
+    if (state.xp < state.xpNext) break;
     state.xp -= state.xpNext;
     state.level += 1;
     state.xpNext = xpForLevel(state.level);
-    openLevelUp(state);
+    state.pendingLevelUps += 1;
   }
+}
+
+/**
+ * Sole XP entry point. Always banks the full amount — a collection can never be rejected.
+ * Opening the choice modal is a separate concern (`openPendingLevelUp`).
+ */
+function gainXp(state: SurvivorState, amount: number): void {
+  if (!(amount > 0)) return;
+  state.xp += amount;
+  settleXpLevels(state);
+}
+
+/**
+ * Open at most one owed level-up when it is safe to do so.
+ * Returns true when a modal was opened (caller should yield the rest of the step).
+ */
+function openPendingLevelUp(state: SurvivorState): boolean {
+  if (state.pendingLevelUps <= 0) return false;
+  if (state.phase !== 'playing') return false;
+  // Let Gravitic Recall finish its visible pull before freezing the sim on a modal.
+  if (state.recall.active) return false;
+  state.pendingLevelUps -= 1;
+  openLevelUp(state);
+  return true;
 }
 
 function ownedWeaponLevel(state: SurvivorState, id: WeaponId): number {
@@ -2532,6 +2609,7 @@ function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): v
 }
 
 function startGraviticRecall(state: SurvivorState): void {
+  // Snapshot only energy orbs alive right now — health orbs and later spawns are never pulled.
   const ids: number[] = [];
   let total = 0;
   for (const pk of state.pickups) {
@@ -2540,10 +2618,19 @@ function startGraviticRecall(state: SurvivorState): void {
     total += pk.value;
     pk.magnetized = true;
   }
+  if (state.recall.active) {
+    // Re-trigger mid-pull: merge so in-flight orbs still reach the player exactly once.
+    for (const id of ids) {
+      if (!state.recall.orbIds.includes(id)) state.recall.orbIds.push(id);
+    }
+    state.recall.t = 0;
+    state.recall.totalXp = total;
+    return;
+  }
   state.recall = {
     active: true,
     t: 0,
-    duration: 1.25,
+    duration: SURVIVOR.recallDuration,
     orbIds: ids,
     totalXp: total,
   };
@@ -2937,17 +3024,31 @@ function updatePressureDirector(state: SurvivorState): void {
   if (s.phase === 'normal') {
     if (t >= s.nextSurgeAt) {
       const kinds = ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood'];
-      // Respect elite gate — never roll elite surge too early.
       let kind = kinds[Math.floor(rng(state) * kinds.length)]!;
-      if (kind === 'elite' && t < SURVIVOR.eliteGateTime) kind = 'flood';
+      // A surge whose whole identity is gated would just be a fodder wave with a
+      // misleading name — roll it forward to an honest early-pressure flood instead.
+      const kindLead: Record<string, string> = {
+        sprinters: 'fast',
+        bruiser: 'bruiser',
+        elite: 'elite',
+        pincer: 'flyer',
+        encircle: 'flyer',
+      };
+      const lead = kindLead[kind];
+      if (lead && !isEnemyEligibleAt(lead, t)) kind = 'flood';
+      // Specialist-heavy surges wait out the opening minute entirely.
+      if (t < FIRST_MINUTE_SPECIALIST_WINDOW && kind !== 'flood') kind = 'flood';
       s.kind = kind;
       s.phase = 'telegraph';
       s.phaseEndsAt = t + SURVIVOR.surgeTelegraph;
       s.edgeA = Math.floor(rng(state) * 4);
-      s.edgeB = (s.edgeA + 2) % 4;
+      // Edges are indexed -Z, +Z, -X, +X, so the facing edge is the sibling in the
+      // pair: XOR 1. The previous +2 wrap produced a perpendicular edge, not a pincer.
+      s.edgeB = s.edgeA ^ 1;
+      s.edgeCursor = 0;
       // Perimeter warning
       for (let i = 0; i < 4; i += 1) {
-        const pos = edgeSpawnWeighted(state, s.kind, i);
+        const pos = edgeSpawnWeighted(state, s.kind);
         pushEffect(state, 'telegraph', pos.x * 0.9, pos.z * 0.9, SURVIVOR.surgeTelegraph, '#ff8866', 2.0, {
           radius: 1.6,
         });
@@ -2973,17 +3074,18 @@ function updatePressureDirector(state: SurvivorState): void {
 }
 
 /** Spawn edge weighted by surge type. */
-function edgeSpawnWeighted(
-  state: SurvivorState,
-  kind: string,
-  salt = 0,
-): { x: number; z: number } {
+function edgeSpawnWeighted(state: SurvivorState, kind: string): { x: number; z: number } {
   const h = SURVIVOR.arenaHalf + 1.2;
   let side = Math.floor(rng(state) * 4);
   if (kind === 'pincer') {
-    side = salt % 2 === 0 ? state.surge.edgeA : state.surge.edgeB;
+    // Alternate per spawn, not per within-frame index, so both jaws actually fill.
+    side = state.surge.edgeCursor % 2 === 0 ? state.surge.edgeA : state.surge.edgeB;
+    state.surge.edgeCursor += 1;
   } else if (kind === 'encircle') {
-    side = salt % 4;
+    // Step around the perimeter per spawn, not per within-frame index — otherwise a
+    // surge that only spawns one enemy per frame always picks the same edge.
+    side = state.surge.edgeCursor % 4;
+    state.surge.edgeCursor = (state.surge.edgeCursor + 1) % 4;
   } else if (kind !== 'flood') {
     // Prefer ahead of player + flanks (35% ahead, 25% flanks, 40% perimeter)
     const r = rng(state);
@@ -3008,13 +3110,17 @@ function edgeSpawnWeighted(
 function surgeCompositionBias(state: SurvivorState, baseId: string): string {
   const k = state.surge.kind;
   if (state.surge.phase !== 'surge') return baseId;
-  if (k === 'sprinters' && rng(state) < 0.55) return rng(state) < 0.5 ? 'fast' : 'spiky';
-  if (k === 'bruiser' && rng(state) < 0.5) return 'bruiser';
-  if (k === 'elite' && state.time >= SURVIVOR.eliteGateTime && rng(state) < 0.45) return 'elite';
+  // Every substitution is filtered by eligibility — a surge cannot outrun the gates.
+  const bias = (id: string): string | null => (canSpawnEnemyNow(state, id) ? id : null);
+  if (k === 'sprinters' && rng(state) < 0.55) {
+    return bias(rng(state) < 0.5 ? 'fast' : 'spiky') ?? baseId;
+  }
+  if (k === 'bruiser' && rng(state) < 0.5) return bias('bruiser') ?? baseId;
+  if (k === 'elite' && rng(state) < 0.45) return bias('elite') ?? baseId;
   if (k === 'flood' && rng(state) < 0.65) return rng(state) < 0.5 ? 'basic' : 'mush';
   if (k === 'pincer' || k === 'encircle') {
     // Slightly favor flankers during geometry surges
-    if (rng(state) < 0.25) return rng(state) < 0.5 ? 'flyer' : 'bee';
+    if (rng(state) < 0.25) return bias(rng(state) < 0.5 ? 'flyer' : 'bee') ?? baseId;
   }
   return baseId;
 }
@@ -3050,13 +3156,13 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   let spawnedThisFrame = 0;
   while (state.spawnAcc >= 1 && alive + spawnedThisFrame < state.enemyCap && spawnedThisFrame < 4) {
     state.spawnAcc -= 1;
-    const pos = edgeSpawnWeighted(state, state.surge.phase === 'surge' ? state.surge.kind : '', spawnedThisFrame);
+    const pos = edgeSpawnWeighted(state, state.surge.phase === 'surge' ? state.surge.kind : '');
     let defId = surgeCompositionBias(state, pickComposition(state));
-    // Forced elites only after gate and not during recovery.
+    // Forced elites route through the same eligibility check as everything else.
     if (
       state.surge.phase !== 'recovery' &&
       rng(state) < diff.eliteChance &&
-      state.time >= SURVIVOR.eliteGateTime
+      canSpawnEnemyNow(state, 'elite')
     ) {
       defId = 'elite';
     }
@@ -3066,11 +3172,11 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   state.eliteTimer -= dt;
   if (
     state.eliteTimer <= 0 &&
-    state.time >= SURVIVOR.eliteGateTime &&
+    canSpawnEnemyNow(state, 'elite') &&
     state.surge.phase !== 'recovery'
   ) {
     state.eliteTimer = Math.max(8, 20 - state.time / 60) + rng(state) * 10;
-    const pos = edgeSpawnWeighted(state, state.surge.kind || '', 0);
+    const pos = edgeSpawnWeighted(state, state.surge.kind || '');
     spawnEnemy(state, 'elite', pos.x, pos.z);
   }
 }
@@ -3082,7 +3188,6 @@ function hasActiveMega(state: SurvivorState): boolean {
 function enqueueBossIndex(state: SurvivorState, index: number): void {
   if (state.pendingBossIndices.includes(index)) return;
   state.pendingBossIndices.push(index);
-  state.breachStacks = state.pendingBossIndices.length; // HUD compatibility mirror
   for (const b of state.bosses) {
     if (b.active && b.state !== 'dead') {
       b.breachEmpower += 0.12;
@@ -3092,6 +3197,11 @@ function enqueueBossIndex(state: SurvivorState, index: number): void {
   state.inboundBanner = 2.5;
 }
 
+/** Test/fixture helper — queue a boss index through the production FIFO path. */
+export function forceEnqueueBossIndex(state: SurvivorState, index: number): void {
+  enqueueBossIndex(state, index);
+}
+
 function drainPendingBosses(state: SurvivorState): void {
   while (state.pendingBossIndices.length > 0) {
     const next = state.pendingBossIndices[0]!;
@@ -3099,12 +3209,10 @@ function drainPendingBosses(state: SurvivorState): void {
     if (mega && hasActiveMega(state)) break;
     if (!mega && aliveBossCount(state) >= SURVIVOR.maxSimultaneousBosses) break;
     state.pendingBossIndices.shift();
-    state.breachStacks = state.pendingBossIndices.length;
     const spawned = spawnBossAtIndex(state, next, true);
     if (!spawned) {
       // Re-queue at front if spawn unexpectedly failed.
       state.pendingBossIndices.unshift(next);
-      state.breachStacks = state.pendingBossIndices.length;
       break;
     }
   }
@@ -3248,9 +3356,6 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
   for (const pa of state.protocolActive) pa.remaining -= dt;
   state.protocolActive = state.protocolActive.filter((pa) => pa.remaining > 0);
 
-  // Legacy protocol rocket battery disabled (ordinary weapon rocket remains).
-  state.rocketProtocol.active = false;
-
   updateGraviticRecall(state, dt);
 
   // Gunship: once-per-target strike when footprint crosses the enemy.
@@ -3283,8 +3388,8 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
           // Once-per-target: delete ordinary; fraction miniboss/boss max HP.
           let dmg = e.maxHealth * 1.05;
           if (e.isMiniboss) dmg = e.maxHealth * 0.8 * pot;
-          damageEnemy(state, e, dmg, { kind: 'ability', pop: 1 });
-          emitDamage(state, `gs:${e.id}`, e.x, e.z + 0.8, Math.round(dmg), 'kill', 1);
+          // Single authoritative damage-number path — normal death/reward processing included.
+          damageEnemy(state, e, dmg, { kind: 'gunship', pop: 1 });
           pushEffect(state, 'impact', e.x, e.z, 0.28, '#ffd46a', 1.6);
         }
       }
@@ -3297,7 +3402,7 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
           g.hitIds.push(b.id);
           const frac = b.isMega ? 0.035 * pot : 0.07 * pot;
           const dmg = b.maxHealth * frac;
-          damageBoss(state, dmg, { kind: 'ability', pop: 1, boss: b, x: b.x, z: b.z });
+          damageBoss(state, dmg, { kind: 'gunship', pop: 1, boss: b, x: b.x, z: b.z });
           pushEffect(state, 'impact', b.x, b.z, 0.35, '#ffd46a', 2.2);
         }
       }
@@ -3497,13 +3602,9 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
   }
 
   state.time += dt;
-  if (state.xp >= state.xpNext && state.phase === 'playing') {
-    state.xp -= state.xpNext;
-    state.level += 1;
-    state.xpNext = xpForLevel(state.level);
-    openLevelUp(state);
-    return;
-  }
+  // Absorb externally-seeded XP (fixtures/tests) then present one owed choice at a time.
+  settleXpLevels(state);
+  if (openPendingLevelUp(state)) return;
 
   ensureUnlocksAndCache(state, dt);
   ensureBossSchedule(state);
@@ -3514,6 +3615,7 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
   updateHazards(state, dt);
   updateEnemies(state, dt);
   updateBosses(state, dt);
+  updateAttacks(state, dt);
   updatePickups(state, dt);
   updateSpawns(state, dt);
   flushDamageAgg(state, dt);

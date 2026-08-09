@@ -27,6 +27,7 @@ import {
   type ActionId,
   type KeybindMap,
 } from './survivorKeybinds';
+import { focusLossTransition, shouldHandleVisibility } from './survivorFocus';
 
 export type SurvivorHandlers = {
   onReturnToCrew: () => void;
@@ -69,15 +70,38 @@ export class SurvivorMode {
   private rebindingAction: ActionId | null = null;
   /** Block gameplay input while rebinding or settings open */
   private inputBlocked = false;
+  private listenersBound = false;
 
   private onResize = (): void => this.resize();
-  private onBlur = (): void => {
-    // Clear held keys so focus loss cannot leave stuck movement/abilities.
+
+  /** Shared blur / page-hidden handling. Never auto-resumes. */
+  private handleFocusLoss(): void {
+    // Held keys and one-shot edges must never survive a focus change.
     this.codesDown.clear();
     this.edge = { mech: false, ship: false, repulsor: false, dodge: false, pause: false, mute: false };
-    if (this.state && this.state.phase === 'playing' && !this.settingsOpen) {
-      this.state.phase = 'paused';
-    }
+
+    const next = focusLossTransition({
+      phase: this.state?.phase ?? null,
+      settingsOpen: this.settingsOpen,
+      rebinding: this.rebindingAction,
+      choiceIndex: this.choiceIndex,
+      inputBlocked: this.inputBlocked,
+    });
+
+    const hadCapture = this.rebindingAction !== null;
+    this.rebindingAction = next.rebinding;
+    this.choiceIndex = next.choiceIndex;
+    this.inputBlocked = next.inputBlocked;
+    if (hadCapture) this.hud?.setRebinding(null);
+    if (this.state && next.phase) this.state.phase = next.phase;
+  }
+
+  private onBlur = (): void => this.handleFocusLoss();
+
+  private onVisibilityChange = (): void => {
+    // Acts only on going hidden — becoming visible again is not a focus event.
+    if (!shouldHandleVisibility(document.hidden === true)) return;
+    this.handleFocusLoss();
   };
   private resolveCode(e: KeyboardEvent): string {
     if (e.code && e.code !== 'Unidentified') return e.code;
@@ -240,16 +264,33 @@ export class SurvivorMode {
     this.applyUiScale(this.uiScale);
     this.hud.setUiScale(this.uiScale);
 
-    window.addEventListener('keydown', this.onKeyDown);
-    window.addEventListener('keyup', this.onKeyUp);
-    window.addEventListener('resize', this.onResize);
-    window.addEventListener('blur', this.onBlur);
-    document.addEventListener('visibilitychange', this.onBlur);
+    this.bindWindowListeners();
     this.canvas.classList.add('game-mode');
     this.resize();
 
     this.lastTime = performance.now();
     this.raf = requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /** Idempotent: re-binding after a remount can never leave duplicate listeners. */
+  private bindWindowListeners(): void {
+    this.unbindWindowListeners();
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('resize', this.onResize);
+    window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.listenersBound = true;
+  }
+
+  private unbindWindowListeners(): void {
+    if (!this.listenersBound) return;
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.listenersBound = false;
   }
 
   private confirmRestart(): void {
@@ -438,6 +479,18 @@ export class SurvivorMode {
     }
 
     this.actors?.sync(this.state, rawDt);
+    // Renderer resource counters for the F3 overlay / GPU stability procedure.
+    const info = this.renderer.info;
+    this.state.metrics.geometries = info.memory.geometries;
+    this.state.metrics.textures = info.memory.textures;
+    this.state.metrics.programs = info.programs?.length ?? 0;
+    this.state.metrics.drawCalls = info.render.calls;
+    const pools = this.actors?.poolStats();
+    if (pools) {
+      this.state.metrics.effects = pools.effects;
+      this.state.metrics.attacks = pools.attacks;
+      this.state.metrics.railPool = pools.railPool;
+    }
     SurvivorArena.followPlayer(this.camera, this.state.player.x, this.state.player.z);
     this.hud?.publish(this.state, this.showMetrics || this.fixture === 'survivor-horde', {
       settingsOpen: this.settingsOpen,
@@ -463,11 +516,7 @@ export class SurvivorMode {
     if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.raf);
-    window.removeEventListener('keydown', this.onKeyDown);
-    window.removeEventListener('keyup', this.onKeyUp);
-    window.removeEventListener('resize', this.onResize);
-    window.removeEventListener('blur', this.onBlur);
-    document.removeEventListener('visibilitychange', this.onBlur);
+    this.unbindWindowListeners();
     this.codesDown.clear();
     this.canvas.classList.remove('game-mode');
     this.hud?.dispose();

@@ -4,6 +4,8 @@ import { BOSS_DEMON, ENEMY_BY_ID, MELEE_BLOB } from '../../content/enemies';
 import { AssetLibrary, createAnimator } from '../../assets/AssetLibrary';
 import { BOSS_DEFS, HORDE, SURVIVOR, SURVIVOR_BOSS, bossDefForIndex } from './survivorContent';
 import type { SurvivorState } from './survivorState';
+import { shapeToRender } from './survivorAttackShapes';
+import { AttackShapeMesh } from './survivorShapeMesh';
 
 type Animator = ReturnType<typeof createAnimator>;
 
@@ -46,6 +48,8 @@ export class SurvivorRenderer {
     depthWrite: false,
   });
   private railPool: THREE.Mesh[] = [];
+  /** Pooled attack-shape visuals; reused across attack entities, never per-frame allocated. */
+  private attackPool: AttackShapeMesh[] = [];
   /** Persistent Protocol Cache world actor (not a short-lived effect). */
   private cacheActor: THREE.Group | null = null;
   private cacheMats: THREE.MeshBasicMaterial[] = [];
@@ -200,7 +204,45 @@ export class SurvivorRenderer {
     this.syncGunship(state, dt);
     this.syncShield(state, dt);
     this.syncEffects(state);
+    this.syncAttacks(state);
     this.syncRails(state);
+  }
+
+  /**
+   * Boss attack telegraphs and live danger zones.
+   *
+   * Geometry comes straight from the simulation's authoritative `AttackShape` through
+   * `shapeToRender` — the renderer never derives its own approximation, so what is drawn
+   * is exactly what `pointHitsShape` tests against.
+   */
+  private syncAttacks(state: SurvivorState): void {
+    let used = 0;
+    for (const a of state.attacks) {
+      if (!a.active) continue;
+      let vis = this.attackPool[used];
+      if (!vis) {
+        vis = new AttackShapeMesh();
+        this.attackPool.push(vis);
+        this.root.add(vis.mesh);
+      }
+      vis.mesh.visible = true;
+      vis.update(shapeToRender(a.shape));
+      vis.material.color.set(a.color);
+      const t = 1 - Math.max(0, Math.min(1, a.remaining / a.maxRemaining));
+      if (a.lifecycle === 'windup') {
+        // Warning: builds toward the strike so the read is unambiguous.
+        vis.material.opacity = 0.16 + t * 0.30;
+      } else if (a.lifecycle === 'active') {
+        vis.material.opacity = a.damaging ? 0.62 : 0.30;
+      } else {
+        vis.material.opacity = Math.max(0, 0.5 * (1 - t));
+      }
+      used += 1;
+    }
+    // Pool high-water mark: surplus visuals are hidden, never destroyed and rebuilt.
+    for (let i = used; i < this.attackPool.length; i += 1) {
+      this.attackPool[i]!.mesh.visible = false;
+    }
   }
 
   private syncPlayer(state: SurvivorState, dt: number): void {
@@ -885,6 +927,15 @@ export class SurvivorRenderer {
     }
   }
 
+  /** Live pool/map sizes for the GPU stability overlay. */
+  poolStats(): { effects: number; attacks: number; railPool: number } {
+    return {
+      effects: this.effects.size,
+      attacks: this.attackPool.length,
+      railPool: this.railPool.length,
+    };
+  }
+
   private basic(color: string, opacity: number, additive = false): THREE.MeshBasicMaterial {
     const key = `${color}:${opacity}:${additive ? 1 : 0}`;
     let m = this.basicMats.get(key);
@@ -1078,6 +1129,8 @@ export class SurvivorRenderer {
       if (m instanceof THREE.Material && m.userData?.owned) m.dispose();
     }
     this.railPool = [];
+    for (const vis of this.attackPool) vis.dispose();
+    this.attackPool = [];
     this.railGeo.dispose();
     this.railMat.dispose();
     this.root.clear();
