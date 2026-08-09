@@ -29,7 +29,7 @@ function parseLaunch(): {
     'survivor-mega',
     'survivor-cache',
     'survivor-shield',
-    'survivor-rockets',
+    'survivor-recall',
     'survivor-gunship',
   ];
 

@@ -18,7 +18,6 @@ import {
 import {
   formatSurvivalTime,
   getHeroLeaderboard,
-  loadRecords,
   makeRunSummary,
   recordRun,
 } from './survivorRecords';

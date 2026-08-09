@@ -19,6 +19,12 @@ import type {
   SurvivorProjectile,
   SurvivorState,
 } from './survivorState';
+import {
+  expandingRing,
+  facingLine,
+  pointHitsShape,
+  type AttackShape,
+} from './survivorAttackShapes';
 
 export type BossSimApi = {
   rng: (state: SurvivorState) => number;
@@ -55,7 +61,7 @@ export type BossSimApi = {
     life: number,
     damage: number,
     color: string,
-    opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd'>>,
+    opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd' | 'sourceBossId'>>,
   ) => void;
   clampArena: (x: number, z: number, r: number) => { x: number; z: number };
   segmentHit: (
@@ -68,6 +74,10 @@ export type BossSimApi = {
     rad: number,
   ) => boolean;
 };
+
+function hitsShape(state: SurvivorState, shape: AttackShape): boolean {
+  return pointHitsShape(state.player.x, state.player.z, SURVIVOR.playerRadius, shape);
+}
 
 type PatternCfg = {
   windup: number;
@@ -414,9 +424,8 @@ function updateActive(
       const maxR = cfg.maxRadius ?? 8;
       const t = Math.min(1, b.patternElapsed / cfg.active);
       b.telegraphR = maxR * t;
-      const d = Math.hypot(p.x - b.x, p.z - b.z);
-      // Ring band collision once per crossing throttle
-      if (Math.abs(d - b.telegraphR) < 0.85 && b.patternHitCd <= 0) {
+      // Shared expanding ring: same band as telegraph radius
+      if (b.patternHitCd <= 0 && hitsShape(state, expandingRing(b.x, b.z, b.telegraphR, 0.85))) {
         api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
         b.patternHitCd = 0.35;
       }
@@ -427,17 +436,8 @@ function updateActive(
       const len = cfg.length ?? 20;
       const width = cfg.width ?? 1.25;
       if (b.patternHitCd <= 0) {
-        if (
-          api.segmentHit(
-            b.lockX || b.x,
-            b.lockZ || b.z,
-            (b.lockX || b.x) + b.lockFx * len,
-            (b.lockZ || b.z) + b.lockFz * len,
-            p.x,
-            p.z,
-            SURVIVOR.playerRadius + width * 0.45,
-          )
-        ) {
+        const shape = facingLine(b.lockX || b.x, b.lockZ || b.z, b.lockFx, b.lockFz, len, width * 0.45);
+        if (hitsShape(state, shape)) {
           api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
           b.patternHitCd = 0.4;
         }
@@ -560,7 +560,7 @@ function updateActive(
           cfg.life ?? 6,
           (cfg.damage ?? 10) * scale * 0.55,
           '#bb44ff',
-          { owner: 'enemy', armTimer: 0.6, tickCd: 0 },
+          { owner: 'enemy', armTimer: 0.6, tickCd: 0, sourceBossId: b.id },
         );
       }
       if (b.timer <= 0) beginRecover(state, b, pattern, api);
@@ -570,10 +570,12 @@ function updateActive(
       const maxR = cfg.maxRadius ?? 10;
       const t = Math.min(1, b.patternElapsed / cfg.active);
       b.telegraphR = maxR * t;
-      const d = Math.hypot(p.x - b.x, p.z - b.z);
-      // Safe inner core: only ring damages
-      const band = 0.9;
-      if (Math.abs(d - b.telegraphR) < band && d > 1.6 && b.patternHitCd <= 0) {
+      // Shared ring band — safe core inside (inner - playerRadius)
+      if (
+        b.patternHitCd <= 0 &&
+        b.telegraphR > 1.6 &&
+        hitsShape(state, expandingRing(b.x, b.z, b.telegraphR, 0.9))
+      ) {
         api.damagePlayer(state, (cfg.damage ?? 18) * scale, 'boss');
         b.patternHitCd = 0.4;
       }
@@ -590,9 +592,7 @@ function updateActive(
           const a = base + i * 0.55;
           const fx = Math.sin(a);
           const fz = Math.cos(a);
-          if (
-            api.segmentHit(b.x, b.z, b.x + fx * len, b.z + fz * len, p.x, p.z, SURVIVOR.playerRadius + width * 0.45)
-          ) {
+          if (hitsShape(state, facingLine(b.x, b.z, fx, fz, len, width * 0.45))) {
             api.damagePlayer(state, (cfg.damage ?? 14) * scale, 'boss');
             // Bounded slow — never below 72%
             p.slowMul = Math.max(0.72, 0.75);
@@ -625,6 +625,7 @@ function updateActive(
           owner: 'enemy',
           armTimer: 0.05,
           tickCd: 0,
+          sourceBossId: b.id,
         });
       }
       if (!b.patternTriggered) {
@@ -655,11 +656,9 @@ function updateActive(
         length: len,
         width: width * 1.2,
       });
-      if (b.patternHitCd <= 0) {
-        if (api.segmentHit(b.x, b.z, b.x + fx * len, b.z + fz * len, p.x, p.z, SURVIVOR.playerRadius + width * 0.4)) {
-          api.damagePlayer(state, (cfg.damage ?? 16) * scale, 'boss');
-          b.patternHitCd = 0.32;
-        }
+      if (b.patternHitCd <= 0 && hitsShape(state, facingLine(b.x, b.z, fx, fz, len, width * 0.4))) {
+        api.damagePlayer(state, (cfg.damage ?? 16) * scale, 'boss');
+        b.patternHitCd = 0.32;
       }
       if (b.timer <= 0) beginRecover(state, b, pattern, api);
       break;
@@ -700,6 +699,7 @@ function updateActive(
           api.spawnHazard(state, 'spore', z.x, z.z, z.r * 0.7, 2.5, (cfg.damage ?? 12) * scale * 0.3, '#ddaa44', {
             owner: 'enemy',
             armTimer: 0.1,
+            sourceBossId: b.id,
           });
         }
       }
@@ -734,9 +734,12 @@ function updateActive(
       } else {
         const shockT = (b.patternElapsed - pullEnd) / (cfg.active - pullEnd);
         b.telegraphR = (cfg.maxRadius ?? 11) * Math.min(1, shockT);
-        const d = Math.hypot(p.x - b.lockX, p.z - b.lockZ);
-        // Safe core inside 2.2
-        if (Math.abs(d - b.telegraphR) < 1.0 && d > 2.2 && b.patternHitCd <= 0) {
+        // Shared expanding ring with safe core (inner band starts ~2.2)
+        if (
+          b.patternHitCd <= 0 &&
+          b.telegraphR > 2.2 &&
+          hitsShape(state, expandingRing(b.lockX, b.lockZ, b.telegraphR, 1.0))
+        ) {
           api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
           b.patternHitCd = 0.45;
         }
@@ -797,11 +800,26 @@ export function cancelBossPattern(state: SurvivorState, b: SurvivorBoss): void {
   b.patternTriggered = false;
   b.patternElapsed = 0;
   b.zones = [];
-  // Deactivate projectiles from this boss
+  // Deactivate projectiles owned by this boss (leave other bosses' projectiles alone).
   for (const proj of state.projectiles) {
-    if (proj.active && proj.sourceBossId === b.id && proj.kind !== 'boss-orb') {
-      // allow lingering orbs briefly; cancel beams/fan
-      if (proj.kind === 'boss-fan' || proj.kind === 'enemy') proj.active = false;
+    if (proj.active && proj.sourceBossId === b.id) {
+      if (proj.kind === 'boss-fan' || proj.kind === 'enemy' || proj.kind === 'boss-orb') {
+        proj.active = false;
+      }
+    }
+  }
+  // Hazards: immediately harmless, short visual fade when owned by this boss.
+  for (const h of state.hazards) {
+    if (h.active && h.sourceBossId === b.id) {
+      h.damage = 0;
+      h.life = Math.min(h.life, 0.35);
+    }
+  }
+  // Clear pending boss telegraphs near this boss (effects are global; lifetime-capped).
+  for (const e of state.effects) {
+    if (e.kind === 'telegraph' || e.kind === 'beam') {
+      const d = Math.hypot(e.x - b.x, e.z - b.z);
+      if (d < 28) e.life = Math.min(e.life, 0.12);
     }
   }
 }

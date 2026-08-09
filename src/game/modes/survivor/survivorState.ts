@@ -64,7 +64,6 @@ export type ProjectileKind =
   | 'bolt'
   | 'drone'
   | 'rocket'
-  | 'protocol-rocket'
   | 'enemy'
   | 'bioplasma'
   | 'boss-orb'
@@ -120,6 +119,8 @@ export interface SurvivorHazard {
   owner: 'player' | 'enemy';
   tickCd: number;
   armTimer: number;
+  /** Owning boss for cleanup; 0 = none. */
+  sourceBossId: number;
 }
 
 export interface SurvivorPickup {
@@ -333,12 +334,21 @@ export interface SurvivorState {
     /** Shared boss body/charge contact throttle. */
     bossContactCd: number;
   };
-  /** Pressure-wave director. */
+  /**
+   * Pressure director:
+   * normal → telegraph → surge → recovery → normal
+   */
   surge: {
-    nextAt: number;
-    activeUntil: number;
+    phase: 'normal' | 'telegraph' | 'surge' | 'recovery';
     kind: string;
+    phaseEndsAt: number;
+    nextSurgeAt: number;
+    /** Geometry hint for spawns (edge index / pair). */
+    edgeA: number;
+    edgeB: number;
   };
+  /** Ordered FIFO of deferred boss schedule indices (1-based). */
+  pendingBossIndices: number[];
   weapons: SurvivorWeaponSlot[];
   /** Ordinary + prototype weapons (prototypes flagged on slot). */
   passives: Partial<Record<PassiveId, number>>;
@@ -386,8 +396,21 @@ export interface SurvivorState {
     facingZ: number;
     /** True while damage pulses are active. */
     firing: boolean;
+    /** Enemy/boss entity IDs already struck once this flyby. */
+    hitIds: number[];
+    /** Temporary spawn suppression after corridor clear. */
+    spawnSuppress: number;
   };
+  /** @deprecated Protocol rocket removed; ordinary weapon rocket remains. */
   rocketProtocol: { active: boolean; remaining: number; fireCd: number; potency: number };
+  /** Gravitic Recall: energy orb ids mid-pull. */
+  recall: {
+    active: boolean;
+    t: number;
+    duration: number;
+    orbIds: number[];
+    totalXp: number;
+  };
 
   enemies: SurvivorEnemy[];
   projectiles: SurvivorProjectile[];
@@ -398,6 +421,7 @@ export interface SurvivorState {
   /** Concurrent bosses (cap SURVIVOR.maxSimultaneousBosses). */
   bosses: SurvivorBoss[];
   /** Owed bosses that could not spawn due to cap — never silently dropped. */
+  /** @deprecated Use pendingBossIndices. Kept 0 for migration safety. */
   breachStacks: number;
   nextBossIndex: number;
   nextBossTime: number;
@@ -620,10 +644,14 @@ export function createSurvivorState(
     protocolActive: [],
     protocolChoices: [],
     surge: {
-      nextAt: SURVIVOR.surgeInterval,
-      activeUntil: 0,
+      phase: 'normal',
       kind: '',
+      phaseEndsAt: 0,
+      nextSurgeAt: SURVIVOR.surgeInterval,
+      edgeA: 0,
+      edgeB: 2,
     },
+    pendingBossIndices: [],
     cache: {
       active: false,
       x: 0,
@@ -660,8 +688,11 @@ export function createSurvivorState(
       facingX: 0,
       facingZ: 1,
       firing: false,
+      hitIds: [],
+      spawnSuppress: 0,
     },
     rocketProtocol: { active: false, remaining: 0, fireCd: 0, potency: 1 },
+    recall: { active: false, t: 0, duration: 1.25, orbIds: [], totalXp: 0 },
     enemies: [],
     projectiles: [],
     hazards: [],
@@ -780,28 +811,23 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.player.shieldMax = 80;
     state.player.shieldTime = 60;
     state.player.invuln = 0;
-  } else if (fixture === 'survivor-rockets') {
+  } else if (fixture === 'survivor-recall') {
     state.time = 90;
     state.player.invuln = 30;
-    state.weapons = []; // silence auto-weapons; Protocol rockets only
+    state.weapons = [];
     state.xpNext = 99999;
-    state.rocketProtocol.active = true;
-    state.rocketProtocol.remaining = 15;
-    state.rocketProtocol.fireCd = 0.05;
-    state.rocketProtocol.potency = 1.25;
-    state.protocolActive = [{ id: 'rocket-barrage', remaining: 15, potency: 1.25 }];
-    for (let i = 0; i < 8; i += 1) {
-      const e = emptyEnemy();
-      e.id = 9100 + i;
-      e.alive = true;
-      e.x = Math.sin(i) * 4;
-      e.z = 6 + Math.cos(i) * 3;
-      e.health = 60;
-      e.maxHealth = 60;
-      e.defId = 'basic';
-      e.role = 'basic';
-      e.xp = 0;
-      state.enemies.push(e);
+    // Scatter energy across the arena for Gravitic Recall.
+    for (let i = 0; i < 18; i += 1) {
+      state.pickups.push({
+        id: 9200 + i,
+        kind: 'xp',
+        x: Math.sin(i * 1.7) * 18,
+        z: Math.cos(i * 1.3) * 18,
+        value: 4 + (i % 5),
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
     }
   } else if (fixture === 'survivor-gunship') {
     state.time = 90;
@@ -841,6 +867,8 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       facingX: 0,
       facingZ: 1,
       firing: false,
+      hitIds: [],
+      spawnSuppress: 0,
     };
   } else if (fixture === 'survivor-boss') {
     // Just before first endless boss at 2:00 with a representative mid-run build

@@ -71,6 +71,14 @@ export class SurvivorMode {
   private inputBlocked = false;
 
   private onResize = (): void => this.resize();
+  private onBlur = (): void => {
+    // Clear held keys so focus loss cannot leave stuck movement/abilities.
+    this.codesDown.clear();
+    this.edge = { mech: false, ship: false, repulsor: false, dodge: false, pause: false, mute: false };
+    if (this.state && this.state.phase === 'playing' && !this.settingsOpen) {
+      this.state.phase = 'paused';
+    }
+  };
   private resolveCode(e: KeyboardEvent): string {
     if (e.code && e.code !== 'Unidentified') return e.code;
     const k = e.key;
@@ -235,6 +243,8 @@ export class SurvivorMode {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onBlur);
     this.canvas.classList.add('game-mode');
     this.resize();
 
@@ -456,6 +466,9 @@ export class SurvivorMode {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onBlur);
+    this.codesDown.clear();
     this.canvas.classList.remove('game-mode');
     this.hud?.dispose();
     this.actors?.dispose();

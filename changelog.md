@@ -10,13 +10,64 @@ The version names below are retrospective product milestones unless a balance ve
 
 ### Remaining follow-up
 
-- Make every boss telegraph match its real collision shape and add complete browser fixtures for each unique pattern.
-- Finish boss-owned cleanup for all hazard/zone types across phase transitions and fixture resets.
-- Ordered boss index backlog and reserved hostile attack capacity.
-- Clear held input on window blur/focus loss for all remappable actions.
+- Hard GPU draw-call / memory A/B metrics and code splitting under long browser sessions.
 - Full run-balance telemetry export (weapon DPS, death source, etc.).
-- Hard GPU draw-call / memory A/B metrics and code splitting.
-- Deeper weapon L1–L5 effective-power rebalance across all scenarios.
+- Optional deeper cone telegraph mesh for fan patterns (collision already uses shared cone math).
+
+## [2.2.0] — 2026-08-09 — Containment Protocol balance and systems release
+
+Balance line: `endless-2.2.0`. New leaderboard partition; historical `endless-2.1.0` (and older) records retained but not mixed into the default current-version board.
+
+### 1. Enemy speeds and opening composition
+
+- Restored controllable opening speeds (basic 3.30, mush 3.10, fast 4.25, spiky 4.35, flyer 3.90, bee 4.05, ghost 4.00, bruiser 2.85, elite 3.70, miniboss 3.10).
+- Global speed curve: `1 + 0.016*m` through 15m, then `+0.008/m`, Collapse steps after 30m, hard cap ~1.70.
+- Gradual composition: fodder 0–30s; sprinters ~8–10% after 30s; flankers after 60s; hunters after 2m; bruisers 1–2m; elites after 90s gate.
+- Elite/hunter lunges: real windup (no move/damage) → lock direction → short dash → recovery.
+
+### 2. Protocol Caches redesigned
+
+- **Aegis Barrier:** `round(20 + 2*minutes + 0.08*maxHP)`, 35s normal / 45s enhanced, 1.35× enhanced amount, replace-not-stack. Dynamic card shows shield + duration.
+- **Gunship Flyby:** once-per-target corridor strike; guaranteed ordinary kills; ~80% miniboss max HP; ~7% boss / ~3.5% Mega; spawn suppress ~1.2s after clear.
+- **Gravitic Recall** replaces Protocol Rocket Barrage (ordinary Rutherford `rocket` weapon untouched). Pulls active energy orbs only; conserves XP; dynamic card value.
+- Protocol Rocket fixtures/state removed from choice set.
+
+### 3. Pressure director finished
+
+- States: normal → telegraph → surge → recovery → normal (one active surge).
+- Surge kinds: sprinters, pincer, bruiser, encircle, elite (gated), flood — each changes composition and/or spawn geometry.
+- Recovery ~10s at ~60% spawn rate; forced elites suppressed.
+- World-edge telegraphs; no new HUD clutter.
+
+### 4. Boss backlog FIFO
+
+- Replaced lossy `breachStacks` count with `pendingBossIndices: number[]`.
+- Exact one-based indices enqueued; FIFO drain; Mega index 5 retains Mega status.
+- HUD backlog derives from queue length.
+
+### 5. Infinite-run GPU lifecycle
+
+- Effect geometries/materials disposed on expiry (`ownsGeometry` / owned mats).
+- Rails use pooled shared unit geometry + scaled meshes; dispose pool on mode teardown.
+- Shared materials no longer poisoned by per-effect opacity fades.
+
+### 6. Boss telegraph / collision
+
+- Shared `survivorAttackShapes.ts` (circle, ring, line, cone) drives hits and render descriptors.
+- Boss patterns use shared shapes for ring/line/beam collisions.
+- Hazards carry `sourceBossId`; cancel cleans only that boss’s projectiles/hazards/telegraphs.
+- Phase interrupts complete attack counters cleanly.
+
+### 7. Weapon / hero balance
+
+- Deterministic combat benchmark harness (`survivorWeaponBenchmark.ts`) across five scenarios.
+- Starter weighted output within ~±10% mean (Bee/microdrone, Fitzwilliam/rail, Fortunato/bioplasma, Rutherford/rocket).
+- Rocket densest-point targeting fixed (no longer averages sparse ring to origin).
+- Overclock remains +7% additive damage per level past L5.
+
+### 8. Focus loss
+
+- `window.blur` + `visibilitychange` clear held keys and pause active runs.
 
 ## [2.1.0] — 2026-08-09 — Melee horde redesign and presentation polish
 

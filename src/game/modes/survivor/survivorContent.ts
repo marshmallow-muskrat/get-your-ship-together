@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.1.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.2.0';
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.07;
@@ -63,10 +63,13 @@ export const SURVIVOR = {
   pickupReserveImportant: 24,
   /** Seconds after taking damage before Nanite Bleed resumes. */
   regenDamagePause: 3.0,
-  /** Surge director interval (seconds). */
-  surgeInterval: 50,
+  /** Pressure director timing (seconds). */
+  surgeInterval: 52,
+  surgeTelegraph: 1.1,
   surgeDuration: 10,
-  surgeRecovery: 14,
+  surgeRecovery: 10,
+  /** Elite specialist earliest appearance (seconds). */
+  eliteGateTime: 90,
   /** Containment Collapse begins at this survival time (seconds). */
   collapseStart: 30 * 60,
   collapseStep: 120,
@@ -88,7 +91,10 @@ export const SURVIVOR = {
   cacheOfferDuration: 0,
   /** Collection radius for Protocol Cache (world units). */
   cacheCollectRadius: 3.25,
-  shieldDuration: 60,
+  /** Normal Aegis duration (enhanced is longer). */
+  shieldDuration: 35,
+  shieldDurationEnhanced: 45,
+  shieldEnhancedMul: 1.35,
   megaEvery: 5,
   megaHealthMul: 2.2,
   megaDamageMul: 1.25,
@@ -256,11 +262,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Homing drones that hunt nearby threats.',
     color: '#f5ae42',
     levels: [
-      { level: 1, label: 'Microdrone I', damage: 22, cadence: 1.8, count: 3, speed: 11, life: 2.2, radius: 0.18 },
-      { level: 2, label: 'Microdrone II', damage: 26, cadence: 1.6, count: 4, speed: 12, life: 2.3, radius: 0.18 },
-      { level: 3, label: 'Swarm Cadre', damage: 28, cadence: 1.45, count: 5, speed: 13, life: 2.4, radius: 0.2 },
-      { level: 4, label: 'Hunter Net', damage: 32, cadence: 1.3, count: 6, speed: 14, life: 2.5, radius: 0.2 },
-      { level: 5, label: 'Hive Overdrive', damage: 38, cadence: 1.15, count: 8, speed: 15, life: 2.6, radius: 0.22 },
+      // Reliability hero: higher raw shot power so homing does not also under-damage.
+      { level: 1, label: 'Microdrone I', damage: 48, cadence: 1.28, count: 3, speed: 14, life: 2.45, radius: 0.2 },
+      { level: 2, label: 'Microdrone II', damage: 54, cadence: 1.18, count: 4, speed: 14.5, life: 2.5, radius: 0.2 },
+      { level: 3, label: 'Swarm Cadre', damage: 58, cadence: 1.1, count: 5, speed: 15, life: 2.55, radius: 0.21 },
+      { level: 4, label: 'Hunter Net', damage: 66, cadence: 1.02, count: 6, speed: 15.5, life: 2.65, radius: 0.22 },
+      { level: 5, label: 'Hive Overdrive', damage: 76, cadence: 0.92, count: 8, speed: 16.5, life: 2.8, radius: 0.23 },
     ],
   },
   rail: {
@@ -269,12 +276,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Piercing line that cuts through dense packs.',
     color: '#ff7ab8',
     levels: [
-      // L1 tuned for early reliability: faster cycle, wider beam, higher damage
-      { level: 1, label: 'Rail Lance I', damage: 72, cadence: 1.75, count: 1, width: 0.62, length: 15 },
-      { level: 2, label: 'Rail Lance II', damage: 88, cadence: 1.6, count: 1, width: 0.7, length: 16 },
-      { level: 3, label: 'Twin Rails', damage: 88, cadence: 1.5, count: 2, width: 0.62, length: 16 },
-      { level: 4, label: 'Wide Beam', damage: 108, cadence: 1.4, count: 2, width: 0.82, length: 17 },
-      { level: 5, label: 'Lance Battery', damage: 128, cadence: 1.25, count: 3, width: 0.75, length: 18 },
+      // L1: reliable early pierce; L3/L5 add rails as major breakpoints.
+      { level: 1, label: 'Rail Lance I', damage: 110, cadence: 1.48, count: 1, width: 0.72, length: 16 },
+      { level: 2, label: 'Rail Lance II', damage: 128, cadence: 1.38, count: 1, width: 0.78, length: 16.5 },
+      { level: 3, label: 'Twin Rails', damage: 118, cadence: 1.3, count: 2, width: 0.68, length: 17 },
+      { level: 4, label: 'Wide Beam', damage: 138, cadence: 1.22, count: 2, width: 0.9, length: 17.5 },
+      { level: 5, label: 'Lance Battery', damage: 152, cadence: 1.1, count: 3, width: 0.8, length: 18.5 },
     ],
   },
   gravity: {
@@ -283,11 +290,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Circular field that damages and slows.',
     color: '#9b7bff',
     levels: [
-      { level: 1, label: 'Gravity Pulse I', damage: 40, cadence: 2.4, count: 1, radius: 2.6, life: 0.35 },
-      { level: 2, label: 'Gravity Pulse II', damage: 52, cadence: 2.2, count: 1, radius: 3.0, life: 0.4 },
-      { level: 3, label: 'Deep Well', damage: 60, cadence: 2.0, count: 1, radius: 3.5, life: 0.45 },
-      { level: 4, label: 'Double Pulse', damage: 60, cadence: 1.85, count: 2, radius: 3.4, life: 0.4 },
-      { level: 5, label: 'Event Horizon', damage: 78, cadence: 1.65, count: 2, radius: 4.0, life: 0.5 },
+      { level: 1, label: 'Gravity Pulse I', damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 0.35 },
+      { level: 2, label: 'Gravity Pulse II', damage: 56, cadence: 2.05, count: 1, radius: 3.1, life: 0.4 },
+      { level: 3, label: 'Deep Well', damage: 66, cadence: 1.9, count: 1, radius: 3.55, life: 0.45 },
+      { level: 4, label: 'Double Pulse', damage: 64, cadence: 1.75, count: 2, radius: 3.4, life: 0.4 },
+      { level: 5, label: 'Event Horizon', damage: 82, cadence: 1.55, count: 2, radius: 4.1, life: 0.5 },
     ],
   },
   rocket: {
@@ -296,12 +303,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Delayed area strikes on dense clusters.',
     color: '#ff8a4a',
     levels: [
-      // L1: shorter arm time (life), faster cadence, stronger splash clusters
-      { level: 1, label: 'Rocket Barrage I', damage: 58, cadence: 2.05, count: 4, radius: 1.55, life: 0.38 },
-      { level: 2, label: 'Rocket Barrage II', damage: 68, cadence: 1.9, count: 5, radius: 1.65, life: 0.36 },
-      { level: 3, label: 'Salvo', damage: 74, cadence: 1.75, count: 6, radius: 1.75, life: 0.34 },
-      { level: 4, label: 'Cluster', damage: 82, cadence: 1.6, count: 7, radius: 1.85, life: 0.32 },
-      { level: 5, label: 'Carpet Fire', damage: 94, cadence: 1.45, count: 9, radius: 2.0, life: 0.3 },
+      // Cluster specialist: delayed arm tradeoff; strong in packs, fair on singles.
+      { level: 1, label: 'Rocket Barrage I', damage: 52, cadence: 2.1, count: 3, radius: 1.5, life: 0.36 },
+      { level: 2, label: 'Rocket Barrage II', damage: 60, cadence: 1.95, count: 4, radius: 1.6, life: 0.34 },
+      { level: 3, label: 'Salvo', damage: 66, cadence: 1.8, count: 5, radius: 1.7, life: 0.32 },
+      { level: 4, label: 'Cluster', damage: 74, cadence: 1.65, count: 6, radius: 1.8, life: 0.3 },
+      { level: 5, label: 'Carpet Fire', damage: 86, cadence: 1.48, count: 8, radius: 1.95, life: 0.28 },
     ],
   },
   bioplasma: {
@@ -313,72 +320,72 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 1,
         label: 'Bio-Plasma Glob I',
-        damage: 38,
-        cadence: 0.78,
+        damage: 34,
+        cadence: 0.82,
         count: 1,
         speed: 20,
         radius: 0.32,
         life: 1.45,
-        splash: 1.7,
-        puddleRadius: 1.45,
-        puddleLife: 2.1,
-        puddleDamage: 12,
+        splash: 1.55,
+        puddleRadius: 1.3,
+        puddleLife: 1.45,
+        puddleDamage: 4.5,
       },
       {
         level: 2,
         label: 'Bio-Plasma Glob II',
-        damage: 46,
-        cadence: 0.74,
+        damage: 40,
+        cadence: 0.76,
         count: 1,
         speed: 21,
         radius: 0.34,
         life: 1.5,
-        splash: 1.9,
-        puddleRadius: 1.55,
-        puddleLife: 2.3,
-        puddleDamage: 13,
+        splash: 1.7,
+        puddleRadius: 1.4,
+        puddleLife: 1.6,
+        puddleDamage: 5.5,
       },
       {
         level: 3,
         label: 'Corrosive Glob',
-        damage: 50,
-        cadence: 0.7,
+        damage: 46,
+        cadence: 0.72,
         count: 1,
         speed: 21.5,
         radius: 0.36,
         life: 1.55,
-        splash: 2.0,
-        puddleRadius: 1.85,
-        puddleLife: 2.9,
-        puddleDamage: 15,
+        splash: 1.85,
+        puddleRadius: 1.6,
+        puddleLife: 1.9,
+        puddleDamage: 7,
       },
       {
         level: 4,
         label: 'Twin Globs',
-        damage: 48,
+        damage: 42,
         cadence: 0.68,
         count: 2,
         speed: 22,
         radius: 0.34,
         life: 1.55,
-        splash: 1.85,
-        puddleRadius: 1.65,
-        puddleLife: 2.5,
-        puddleDamage: 14,
+        splash: 1.7,
+        puddleRadius: 1.45,
+        puddleLife: 1.7,
+        puddleDamage: 6,
       },
       {
         level: 5,
         label: 'Virulent Cascade',
-        damage: 54,
+        damage: 50,
         cadence: 0.62,
         count: 2,
         speed: 22.5,
         radius: 0.36,
         life: 1.6,
-        splash: 2.05,
-        puddleRadius: 2.1,
-        puddleLife: 3.2,
-        puddleDamage: 17,
+        splash: 1.95,
+        puddleRadius: 1.75,
+        puddleLife: 2.1,
+        puddleDamage: 8.5,
         bounce: 1,
         split: 1,
       },
@@ -831,7 +838,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'fodder',
     visual: MELEE_BLOB,
     xp: 3,
-    baseSpeed: 4.0,
+    baseSpeed: 3.3,
     contactDamage: 8,
     healthScale: 0.85,
   },
@@ -840,7 +847,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'fodder',
     visual: MELEE_MUSHNUB,
     xp: 3,
-    baseSpeed: 3.9,
+    baseSpeed: 3.1,
     contactDamage: 8,
     healthScale: 0.9,
   },
@@ -849,7 +856,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'sprinter',
     visual: MELEE_ALIEN,
     xp: 4,
-    baseSpeed: 5.6,
+    baseSpeed: 4.25,
     contactDamage: 9,
     healthScale: 0.75,
   },
@@ -858,7 +865,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'sprinter',
     visual: MELEE_SPIKY,
     xp: 5,
-    baseSpeed: 5.7,
+    baseSpeed: 4.35,
     contactDamage: 10,
     healthScale: 0.8,
   },
@@ -868,7 +875,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'flanker',
     visual: RANGED_GOLELING,
     xp: 6,
-    baseSpeed: 4.85,
+    baseSpeed: 3.9,
     contactDamage: 10,
     healthScale: 1.0,
   },
@@ -877,7 +884,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'hunter',
     visual: RANGED_GHOST,
     xp: 6,
-    baseSpeed: 5.0,
+    baseSpeed: 4.0,
     contactDamage: 11,
     healthScale: 1.05,
   },
@@ -886,7 +893,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'flanker',
     visual: RANGED_ARMABEE,
     xp: 5,
-    baseSpeed: 5.2,
+    baseSpeed: 4.05,
     contactDamage: 9,
     healthScale: 0.7,
   },
@@ -895,7 +902,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'bruiser',
     visual: MELEE_ORC,
     xp: 12,
-    baseSpeed: 3.2,
+    baseSpeed: 2.85,
     contactDamage: 16,
     healthScale: 2.4,
   },
@@ -904,7 +911,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'elite',
     visual: RANGED_SQUIDLE,
     xp: 28,
-    baseSpeed: 4.7,
+    baseSpeed: 3.7,
     contactDamage: 18,
     healthScale: 3.2,
     isElite: true,
@@ -914,7 +921,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'miniboss',
     visual: MELEE_ORC,
     xp: 120,
-    baseSpeed: 3.6,
+    baseSpeed: 3.1,
     contactDamage: 20,
     healthScale: 1,
     isElite: true,
@@ -1015,11 +1022,12 @@ export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
     1 + 0.12 * m + 0.02 * late * late + collapseSteps * 0.08;
   const damageMul =
     1 + 0.06 * m + 0.03 * Math.max(0, m - 10) + collapseSteps * 0.07;
-  // Opening ~1.10, ~1.22 @5m, ~1.35 @10m, ~1.50 @16m, ~1.65 late/collapse
-  let speedMul = 1.1 + 0.024 * m;
-  if (m > 10) speedMul = 1.35 + 0.018 * (m - 10);
-  if (m > 16) speedMul = 1.5 + 0.012 * (m - 16);
-  speedMul = Math.min(1.85, speedMul + collapseSteps * 0.025);
+  // Controllable opening: 1.00 @0, ~1.08 @5, ~1.16 @10, ~1.24 @15, ~1.36 @30 before collapse.
+  // Through 15m: 1 + 0.016*m; after 15m: slower slope +0.008/m; collapse steps add after 30m.
+  let speedMul: number;
+  if (m <= 15) speedMul = 1 + 0.016 * m;
+  else speedMul = 1 + 0.016 * 15 + 0.008 * (m - 15);
+  speedMul = Math.min(1.7, speedMul + collapseSteps * 0.02);
   const attackRateMul = Math.min(2.1, 1 + 0.03 * m + collapseSteps * 0.045);
   // Density curve toward 160 cap
   let targetActive: number;
@@ -1104,63 +1112,57 @@ export function bossTimeForIndex(index: number): number {
 }
 
 /**
- * Opening sequence + late composition.
- * 0–15s fodder; 15–30 sprinters; 30–45 flankers; 60+ bruisers; late advanced melee.
+ * Gradual opening composition (melee only).
+ * 0–30s fodder only; sprinters ~8–10% after 30s; hunters after 2m; elites after eliteGateTime.
  */
 export function compositionAt(t: number): Array<{ id: string; weight: number }> {
-  if (t < 15) return [{ id: 'basic', weight: 8 }, { id: 'mush', weight: 3 }];
-  if (t < 30)
-    return [
-      { id: 'basic', weight: 6 },
-      { id: 'mush', weight: 2 },
-      { id: 'fast', weight: 3 },
-      { id: 'spiky', weight: 1 },
-    ];
-  if (t < 45)
-    return [
-      { id: 'basic', weight: 4 },
-      { id: 'fast', weight: 3 },
-      { id: 'flyer', weight: 3 },
-      { id: 'bee', weight: 2 },
-    ];
+  if (t < 30) return [{ id: 'basic', weight: 8 }, { id: 'mush', weight: 3 }];
   if (t < 60)
     return [
-      { id: 'basic', weight: 3 },
-      { id: 'fast', weight: 3 },
-      { id: 'flyer', weight: 2 },
-      { id: 'ghost', weight: 2 },
-      { id: 'spiky', weight: 2 },
+      { id: 'basic', weight: 8 },
+      { id: 'mush', weight: 3 },
+      { id: 'fast', weight: 1 },
     ];
   if (t < 90)
     return [
-      { id: 'basic', weight: 3 },
-      { id: 'fast', weight: 3 },
-      { id: 'flyer', weight: 2 },
-      { id: 'bruiser', weight: 2 },
-      { id: 'ghost', weight: 1 },
+      { id: 'basic', weight: 6 },
+      { id: 'mush', weight: 2 },
+      { id: 'fast', weight: 2 },
+      { id: 'spiky', weight: 1 },
+      { id: 'flyer', weight: 1 },
+    ];
+  if (t < 120)
+    return [
+      { id: 'basic', weight: 5 },
+      { id: 'mush', weight: 2 },
+      { id: 'fast', weight: 2 },
+      { id: 'spiky', weight: 1 },
+      { id: 'flyer', weight: 1 },
+      { id: 'bee', weight: 1 },
+      { id: 'bruiser', weight: 1 },
     ];
   if (t < 180)
     return [
-      { id: 'basic', weight: 3 },
-      { id: 'fast', weight: 3 },
+      { id: 'basic', weight: 4 },
+      { id: 'mush', weight: 2 },
+      { id: 'fast', weight: 2 },
       { id: 'spiky', weight: 2 },
       { id: 'flyer', weight: 2 },
-      { id: 'ghost', weight: 2 },
+      { id: 'ghost', weight: 1 },
       { id: 'bruiser', weight: 2 },
-      { id: 'elite', weight: 0.6 },
+      { id: 'elite', weight: 0.4 },
     ];
   if (t < 480)
     return [
       { id: 'basic', weight: 2 },
       { id: 'fast', weight: 3 },
       { id: 'spiky', weight: 2 },
-      { id: 'flyer', weight: 3 },
+      { id: 'flyer', weight: 2 },
       { id: 'ghost', weight: 2 },
       { id: 'bee', weight: 2 },
       { id: 'bruiser', weight: 3 },
-      { id: 'elite', weight: 1.5 },
+      { id: 'elite', weight: 1.4 },
     ];
-  // Late / Collapse — advanced melee dominance
   return [
     { id: 'basic', weight: 1 },
     { id: 'fast', weight: 3 },
@@ -1169,7 +1171,7 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
     { id: 'ghost', weight: 3 },
     { id: 'bee', weight: 2 },
     { id: 'bruiser', weight: 3 },
-    { id: 'elite', weight: 3.5 },
+    { id: 'elite', weight: 3.2 },
   ];
 }
 
@@ -1214,7 +1216,7 @@ export const TEMP_BUFFS: TempBuffDef[] = [
   { id: 'thruster-surge', title: 'Thruster Surge', body: 'Temporary move-speed boost.' },
 ];
 
-export type ProtocolId = 'aegis-barrier' | 'rocket-barrage' | 'gunship-flyby';
+export type ProtocolId = 'aegis-barrier' | 'gunship-flyby' | 'gravitic-recall';
 
 export interface ProtocolDef {
   id: ProtocolId;
@@ -1227,27 +1229,34 @@ export const PROTOCOLS: ProtocolDef[] = [
   {
     id: 'aegis-barrier',
     title: 'Aegis Barrier',
-    body: 'Deploy a scalable shield that absorbs incoming damage first.',
-    duration: 60,
-  },
-  {
-    id: 'rocket-barrage',
-    title: 'Rocket Barrage',
-    body: 'Call a temporary rocket battery that prioritizes bosses (~15s).',
-    duration: 15,
+    body: 'Deploy a barrier that absorbs damage before integrity.',
+    duration: 35,
   },
   {
     id: 'gunship-flyby',
     title: 'Gunship Flyby',
-    body: 'Your ship strafes the arena, raining fire along a telegraphed lane.',
+    body: 'Your ship strafes a lane, guaranteeing kills on ordinary enemies.',
     duration: 6,
+  },
+  {
+    id: 'gravitic-recall',
+    title: 'Gravitic Recall',
+    body: 'Pull all energy on the arena to you over ~1.2s.',
+    duration: 1.4,
   },
 ];
 
-/** Shield points granted by Aegis Barrier at acquisition time. */
+/**
+ * Shield points at acquisition: round(20 + 2*minutes + 0.08*maxHealth).
+ * Enhanced multiplies by SURVIVOR.shieldEnhancedMul after this base.
+ */
 export function computeShieldPoints(elapsedSec: number, maxHealth: number): number {
   const m = Math.max(0, elapsedSec / 60);
-  return Math.round(35 + 6 * m + 0.08 * maxHealth);
+  return Math.round(20 + 2 * m + 0.08 * maxHealth);
+}
+
+export function computeShieldDuration(enhanced: boolean): number {
+  return enhanced ? SURVIVOR.shieldDurationEnhanced : SURVIVOR.shieldDuration;
 }
 
 /** Boss-focus base probability from elapsed time (before modifiers). */
@@ -1291,7 +1300,7 @@ export type SurvivorFixture =
   | 'survivor-mega'
   | 'survivor-cache'
   | 'survivor-shield'
-  | 'survivor-rockets'
+  | 'survivor-recall'
   | 'survivor-gunship'
   | null;
 
@@ -1311,6 +1320,6 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-mega',
   'survivor-cache',
   'survivor-shield',
-  'survivor-rockets',
+  'survivor-recall',
   'survivor-gunship',
 ];

@@ -37,6 +37,15 @@ export class SurvivorRenderer {
   private hazards = new Map<number, THREE.Object3D>();
   private effects = new Map<number, THREE.Object3D>();
   private rails: THREE.Object3D[] = [];
+  /** Shared unit rail geometry — scale mesh length instead of reallocating. */
+  private railGeo = new THREE.BoxGeometry(0.3, 0.12, 1);
+  private railMat = new THREE.MeshBasicMaterial({
+    color: '#88d4ff',
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  });
+  private railPool: THREE.Mesh[] = [];
   /** Persistent Protocol Cache world actor (not a short-lived effect). */
   private cacheActor: THREE.Group | null = null;
   private cacheMats: THREE.MeshBasicMaterial[] = [];
@@ -388,47 +397,11 @@ export class SurvivorRenderer {
       if (!p.active) continue;
       let mesh = this.projectiles.get(p.id);
       if (!mesh) {
-        if (p.kind === 'protocol-rocket') {
-          // Massive unmistakable missile body + nose + thruster.
-          const g = new THREE.Group();
-          const body = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.22, 0.28, 1.8, 10),
-            this.effectMat('#ffb050', 0.98, true),
-          );
-          body.rotation.x = Math.PI / 2;
-          const nose = new THREE.Mesh(
-            new THREE.ConeGeometry(0.28, 0.55, 10),
-            this.effectMat('#fff8e0', 1, true),
-          );
-          nose.rotation.x = Math.PI / 2;
-          nose.position.z = 1.1;
-          const flame = new THREE.Mesh(
-            new THREE.ConeGeometry(0.32, 1.1, 8, 1, true),
-            this.effectMat('#ff6622', 0.9, true),
-          );
-          flame.rotation.x = -Math.PI / 2;
-          flame.position.z = -1.15;
-          flame.name = 'proto-flame';
-          g.add(body, nose, flame);
-          mesh = g as unknown as THREE.Mesh;
-        } else {
-          mesh = new THREE.Mesh(this.boltGeo, this.mat(p.color));
-        }
+        mesh = new THREE.Mesh(this.boltGeo, this.mat(p.color));
         this.projectiles.set(p.id, mesh);
         this.root.add(mesh);
       }
-      if (p.kind === 'protocol-rocket') {
-        mesh.position.set(p.x, 1.4, p.z);
-        mesh.rotation.y = Math.atan2(p.vx, p.vz);
-        mesh.scale.setScalar(1.15);
-        const flame = mesh.getObjectByName('proto-flame');
-        if (flame) {
-          const flick = 0.9 + Math.sin(performance.now() * 0.04 + p.id) * 0.25;
-          flame.scale.set(1, 1, flick);
-        }
-        continue;
-      }
-      let s =
+      const s =
         p.kind === 'drone'
           ? 0.75
           : p.kind === 'rocket'
@@ -848,11 +821,40 @@ export class SurvivorRenderer {
     }
   }
 
+  private disposeEffectObject(obj: THREE.Object3D): void {
+    const seenGeo = new Set<THREE.BufferGeometry>();
+    const seenMat = new Set<THREE.Material>();
+    obj.traverse((c) => {
+      if (c instanceof THREE.Mesh) {
+        const g = c.geometry;
+        // Effect meshes always own their geometry unless shared pool marker is set.
+        if (g && !seenGeo.has(g) && c.userData.ownsGeometry !== false && !c.userData.sharedGeometry) {
+          seenGeo.add(g);
+          g.dispose();
+        }
+        const mats = Array.isArray(c.material) ? c.material : [c.material];
+        for (const m of mats) {
+          if (m && !seenMat.has(m) && (c.userData.ownsMaterial || m.userData?.owned)) {
+            seenMat.add(m);
+            m.dispose();
+          }
+        }
+      }
+    });
+  }
+
+  /** Mark mesh as owning its geometry/material for dispose. */
+  private ownMesh(mesh: THREE.Mesh): THREE.Mesh {
+    mesh.userData.ownsGeometry = true;
+    return mesh;
+  }
+
   private syncEffects(state: SurvivorState): void {
     const alive = new Set(state.effects.map((e) => e.id));
     for (const [id, obj] of this.effects) {
       if (!alive.has(id)) {
         this.root.remove(obj);
+        this.disposeEffectObject(obj);
         this.effects.delete(id);
       }
     }
@@ -902,7 +904,9 @@ export class SurvivorRenderer {
 
   /** Clone cached materials so per-frame opacity fade never poisons shared mats. */
   private effectMat(color: string, opacity: number, additive = false): THREE.MeshBasicMaterial {
-    return this.basic(color, opacity, additive).clone();
+    const m = this.basic(color, opacity, additive).clone();
+    m.userData.owned = true;
+    return m;
   }
 
   private createEffect(e: SurvivorState['effects'][0]): THREE.Object3D {
@@ -910,9 +914,8 @@ export class SurvivorRenderer {
     const color = e.color;
     if (e.kind === 'rail') {
       const len = e.length ?? 10;
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(e.width ?? 0.4, 0.15, len),
-        this.effectMat(color, 0.85),
+      const mesh = this.ownMesh(
+        new THREE.Mesh(new THREE.BoxGeometry(e.width ?? 0.4, 0.15, len), this.effectMat(color, 0.85)),
       );
       mesh.userData.baseOpacity = 0.85;
       mesh.position.set((e.facingX ?? 0) * len * 0.5, 1.1, (e.facingZ ?? 1) * len * 0.5);
@@ -925,27 +928,24 @@ export class SurvivorRenderer {
       // Lane telegraph for gunship / boss charges — readable floor strip, not a generic ring.
       const len = e.length ?? 10;
       const w = e.width ?? 2.2;
-      const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(w, len),
-        this.effectMat(color, 0.35, true),
+      const floor = this.ownMesh(
+        new THREE.Mesh(new THREE.PlaneGeometry(w, len), this.effectMat(color, 0.35, true)),
       );
       floor.userData.baseOpacity = 0.35;
       floor.rotation.x = -Math.PI / 2;
       floor.position.y = 0.06;
-      const edge = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 1.08, len),
-        this.effectMat('#ffffff', 0.18, true),
+      const edge = this.ownMesh(
+        new THREE.Mesh(new THREE.PlaneGeometry(w * 1.08, len), this.effectMat('#ffffff', 0.18, true)),
       );
       edge.userData.baseOpacity = 0.18;
       edge.rotation.x = -Math.PI / 2;
       edge.position.y = 0.04;
-      const rimL = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, 0.12, len),
-        this.effectMat(color, 0.75, true),
+      const rimL = this.ownMesh(
+        new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, len), this.effectMat(color, 0.75, true)),
       );
       rimL.userData.baseOpacity = 0.75;
       rimL.position.set(-w * 0.5, 0.1, 0);
-      const rimR = rimL.clone();
+      const rimR = this.ownMesh(rimL.clone());
       rimR.position.x = w * 0.5;
       g.add(edge, floor, rimL, rimR);
       g.position.set(e.x, 0, e.z);
@@ -955,15 +955,13 @@ export class SurvivorRenderer {
     if (e.kind === 'gunship') {
       // Ingress marker at lane start
       const r = e.radius ?? e.scale ?? 2;
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(r * 0.4, r, 32),
-        this.effectMat(color, 0.8, true),
+      const ring = this.ownMesh(
+        new THREE.Mesh(new THREE.RingGeometry(r * 0.4, r, 32), this.effectMat(color, 0.8, true)),
       );
       ring.userData.baseOpacity = 0.8;
       ring.rotation.x = -Math.PI / 2;
-      const chevron = new THREE.Mesh(
-        new THREE.ConeGeometry(0.5, 1.2, 6),
-        this.effectMat('#fff6d0', 0.9, true),
+      const chevron = this.ownMesh(
+        new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 6), this.effectMat('#fff6d0', 0.9, true)),
       );
       chevron.userData.baseOpacity = 0.9;
       chevron.position.y = 1.2;
@@ -975,42 +973,42 @@ export class SurvivorRenderer {
     if (e.kind === 'repulsor') {
       // Strong multi-layer expanding shockwave matching gameplay radius
       // Unique materials per effect so repeated uses never inherit faded opacity
-      const outer = new THREE.Mesh(
-        new THREE.RingGeometry(r * 0.88, r, 72),
-        this.effectMat(color, 0.95, true),
+      const outer = this.ownMesh(
+        new THREE.Mesh(new THREE.RingGeometry(r * 0.88, r, 72), this.effectMat(color, 0.95, true)),
       );
       outer.userData.baseOpacity = 0.95;
       outer.rotation.x = -Math.PI / 2;
-      const mid = new THREE.Mesh(
-        new THREE.RingGeometry(r * 0.55, r * 0.82, 56),
-        this.effectMat('#ffffff', 0.55, true),
+      const mid = this.ownMesh(
+        new THREE.Mesh(new THREE.RingGeometry(r * 0.55, r * 0.82, 56), this.effectMat('#ffffff', 0.55, true)),
       );
       mid.userData.baseOpacity = 0.55;
       mid.rotation.x = -Math.PI / 2;
       mid.position.y = 0.03;
-      const inner = new THREE.Mesh(
-        new THREE.RingGeometry(r * 0.2, r * 0.5, 48),
-        this.effectMat(color, 0.45, true),
+      const inner = this.ownMesh(
+        new THREE.Mesh(new THREE.RingGeometry(r * 0.2, r * 0.5, 48), this.effectMat(color, 0.45, true)),
       );
       inner.userData.baseOpacity = 0.45;
       inner.rotation.x = -Math.PI / 2;
       inner.position.y = 0.05;
-      const floor = new THREE.Mesh(
-        new THREE.CircleGeometry(r * 0.98, 56),
-        this.effectMat(color, 0.25, true),
+      const floor = this.ownMesh(
+        new THREE.Mesh(new THREE.CircleGeometry(r * 0.98, 56), this.effectMat(color, 0.25, true)),
       );
       floor.userData.baseOpacity = 0.25;
       floor.rotation.x = -Math.PI / 2;
       floor.position.y = -0.02;
-      const shell = new THREE.Mesh(
-        new THREE.CylinderGeometry(r * 0.95, r * 1.02, 1.1, 48, 1, true),
-        this.effectMat(color, 0.32, true),
+      const shell = this.ownMesh(
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(r * 0.95, r * 1.02, 1.1, 48, 1, true),
+          this.effectMat(color, 0.32, true),
+        ),
       );
       shell.userData.baseOpacity = 0.32;
       shell.position.y = 0.55;
-      const shell2 = new THREE.Mesh(
-        new THREE.CylinderGeometry(r * 0.7, r * 0.85, 0.7, 40, 1, true),
-        this.effectMat('#ffffff', 0.18, true),
+      const shell2 = this.ownMesh(
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(r * 0.7, r * 0.85, 0.7, 40, 1, true),
+          this.effectMat('#ffffff', 0.18, true),
+        ),
       );
       shell2.userData.baseOpacity = 0.18;
       shell2.position.y = 0.4;
@@ -1018,9 +1016,8 @@ export class SurvivorRenderer {
       g.position.set(e.x, 0.08, e.z);
       return g;
     }
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(r * 0.2, r, 28),
-      this.effectMat(color, 0.65),
+    const ring = this.ownMesh(
+      new THREE.Mesh(new THREE.RingGeometry(r * 0.2, r, 28), this.effectMat(color, 0.65)),
     );
     ring.userData.baseOpacity = 0.65;
     ring.rotation.x = -Math.PI / 2;
@@ -1030,21 +1027,32 @@ export class SurvivorRenderer {
   }
 
   private syncRails(state: SurvivorState): void {
-    for (const r of this.rails) this.root.remove(r);
-    this.rails = [];
+    // Hide all pooled rails then reuse.
+    for (const mesh of this.railPool) mesh.visible = false;
+    let i = 0;
     for (const r of state.rails) {
       const dx = r.x1 - r.x0;
       const dz = r.z1 - r.z0;
-      const len = Math.hypot(dx, dz);
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.3, 0.12, len),
-        new THREE.MeshBasicMaterial({ color: r.color, transparent: true, opacity: Math.min(1, r.life * 5) }),
-      );
+      const len = Math.hypot(dx, dz) || 0.01;
+      let mesh = this.railPool[i];
+      if (!mesh) {
+        mesh = new THREE.Mesh(this.railGeo, this.railMat.clone());
+        mesh.userData.sharedGeometry = true; // railGeo is pooled; never dispose per-mesh
+        mesh.userData.ownsGeometry = false;
+        (mesh.material as THREE.Material).userData.owned = true;
+        this.railPool.push(mesh);
+        this.root.add(mesh);
+      }
+      mesh.visible = true;
       mesh.position.set((r.x0 + r.x1) / 2, 1.1, (r.z0 + r.z1) / 2);
       mesh.rotation.y = Math.atan2(dx, dz);
-      this.rails.push(mesh);
-      this.root.add(mesh);
+      mesh.scale.set(1, 1, len);
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+      mat.color.set(r.color);
+      mat.opacity = Math.min(1, r.life * 5);
+      i += 1;
     }
+    this.rails = this.railPool.slice(0, i);
   }
 
   private place(vis: ActorVis, x: number, z: number, fx: number, fz: number, scale = 1): void {
@@ -1061,6 +1069,17 @@ export class SurvivorRenderer {
   }
 
   dispose(): void {
+    for (const obj of this.effects.values()) this.disposeEffectObject(obj);
+    for (const mesh of this.projectiles.values()) {
+      if (mesh instanceof THREE.Group) this.disposeEffectObject(mesh);
+    }
+    for (const mesh of this.railPool) {
+      const m = mesh.material;
+      if (m instanceof THREE.Material && m.userData?.owned) m.dispose();
+    }
+    this.railPool = [];
+    this.railGeo.dispose();
+    this.railMat.dispose();
     this.root.clear();
     this.enemies.clear();
     this.projectiles.clear();

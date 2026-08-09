@@ -5,8 +5,6 @@ import {
   MINIBOSS,
   PASSIVES,
   SURVIVOR,
-  SURVIVOR_BOSS,
-  TEMP_BUFFS,
   WEAPONS,
   bossDefForIndex,
   bossDifficultyFor,
@@ -30,20 +28,18 @@ import {
   isMegaBossIndex,
   breachShieldingReduction,
   bossCategoryDamage,
+  computeShieldDuration,
   type BossDamageCategory,
   type PassiveId,
   type ProtocolId,
   type TempBuffId,
   type WeaponId,
-  SURVIVOR as SURVIVOR_TUNING,
 } from './survivorContent';
 import {
   livingBosses,
   nearestBoss,
-  nearestEnemyOnly,
   selectWeaponTarget,
   targetPosition,
-  bossFocusChance,
 } from './survivorTargeting';
 import {
   updateOneBoss as updateOneBossPatterns,
@@ -428,16 +424,6 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   return slot;
 }
 
-function edgeSpawn(state: SurvivorState): { x: number; z: number } {
-  const h = SURVIVOR.arenaHalf + 1.2;
-  const side = Math.floor(rng(state) * 4);
-  const t = (rng(state) * 2 - 1) * h;
-  if (side === 0) return { x: t, z: -h };
-  if (side === 1) return { x: t, z: h };
-  if (side === 2) return { x: -h, z: t };
-  return { x: h, z: t };
-}
-
 function pickComposition(state: SurvivorState): string {
   const comps = compositionAt(state.time);
   let total = 0;
@@ -687,10 +673,13 @@ export function damagePlayer(
 }
 
 export function applyAegisBarrier(state: SurvivorState, potency = 1): void {
-  const pts = Math.round(computeShieldPoints(state.time, state.player.maxHealth) * potency);
+  const enhanced = potency > 1;
+  const base = computeShieldPoints(state.time, state.player.maxHealth);
+  const pts = Math.round(base * (enhanced ? SURVIVOR.shieldEnhancedMul : 1));
+  // Replace/refresh — never stack shields.
   state.player.shieldMax = pts;
   state.player.shieldPoints = pts;
-  state.player.shieldTime = SURVIVOR.shieldDuration * (potency > 1 ? 1.25 : 1);
+  state.player.shieldTime = computeShieldDuration(enhanced);
   state.player.barrierHits = 0;
   pushEffect(state, 'shield', state.player.x, state.player.z, 0.55, '#a8e8ff', 2.2);
 }
@@ -759,6 +748,7 @@ function acquireHazard(state: SurvivorState): SurvivorHazard | null {
     owner: 'player',
     tickCd: 0,
     armTimer: 0,
+    sourceBossId: 0,
   };
   state.hazards.push(h);
   return h;
@@ -773,7 +763,7 @@ function spawnHazard(
   life: number,
   damage: number,
   color: string,
-  opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd'>>,
+  opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd' | 'sourceBossId'>>,
 ): void {
   const h = acquireHazard(state);
   if (!h) return;
@@ -790,6 +780,7 @@ function spawnHazard(
   h.owner = opts?.owner ?? 'player';
   h.tickCd = opts?.tickCd ?? 0;
   h.armTimer = opts?.armTimer ?? 0;
+  h.sourceBossId = opts?.sourceBossId ?? 0;
 }
 
 function nearestEnemy(state: SurvivorState, x: number, z: number, maxR: number): SurvivorEnemy | null {
@@ -845,24 +836,40 @@ function collectNearestEnemies(
 }
 
 function densestPoint(state: SurvivorState, originX: number, originZ: number): { x: number; z: number } {
-  let sx = 0;
-  let sz = 0;
-  let n = 0;
+  // Grid density search — average of sparse ring targets collapses to origin and wastes salvoes.
+  const cell = 3.2;
+  const scores = new Map<string, { weight: number; count: number; sx: number; sz: number }>();
+  let bestKey = '';
+  let bestW = 0;
   for (const e of state.enemies) {
     if (!e.alive) continue;
     const d = (e.x - originX) ** 2 + (e.z - originZ) ** 2;
-    if (d < 100) {
-      sx += e.x;
-      sz += e.z;
-      n += 1;
-      if (n >= 12) break;
+    if (d > 22 * 22) continue;
+    const gx = Math.round(e.x / cell);
+    const gz = Math.round(e.z / cell);
+    const key = `${gx},${gz}`;
+    let s = scores.get(key);
+    if (!s) {
+      s = { weight: 0, count: 0, sx: 0, sz: 0 };
+      scores.set(key, s);
+    }
+    s.weight += e.isElite || e.isMiniboss ? 3 : 1;
+    s.count += 1;
+    s.sx += e.x;
+    s.sz += e.z;
+    if (s.weight > bestW) {
+      bestW = s.weight;
+      bestKey = key;
     }
   }
-  if (n === 0) {
-    const t = nearestEnemy(state, originX, originZ, 20);
-    return t ? { x: t.x, z: t.z } : { x: originX + state.player.facingX * 4, z: originZ + state.player.facingZ * 4 };
+  if (bestW <= 0 || !bestKey) {
+    const t = nearestEnemy(state, originX, originZ, 22);
+    return t
+      ? { x: t.x, z: t.z }
+      : { x: originX + state.player.facingX * 4, z: originZ + state.player.facingZ * 4 };
   }
-  return { x: sx / n, z: sz / n };
+  const s = scores.get(bestKey)!;
+  return { x: s.sx / s.count, z: s.sz / s.count };
 }
 
 function segmentHit(
@@ -1490,9 +1497,20 @@ function damageBoss(
     b.phase = phase;
     b.phaseAnnounced = phase;
     pushEffect(state, 'transform', b.x, b.z, 0.9, phase === 3 ? '#ff2244' : '#ff8844', 3.2);
+    // Phase interrupt ends the current attack cleanly (same counters as normal recovery).
+    if (b.pattern || b.state === 'active' || b.state === 'windup') {
+      b.attacksCompleted += 1;
+      b.attacksSinceUnique += 1;
+      b.attacksSinceMega += 1;
+      b.previousPattern = b.pattern;
+    }
     b.state = 'recover';
     b.timer = 0.7;
     b.pattern = null;
+    b.telegraphR = 0;
+    b.patternTriggered = false;
+    b.patternElapsed = 0;
+    b.zones = [];
   }
   if (b.health <= 0) {
     onBossDefeated(state, b);
@@ -1528,11 +1546,8 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
   if (state.player.form !== 'mech') {
     state.player.mechCharge = Math.min(1, state.player.mechCharge + SURVIVOR.mech.chargePerBoss);
   }
-  // Drain one breach stack into a free spawn slot if pending
-  if (state.breachStacks > 0 && aliveBossCount(state) < SURVIVOR.maxSimultaneousBosses) {
-    state.breachStacks -= 1;
-    spawnBossAtIndex(state, state.bossesSpawned + 1, true);
-  }
+  // Drain next queued boss index if capacity frees.
+  drainPendingBosses(state);
   syncPrimaryBossMirror(state);
 }
 
@@ -1572,24 +1587,15 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       continue;
     }
 
-    if (proj.kind === 'rocket' || proj.kind === 'protocol-rocket' || proj.kind === 'orbital-marker') {
+    if (proj.kind === 'rocket' || proj.kind === 'orbital-marker') {
       // Travel while arming; damage only on impact after armTimer elapses.
       proj.x += proj.vx * dt;
       proj.z += proj.vz * dt;
       proj.armTimer -= dt;
       proj.life -= dt;
-      if ((proj.kind === 'rocket' || proj.kind === 'protocol-rocket') && proj.armTimer > 0) {
-        const trailEvery = proj.kind === 'protocol-rocket' ? 2 : 3;
-        if ((proj.id + Math.floor(state.time * 30)) % trailEvery === 0) {
-          pushEffect(
-            state,
-            'muzzle',
-            proj.x,
-            proj.z,
-            proj.kind === 'protocol-rocket' ? 0.14 : 0.08,
-            proj.color,
-            proj.kind === 'protocol-rocket' ? 0.9 : 0.45,
-          );
+      if (proj.kind === 'rocket' && proj.armTimer > 0) {
+        if ((proj.id + Math.floor(state.time * 30)) % 3 === 0) {
+          pushEffect(state, 'muzzle', proj.x, proj.z, 0.08, proj.color, 0.45);
         }
       }
       if (proj.armTimer > 0 && proj.life > 0) continue;
@@ -1599,22 +1605,13 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         proj.kind === 'orbital-marker' ? 'orbital' : 'impact',
         proj.x,
         proj.z,
-        proj.kind === 'protocol-rocket' ? 0.55 : 0.4,
+        0.4,
         proj.color,
-        er * (proj.kind === 'protocol-rocket' ? 1.8 : 1.4),
+        er * 1.4,
         { radius: er },
       );
-      if (proj.kind === 'rocket' || proj.kind === 'protocol-rocket') {
-        pushEffect(
-          state,
-          'pulse',
-          proj.x,
-          proj.z,
-          proj.kind === 'protocol-rocket' ? 0.4 : 0.28,
-          '#fff6d0',
-          er * (proj.kind === 'protocol-rocket' ? 1.15 : 0.9),
-          { radius: er * (proj.kind === 'protocol-rocket' ? 1.15 : 0.9) },
-        );
+      if (proj.kind === 'rocket') {
+        pushEffect(state, 'pulse', proj.x, proj.z, 0.28, '#fff6d0', er * 0.9, { radius: er * 0.9 });
       }
       for (const e of state.enemies) {
         if (!e.alive) continue;
@@ -1866,20 +1863,37 @@ function updateEnemies(state: SurvivorState, dt: number): void {
     e.facingX = ndx;
     e.facingZ = ndz;
     const role = e.role;
-    let speed = enemyBaseSpeed(e);
+    const speed = enemyBaseSpeed(e);
 
-    // Elite lunge dash
-    if (role === 'elite' && e.lungeTimer > 0) {
+    // Elite/hunter: windup (no move) → locked dash → recovery
+    if ((role === 'elite' || role === 'hunter') && e.windup > 0) {
+      e.windup -= dt;
+      // Stand still during windup — telegraph already placed at start.
+      if (e.windup <= 0) {
+        // Lock direction at windup end; start short dash.
+        e.lungeFx = ndx;
+        e.lungeFz = ndz;
+        e.facingX = ndx;
+        e.facingZ = ndz;
+        e.lungeTimer = role === 'elite' ? 0.22 : 0.14; // ~3u / ~2u at speeds below
+      }
+      const c = clampArena(e.x, e.z, e.radius * 0.5);
+      e.x = c.x;
+      e.z = c.z;
+      continue;
+    }
+    if ((role === 'elite' || role === 'hunter') && e.lungeTimer > 0) {
       e.lungeTimer -= dt;
-      e.x += e.lungeFx * 18 * dt;
-      e.z += e.lungeFz * 18 * dt;
-      if (dist < e.radius + pr + 0.15 && e.attackCd <= 0) {
+      const dashSpd = role === 'elite' ? 14 : 12;
+      e.x += e.lungeFx * dashSpd * dt;
+      e.z += e.lungeFz * dashSpd * dt;
+      if (dist < e.radius + pr + 0.2 && e.attackCd <= 0) {
         e.attackCd = 0.9;
-        damagePlayer(state, contactDamageOf(e) * 1.35);
+        damagePlayer(state, contactDamageOf(e) * (role === 'elite' ? 1.35 : 1.15));
         e.lungeTimer = 0;
-        e.lungeCd = 2.8;
+        e.lungeCd = role === 'elite' ? 2.6 : 2.2;
       } else if (e.lungeTimer <= 0) {
-        e.lungeCd = 2.2; // recovery after miss
+        e.lungeCd = role === 'elite' ? 2.4 : 2.0; // miss recovery
       }
       const c = clampArena(e.x, e.z, e.radius * 0.5);
       e.x = c.x;
@@ -1938,19 +1952,16 @@ function updateEnemies(state: SurvivorState, dt: number): void {
         damagePlayer(state, contactDamageOf(e));
       }
     } else if (role === 'hunter') {
-      // Build momentum while pursuing; short recovery after a lunge miss.
-      e.huntMomentum = Math.min(1, e.huntMomentum + dt * 0.35);
-      if (e.lungeCd <= 0 && dist < 5.5 && dist > 1.2) {
-        e.lungeTimer = 0.28;
-        e.lungeFx = ndx;
-        e.lungeFz = ndz;
-        e.lungeCd = 2.4;
-        e.huntMomentum = 0.2;
-        pushEffect(state, 'telegraph', e.x + ndx * 1.2, e.z + ndz * 1.2, 0.22, '#ff6688', 1.2, {
-          radius: 0.9,
+      e.huntMomentum = Math.min(1, e.huntMomentum + dt * 0.28);
+      if (e.lungeCd <= 0 && dist < 5.2 && dist > 1.4) {
+        // Windup only — no movement/damage until windup ends.
+        e.windup = 0.32;
+        e.lungeCd = 99;
+        pushEffect(state, 'telegraph', e.x + ndx * 1.1, e.z + ndz * 1.1, 0.32, '#ff6688', 1.0, {
+          radius: 0.85,
         });
       }
-      const spd = speed * (0.75 + e.huntMomentum * 0.55);
+      const spd = speed * (0.8 + e.huntMomentum * 0.35);
       e.x += ndx * spd * dt;
       e.z += ndz * spd * dt;
       if (dist < e.radius + pr + 0.05 && e.attackCd <= 0) {
@@ -1959,17 +1970,15 @@ function updateEnemies(state: SurvivorState, dt: number): void {
         e.huntMomentum = 0;
       }
     } else if (role === 'elite') {
-      if (e.lungeCd <= 0 && dist < 7 && dist > 1.5) {
-        e.lungeTimer = 0.32;
-        e.lungeFx = ndx;
-        e.lungeFz = ndz;
-        pushEffect(state, 'telegraph', e.x + ndx * 2, e.z + ndz * 2, 0.28, '#ff4466', 1.6, {
-          length: 5,
-          width: 1.1,
+      if (e.lungeCd <= 0 && dist < 6.5 && dist > 1.6) {
+        e.windup = 0.4;
+        e.lungeCd = 99;
+        pushEffect(state, 'telegraph', e.x + ndx * 1.6, e.z + ndz * 1.6, 0.4, '#ff4466', 1.5, {
+          length: 3.2,
+          width: 1.0,
           facingX: ndx,
           facingZ: ndz,
         });
-        e.lungeCd = 99; // set properly after lunge resolves
       }
       e.x += ndx * speed * dt;
       e.z += ndz * speed * dt;
@@ -2063,9 +2072,9 @@ function updatePickups(state: SurvivorState, dt: number): void {
       }
     }
 
-    let dx = p.x - pk.x;
-    let dz = p.z - pk.z;
-    let d2 = dx * dx + dz * dz;
+    const dx = p.x - pk.x;
+    const dz = p.z - pk.z;
+    const d2 = dx * dx + dz * dz;
 
     if (pk.kind === 'xp') {
       if (d2 <= eMag * eMag) pk.magnetized = true;
@@ -2508,24 +2517,71 @@ function trackProtocol(state: SurvivorState, id: ProtocolId, remaining: number, 
 }
 
 function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): void {
-  // Opening flash before protocol resolution
   pushEffect(state, 'cache', state.player.x, state.player.z, 0.45, '#ffd46a', 2.4);
   if (id === 'aegis-barrier') {
     applyAegisBarrier(state, potency);
-    trackProtocol(state, id, SURVIVOR.shieldDuration * (potency > 1 ? 1.2 : 1), potency);
-  } else if (id === 'rocket-barrage') {
-    state.rocketProtocol.active = true;
-    state.rocketProtocol.remaining = 15 * (potency > 1 ? 1.5 : 1);
-    state.rocketProtocol.fireCd = 0.2;
-    state.rocketProtocol.potency = potency;
-    trackProtocol(state, id, state.rocketProtocol.remaining, potency);
-    // Temporary missile pod silhouette near player
-    pushEffect(state, 'transform', state.player.x, state.player.z, 0.55, '#ff8a4a', 2.2);
-    pushEffect(state, 'muzzle', state.player.x, state.player.z, 0.35, '#fff0c0', 1.8);
+    trackProtocol(state, id, state.player.shieldTime, potency);
   } else if (id === 'gunship-flyby') {
     startGunship(state, potency);
     trackProtocol(state, id, state.gunship.duration, potency);
     pushEffect(state, 'gunship', state.player.x, state.player.z, 0.5, state.accent, 2.2);
+  } else if (id === 'gravitic-recall') {
+    startGraviticRecall(state);
+    trackProtocol(state, id, state.recall.duration, potency);
+  }
+}
+
+function startGraviticRecall(state: SurvivorState): void {
+  const ids: number[] = [];
+  let total = 0;
+  for (const pk of state.pickups) {
+    if (!pk.active || pk.kind !== 'xp') continue;
+    ids.push(pk.id);
+    total += pk.value;
+    pk.magnetized = true;
+  }
+  state.recall = {
+    active: true,
+    t: 0,
+    duration: 1.25,
+    orbIds: ids,
+    totalXp: total,
+  };
+  pushEffect(state, 'pulse', state.player.x, state.player.z, 0.7, '#aaffee', 18, { radius: 18 });
+  pushEffect(state, 'levelup', state.player.x, state.player.z, 0.45, '#66ffcc', 2.5);
+}
+
+function updateGraviticRecall(state: SurvivorState, dt: number): void {
+  const r = state.recall;
+  if (!r.active) return;
+  r.t += dt;
+  const p = state.player;
+  const u = Math.min(1, r.t / r.duration);
+  // Ease orbs toward player; collect via normal path when close.
+  for (const id of r.orbIds) {
+    const pk = state.pickups.find((x) => x.id === id && x.active && x.kind === 'xp');
+    if (!pk) continue;
+    const dx = p.x - pk.x;
+    const dz = p.z - pk.z;
+    const d = Math.hypot(dx, dz) || 1;
+    // Stream faster as recall progresses (far-map complete within duration).
+    const spd = 18 + u * 42;
+    pk.x += (dx / d) * spd * dt;
+    pk.z += (dz / d) * spd * dt;
+    pk.magnetized = true;
+  }
+  if (r.t >= r.duration) {
+    // Final snap-collect remaining recall orbs through gainXp once each.
+    for (const id of r.orbIds) {
+      const pk = state.pickups.find((x) => x.id === id && x.active && x.kind === 'xp');
+      if (!pk) continue;
+      pk.active = false;
+      pk.magnetized = false;
+      gainXp(state, pk.value);
+      pushEffect(state, 'pickup', p.x, p.z, 0.2, '#66ffcc', 0.7);
+    }
+    r.active = false;
+    r.orbIds = [];
   }
 }
 
@@ -2624,6 +2680,8 @@ function startGunship(state: SurvivorState, potency: number): void {
     facingX: fx / fl,
     facingZ: fz / fl,
     firing: false,
+    hitIds: [],
+    spawnSuppress: 0,
   };
   const midX = (lane.x0 + lane.x1) / 2;
   const midZ = (lane.z0 + lane.z1) / 2;
@@ -2639,7 +2697,8 @@ function startGunship(state: SurvivorState, potency: number): void {
 }
 
 
-function applyTempBuff(state: SurvivorState, id: TempBuffId): void {
+/** Legacy temp-buff applicator retained for fixtures / future cache variants. */
+export function applyTempBuff(state: SurvivorState, id: TempBuffId): void {
   const p = state.player;
   const cfg = SURVIVOR.tempBuff;
   if (id === 'emergency-repair') {
@@ -2871,49 +2930,147 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
   }
 }
 
+function updatePressureDirector(state: SurvivorState): void {
+  if (state.phase !== 'playing') return;
+  const s = state.surge;
+  const t = state.time;
+  if (s.phase === 'normal') {
+    if (t >= s.nextSurgeAt) {
+      const kinds = ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood'];
+      // Respect elite gate — never roll elite surge too early.
+      let kind = kinds[Math.floor(rng(state) * kinds.length)]!;
+      if (kind === 'elite' && t < SURVIVOR.eliteGateTime) kind = 'flood';
+      s.kind = kind;
+      s.phase = 'telegraph';
+      s.phaseEndsAt = t + SURVIVOR.surgeTelegraph;
+      s.edgeA = Math.floor(rng(state) * 4);
+      s.edgeB = (s.edgeA + 2) % 4;
+      // Perimeter warning
+      for (let i = 0; i < 4; i += 1) {
+        const pos = edgeSpawnWeighted(state, s.kind, i);
+        pushEffect(state, 'telegraph', pos.x * 0.9, pos.z * 0.9, SURVIVOR.surgeTelegraph, '#ff8866', 2.0, {
+          radius: 1.6,
+        });
+      }
+    }
+  } else if (s.phase === 'telegraph') {
+    if (t >= s.phaseEndsAt) {
+      s.phase = 'surge';
+      s.phaseEndsAt = t + SURVIVOR.surgeDuration;
+    }
+  } else if (s.phase === 'surge') {
+    if (t >= s.phaseEndsAt) {
+      s.phase = 'recovery';
+      s.phaseEndsAt = t + SURVIVOR.surgeRecovery;
+    }
+  } else if (s.phase === 'recovery') {
+    if (t >= s.phaseEndsAt) {
+      s.phase = 'normal';
+      s.kind = '';
+      s.nextSurgeAt = t + SURVIVOR.surgeInterval + rng(state) * 8;
+    }
+  }
+}
+
+/** Spawn edge weighted by surge type. */
+function edgeSpawnWeighted(
+  state: SurvivorState,
+  kind: string,
+  salt = 0,
+): { x: number; z: number } {
+  const h = SURVIVOR.arenaHalf + 1.2;
+  let side = Math.floor(rng(state) * 4);
+  if (kind === 'pincer') {
+    side = salt % 2 === 0 ? state.surge.edgeA : state.surge.edgeB;
+  } else if (kind === 'encircle') {
+    side = salt % 4;
+  } else if (kind !== 'flood') {
+    // Prefer ahead of player + flanks (35% ahead, 25% flanks, 40% perimeter)
+    const r = rng(state);
+    const facingSide =
+      Math.abs(state.player.facingX) > Math.abs(state.player.facingZ)
+        ? state.player.facingX > 0
+          ? 3
+          : 2
+        : state.player.facingZ > 0
+          ? 1
+          : 0;
+    if (r < 0.35) side = facingSide;
+    else if (r < 0.6) side = (facingSide + (rng(state) < 0.5 ? 1 : 3)) % 4;
+  }
+  const t = (rng(state) * 2 - 1) * h;
+  if (side === 0) return { x: t, z: -h };
+  if (side === 1) return { x: t, z: h };
+  if (side === 2) return { x: -h, z: t };
+  return { x: h, z: t };
+}
+
+function surgeCompositionBias(state: SurvivorState, baseId: string): string {
+  const k = state.surge.kind;
+  if (state.surge.phase !== 'surge') return baseId;
+  if (k === 'sprinters' && rng(state) < 0.55) return rng(state) < 0.5 ? 'fast' : 'spiky';
+  if (k === 'bruiser' && rng(state) < 0.5) return 'bruiser';
+  if (k === 'elite' && state.time >= SURVIVOR.eliteGateTime && rng(state) < 0.45) return 'elite';
+  if (k === 'flood' && rng(state) < 0.65) return rng(state) < 0.5 ? 'basic' : 'mush';
+  if (k === 'pincer' || k === 'encircle') {
+    // Slightly favor flankers during geometry surges
+    if (rng(state) < 0.25) return rng(state) < 0.5 ? 'flyer' : 'bee';
+  }
+  return baseId;
+}
+
 function updateSpawns(state: SurvivorState, dt: number): void {
+  updatePressureDirector(state);
   const diff = endlessDifficultyAt(state.time);
   const alive = state.enemies.reduce((n, e) => n + (e.alive ? 1 : 0), 0);
   const target = diff.targetActive;
   let rate = diff.spawnRate;
   if (alive < diff.populationMin) rate *= 1.75;
   else if (alive > target) rate *= 0.55;
-  // Boss pressure: ~85% normal, ~65% mega (not 70% default).
   if (hasActiveMega(state)) rate *= 0.65;
   else if (aliveBossCount(state) > 0) {
-    // After 40 minutes of collapse, bosses no longer reduce horde pressure.
     rate *= state.time >= 40 * 60 ? 1 : 0.85;
   }
-  // Surge director: short flood windows
-  if (state.surge.activeUntil > state.time) rate *= 1.5;
-  else if (state.time >= state.surge.nextAt) {
-    state.surge.activeUntil = state.time + SURVIVOR.surgeDuration;
-    state.surge.nextAt = state.time + SURVIVOR.surgeInterval + rng(state) * 10;
-    const kinds = ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood'];
-    state.surge.kind = kinds[Math.floor(rng(state) * kinds.length)]!;
-    // Telegraph perimeter entry
-    for (let i = 0; i < 3; i += 1) {
-      const pos = edgeSpawn(state);
-      pushEffect(state, 'telegraph', pos.x * 0.92, pos.z * 0.92, 0.8, '#ff8866', 2.2, {
-        radius: 1.8,
-      });
-    }
+  if (state.gunship.spawnSuppress > 0) {
+    state.gunship.spawnSuppress = Math.max(0, state.gunship.spawnSuppress - dt);
+    rate *= 0.15;
+  }
+  // Director phase multipliers
+  if (state.surge.phase === 'surge') {
+    if (state.surge.kind === 'flood') rate *= 1.55;
+    else if (state.surge.kind === 'bruiser') rate *= 0.85;
+    else rate *= 1.35;
+  } else if (state.surge.phase === 'recovery') {
+    rate *= 0.6;
+  } else if (state.surge.phase === 'telegraph') {
+    rate *= 0.9;
   }
 
   state.spawnAcc += dt * rate;
   let spawnedThisFrame = 0;
   while (state.spawnAcc >= 1 && alive + spawnedThisFrame < state.enemyCap && spawnedThisFrame < 4) {
     state.spawnAcc -= 1;
-    const pos = edgeSpawn(state);
-    let defId = pickComposition(state);
-    if (rng(state) < diff.eliteChance && state.time > 90) defId = 'elite';
+    const pos = edgeSpawnWeighted(state, state.surge.phase === 'surge' ? state.surge.kind : '', spawnedThisFrame);
+    let defId = surgeCompositionBias(state, pickComposition(state));
+    // Forced elites only after gate and not during recovery.
+    if (
+      state.surge.phase !== 'recovery' &&
+      rng(state) < diff.eliteChance &&
+      state.time >= SURVIVOR.eliteGateTime
+    ) {
+      defId = 'elite';
+    }
     if (spawnEnemy(state, defId, pos.x, pos.z)) spawnedThisFrame += 1;
   }
 
   state.eliteTimer -= dt;
-  if (state.eliteTimer <= 0 && state.time > 80) {
+  if (
+    state.eliteTimer <= 0 &&
+    state.time >= SURVIVOR.eliteGateTime &&
+    state.surge.phase !== 'recovery'
+  ) {
     state.eliteTimer = Math.max(8, 20 - state.time / 60) + rng(state) * 10;
-    const pos = edgeSpawn(state);
+    const pos = edgeSpawnWeighted(state, state.surge.kind || '', 0);
     spawnEnemy(state, 'elite', pos.x, pos.z);
   }
 }
@@ -2922,22 +3079,46 @@ function hasActiveMega(state: SurvivorState): boolean {
   return state.bosses.some((b) => b.active && b.state !== 'dead' && b.isMega);
 }
 
+function enqueueBossIndex(state: SurvivorState, index: number): void {
+  if (state.pendingBossIndices.includes(index)) return;
+  state.pendingBossIndices.push(index);
+  state.breachStacks = state.pendingBossIndices.length; // HUD compatibility mirror
+  for (const b of state.bosses) {
+    if (b.active && b.state !== 'dead') {
+      b.breachEmpower += 0.12;
+      b.damageMul *= 1.08;
+    }
+  }
+  state.inboundBanner = 2.5;
+}
+
+function drainPendingBosses(state: SurvivorState): void {
+  while (state.pendingBossIndices.length > 0) {
+    const next = state.pendingBossIndices[0]!;
+    const mega = isMegaBossIndex(next);
+    if (mega && hasActiveMega(state)) break;
+    if (!mega && aliveBossCount(state) >= SURVIVOR.maxSimultaneousBosses) break;
+    state.pendingBossIndices.shift();
+    state.breachStacks = state.pendingBossIndices.length;
+    const spawned = spawnBossAtIndex(state, next, true);
+    if (!spawned) {
+      // Re-queue at front if spawn unexpectedly failed.
+      state.pendingBossIndices.unshift(next);
+      state.breachStacks = state.pendingBossIndices.length;
+      break;
+    }
+  }
+}
+
 function spawnBossAtIndex(state: SurvivorState, index: number, fromStack = false): SurvivorBoss | null {
   const mega = isMegaBossIndex(index);
-  // Mega bypasses ordinary cap (one reserved slot); hold breach stacks while mega lives
+  // Mega bypasses ordinary cap (one reserved slot); queue exact index when deferred.
   if (!mega && aliveBossCount(state) >= SURVIVOR.maxSimultaneousBosses) {
-    if (!fromStack) state.breachStacks += 1;
-    for (const b of state.bosses) {
-      if (b.active && b.state !== 'dead') {
-        b.breachEmpower += 0.12;
-        b.damageMul *= 1.08;
-      }
-    }
-    state.inboundBanner = 2.5;
+    if (!fromStack) enqueueBossIndex(state, index);
     return null;
   }
   if (mega && hasActiveMega(state)) {
-    if (!fromStack) state.breachStacks += 1;
+    if (!fromStack) enqueueBossIndex(state, index);
     return null;
   }
 
@@ -3005,16 +3186,20 @@ function spawnBossAtIndex(state: SurvivorState, index: number, fromStack = false
 function ensureBossSchedule(state: SurvivorState): void {
   while (state.time + 1e-6 >= state.nextBossTime) {
     const idx = state.nextBossIndex;
-    spawnBossAtIndex(state, idx, false);
+    // If backlog already exists, append schedule order rather than bypassing older bosses.
+    if (state.pendingBossIndices.length > 0) {
+      enqueueBossIndex(state, idx);
+    } else {
+      const spawned = spawnBossAtIndex(state, idx, false);
+      if (!spawned) {
+        // spawnBossAtIndex already enqueued exact index when deferred
+      }
+    }
     state.nextBossIndex = idx + 1;
     state.nextBossTime = bossTimeForIndex(state.nextBossIndex);
   }
-  // Do not release ordinary stacks while a Mega is alive
-  if (hasActiveMega(state)) return;
-  while (state.breachStacks > 0 && aliveBossCount(state) < SURVIVOR.maxSimultaneousBosses) {
-    state.breachStacks -= 1;
-    spawnBossAtIndex(state, state.bossesSpawned + 1, true);
-  }
+  // Drain FIFO queue when capacity allows (Mega front blocks ordinary drain).
+  drainPendingBosses(state);
 }
 
 function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
@@ -3063,17 +3248,12 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
   for (const pa of state.protocolActive) pa.remaining -= dt;
   state.protocolActive = state.protocolActive.filter((pa) => pa.remaining > 0);
 
-  // Rocket protocol battery
-  if (state.rocketProtocol.active) {
-    state.rocketProtocol.remaining -= dt;
-    state.rocketProtocol.fireCd -= dt;
-    if (state.rocketProtocol.fireCd <= 0) {
-      state.rocketProtocol.fireCd = 0.55 / state.rocketProtocol.potency;
-      fireProtocolRocket(state);
-    }
-    if (state.rocketProtocol.remaining <= 0) state.rocketProtocol.active = false;
-  }
-  // Gunship flyby — warning then edge-to-edge strafe with proper boss/enemy damage.
+  // Legacy protocol rocket battery disabled (ordinary weapon rocket remains).
+  state.rocketProtocol.active = false;
+
+  updateGraviticRecall(state, dt);
+
+  // Gunship: once-per-target strike when footprint crosses the enemy.
   if (state.gunship.active) {
     const g = state.gunship;
     const cfg = SURVIVOR.gunship;
@@ -3081,7 +3261,6 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     const warn = g.warnDuration;
     const strafeT = Math.max(0, g.t - warn);
     const strafeDur = Math.max(0.01, g.duration - warn);
-    // Position: hold at start during warning, then traverse the lane.
     const u = g.t < warn ? 0 : Math.min(1, strafeT / strafeDur);
     g.x = g.x0 + (g.x1 - g.x0) * u;
     g.z = g.z0 + (g.z1 - g.z0) * u;
@@ -3093,40 +3272,43 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     g.firing = g.t >= warn && g.t < g.duration;
 
     if (g.firing) {
-      g.fireCd -= dt;
-      if (g.fireCd <= 0) {
-        g.fireCd = cfg.fireInterval;
-        const power = playerPowerScale({ weapons: state.weapons, passives: state.passives });
-        const pot = g.potency * (1 + Math.min(0.55, power * 0.04));
-        const halfW = cfg.laneHalfWidth;
-        // Damage all hostiles near the current gunship position along the lane.
-        for (const e of state.enemies) {
-          if (!e.alive) continue;
-          const d = distPointToSegment(e.x, e.z, g.x0, g.z0, g.x1, g.z1);
-          const along = Math.hypot(e.x - g.x, e.z - g.z);
-          if (d <= halfW && along <= cfg.impactRadius + 1.2) {
-            const mul = e.isMiniboss ? 0.7 : e.isElite ? 0.85 : 1;
-            damageEnemy(state, e, cfg.enemyDamage * pot * mul, { kind: 'ability', pop: 0.75 });
-          }
+      const halfW = cfg.laneHalfWidth * (g.potency > 1 ? 1.15 : 1);
+      const pot = g.potency;
+      for (const e of state.enemies) {
+        if (!e.alive || g.hitIds.includes(e.id)) continue;
+        const d = distPointToSegment(e.x, e.z, g.x0, g.z0, g.x1, g.z1);
+        const along = Math.hypot(e.x - g.x, e.z - g.z);
+        if (d <= halfW + e.radius && along <= cfg.impactRadius + 1.4) {
+          g.hitIds.push(e.id);
+          // Once-per-target: delete ordinary; fraction miniboss/boss max HP.
+          let dmg = e.maxHealth * 1.05;
+          if (e.isMiniboss) dmg = e.maxHealth * 0.8 * pot;
+          damageEnemy(state, e, dmg, { kind: 'ability', pop: 1 });
+          emitDamage(state, `gs:${e.id}`, e.x, e.z + 0.8, Math.round(dmg), 'kill', 1);
+          pushEffect(state, 'impact', e.x, e.z, 0.28, '#ffd46a', 1.6);
         }
-        for (const b of livingBosses(state)) {
-          if (!b.active || b.state === 'dead') continue;
-          const d = distPointToSegment(b.x, b.z, g.x0, g.z0, g.x1, g.z1);
-          const along = Math.hypot(b.x - g.x, b.z - g.z);
-          const br = b.colliderRadius;
-          if (d <= halfW + br * 0.4 && along <= cfg.impactRadius + br) {
-            // Bounded late-game: does not delete bosses automatically.
-            const bossDmg = cfg.bossDamage * pot * (b.isMega ? 0.75 : 1);
-            damageBoss(state, bossDmg, { kind: 'ability', pop: 0.9, boss: b, x: b.x, z: b.z });
-          }
+      }
+      for (const b of livingBosses(state)) {
+        if (!b.active || b.state === 'dead' || g.hitIds.includes(b.id)) continue;
+        const d = distPointToSegment(b.x, b.z, g.x0, g.z0, g.x1, g.z1);
+        const along = Math.hypot(b.x - g.x, b.z - g.z);
+        const br = b.colliderRadius;
+        if (d <= halfW + br * 0.5 && along <= cfg.impactRadius + br) {
+          g.hitIds.push(b.id);
+          const frac = b.isMega ? 0.035 * pot : 0.07 * pot;
+          const dmg = b.maxHealth * frac;
+          damageBoss(state, dmg, { kind: 'ability', pop: 1, boss: b, x: b.x, z: b.z });
+          pushEffect(state, 'impact', b.x, b.z, 0.35, '#ffd46a', 2.2);
         }
-        pushEffect(state, 'impact', g.x, g.z, 0.22, state.accent, 1.4);
-        pushEffect(state, 'muzzle', g.x, g.z, 0.12, '#fff6d0', 0.9);
+      }
+      if (g.hitIds.length > 0 && g.spawnSuppress <= 0) {
+        g.spawnSuppress = 1.2;
       }
     }
     if (g.t >= g.duration) {
       g.active = false;
       g.firing = false;
+      g.spawnSuppress = Math.max(g.spawnSuppress, 1.0);
     }
   }
 }
@@ -3160,45 +3342,41 @@ function spawnProtocolCache(state: SurvivorState, mega: boolean): void {
 function openProtocolCache(state: SurvivorState): void {
   state.cache.active = false;
   state.phase = 'protocol';
-  state.protocolChoices = PROTOCOLS.map((p) => ({
-    kind: 'protocol' as const,
-    id: `proto-${p.id}`,
-    title: p.title,
-    body: p.body + (state.cache.potency > 1 ? ' (Enhanced)' : ''),
-    protocolId: p.id,
-  }));
-  pushEffect(state, 'levelup', state.player.x, state.player.z, 0.5, '#ffd46a', 2);
-}
-
-function fireProtocolRocket(state: SurvivorState): void {
-  const p = state.player;
-  const boss = nearestBoss(state, p.x, p.z, 30);
-  const dens = densestPoint(state, p.x, p.z);
-  const tx = boss ? boss.x : dens.x;
-  const tz = boss ? boss.z : dens.z;
-  const proj = acquireProjectile(state);
-  if (!proj) return;
-  // Massive protocol-rocket: launch near player, travel visibly, huge impact.
-  const launchX = p.x + (rng(state) - 0.5) * 1.8;
-  const launchZ = p.z + (rng(state) - 0.5) * 1.8;
-  const dx = tx - launchX;
-  const dz = tz - launchZ;
-  const dist = Math.hypot(dx, dz) || 1;
-  const travel = Math.min(0.95, Math.max(0.42, dist / 26));
-  const spd = dist / travel;
-  const pot = state.rocketProtocol.potency;
-  const er = 2.4 * pot;
-  resetProj(proj, state, 'protocol-rocket', 'rocket', launchX, launchZ, (dx / dist) * spd, (dz / dist) * spd, {
-    damage: 62 * pot,
-    radius: 0.55,
-    visualRadius: 1.9,
-    life: travel + 0.12,
-    color: '#ffb050',
-    armTimer: travel,
-    explodeRadius: er,
+  const enhanced = state.cache.potency > 1;
+  const shieldPts = Math.round(
+    computeShieldPoints(state.time, state.player.maxHealth) *
+      (enhanced ? SURVIVOR.shieldEnhancedMul : 1),
+  );
+  const shieldDur = computeShieldDuration(enhanced);
+  let energyOrbs = 0;
+  let energyXp = 0;
+  for (const pk of state.pickups) {
+    if (pk.active && pk.kind === 'xp') {
+      energyOrbs += 1;
+      energyXp += pk.value;
+    }
+  }
+  state.protocolChoices = PROTOCOLS.map((p) => {
+    let body = p.body;
+    if (p.id === 'aegis-barrier') {
+      body = `Absorb ~${shieldPts} damage for ${Math.round(shieldDur)}s before integrity.${enhanced ? ' Enhanced.' : ''}`;
+    } else if (p.id === 'gunship-flyby') {
+      body = `Once-per-target corridor strike. Deletes ordinary enemies; dents bosses.${enhanced ? ' Enhanced lane.' : ''}`;
+    } else if (p.id === 'gravitic-recall') {
+      body =
+        energyOrbs > 0
+          ? `Recall ${energyXp} energy from ${energyOrbs} orbs.`
+          : 'No energy currently on the field.';
+    }
+    return {
+      kind: 'protocol' as const,
+      id: `proto-${p.id}`,
+      title: p.title,
+      body,
+      protocolId: p.id,
+    };
   });
-  pushEffect(state, 'muzzle', launchX, launchZ, 0.28, '#fff0c0', 2.2);
-  pushEffect(state, 'telegraph', tx, tz, travel, '#ff8a4a', er, { radius: er });
+  pushEffect(state, 'levelup', state.player.x, state.player.z, 0.5, '#ffd46a', 2);
 }
 
 function makeBossApi(): BossSimApi {

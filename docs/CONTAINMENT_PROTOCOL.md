@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.1.0`
+**Current balance line:** `endless-2.2.0`
 
 ## Purpose
 
@@ -120,23 +120,65 @@ Every 5th boss is a **Mega-Boss** (2× visual scale, 2.2× HP of the rebalanced 
 
 ## Protocol Cache
 
-Every 120s (≈15s before each boss window): corner beacon with Aegis Barrier, Rocket Barrage, or Gunship Flyby. Mega-Boss death leaves an enhanced non-expiring cache.
+Every 120s (≈15s before each boss window): corner beacon. Choices:
 
+| Protocol | Role |
+|---|---|
+| **Aegis Barrier** | Absorb damage before integrity: `round(20 + 2m + 0.08×maxHP)`, 35s (45s enhanced). Replace/refresh, never stack. |
+| **Gunship Flyby** | Once-per-target corridor strike from the player. Deletes ordinary enemies; dents bosses (never auto-deletes a real boss). |
+| **Gravitic Recall** | Pull all active energy orbs to the player over ~1.25s with exact XP conservation (health orbs excluded). |
+
+Mega-Boss death leaves an enhanced non-expiring cache. The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Caches.
+
+## Enemy speeds (endless-2.2.0)
+
+Base speeds (before global speedMul): basic 3.30, mush 3.10, fast 4.25, spiky 4.35, flyer 3.90, bee 4.05, ghost 4.00, bruiser 2.85, elite 3.70, miniboss 3.10. Player base speed 6.4.
+
+Global speedMul:
+
+```text
+m = minutes
+through 15m: 1 + 0.016*m
+after 15m:   1.24 + 0.008*(m-15)
++ Collapse steps after 30:00 (+0.02 each step)
+hard cap ≈ 1.70
+```
+
+Opening composition is gradual (fodder only 0–30s; sprinters after 30s; hunters after 2m; elites after 90s).
+
+## Pressure director
+
+`normal → telegraph → surge → recovery → normal`. One surge at a time. Kinds: sprinters, pincer, bruiser, encircle, elite (time-gated), flood. Recovery ≈10s at ~60% spawn rate.
+
+## Boss schedule backlog
+
+Deferred bosses use FIFO `pendingBossIndices` (exact one-based indices). Mega indices retain Mega status. Never reconstruct deferred indices from `bossesSpawned`.
 
 ## Endless difficulty
 
 Enemy and boss growth must eventually exceed the player’s additive Overclock growth.
 
-Current direction:
-
 ```text
 m = elapsedSeconds / 60
-enemyHealth = 1 + 0.12m + 0.02*max(0,m-8)^2
-enemyDamage = 1 + 0.08m + 0.05*max(0,m-10)
-enemySpeed  = min(1.30, 1 + 0.015m)
+enemyHealth = 1 + 0.12m + 0.02*max(0,m-5)^2 + collapse
+enemyDamage = 1 + 0.06m + 0.03*max(0,m-10) + collapse
+enemySpeed  = min(1.70, gentle curve above + collapse)
 ```
 
-Boss index `n` arrives at `n * 120` seconds. Boss health grows multiplicatively while recovery shortens within a safe telegraph floor. The game ends through readable pressure, not an arbitrary kill timer.
+Boss index `n` arrives at `n * 120` seconds. Concurrent bosses are capped; excess schedules enqueue.
+
+## Weapon balance (starters)
+
+Deterministic benchmark harness: `survivorWeaponBenchmark.ts` (single durable target, sparse, dense, mixed-elite, mobile/off-axis).
+
+| Hero | Starter | Role |
+|---|---|---|
+| Boswell | Microdrone Swarm | Reliable homing |
+| Fitzwilliam | Rail Lance | Pierce lanes |
+| Fortunato | Bio-Plasma Glob | Splash + puddle |
+| Rutherford | Rocket Barrage | Cluster delayed strikes |
+
+Weighted starter output targets within ~±15% of mean. L1–L5 progression uses mechanical breakpoints (extra projectiles, pierce, puddle, bounce). Overclock after L5: **+7% additive** damage per displayed level.
 
 ## Bosses
 
@@ -183,6 +225,10 @@ Records rank by survival time, then kills and bosses defeated as tie-breakers. A
 | `survivor-repulsor` | Repulsor radius, knockback, and VFX |
 | `survivor-ship` | Afterburner, thrusters, and pickup reach |
 | `survivor-damage` | Damage-number presentation |
+| `survivor-cache` | Protocol Cache presentation |
+| `survivor-recall` | Gravitic Recall energy pull |
+| `survivor-mega` | Mega-Boss |
+| `survivor-miniboss` | Miniboss melee slam |
 
 Example:
 

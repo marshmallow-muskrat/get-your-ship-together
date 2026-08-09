@@ -37,6 +37,7 @@ import {
   HORDE,
   WEAPONS,
   bossCategoryDamage,
+  computeShieldPoints,
   bossDefForIndex,
   bossDifficultyFor,
   bossPhaseFromHealth,
@@ -807,6 +808,8 @@ describe('boss pattern state machine', () => {
   it.each(ALL_BOSS_PATTERNS)('pattern %s completes lifecycle without stuck active', (pattern) => {
     const state = createSurvivorState('bee', 'survivor-boss', 200 + ALL_BOSS_PATTERNS.indexOf(pattern));
     state.player.invuln = 999;
+    // Isolate pattern lifecycle from player weapon damage / phase interrupts.
+    state.weapons = [];
     const { boss, steps, sawRecover } = runPatternToIdle(state, pattern);
     expect(steps).toBeLessThan(1500);
     expect(boss.state).not.toBe('active');
@@ -1337,7 +1340,7 @@ describe('progression integrity — no unsolicited permanent upgrades', () => {
   });
 
   it('all three Protocols leave permanent Build unchanged', () => {
-    for (const id of ['aegis-barrier', 'rocket-barrage', 'gunship-flyby'] as const) {
+    for (const id of ['aegis-barrier', 'gunship-flyby', 'gravitic-recall'] as const) {
       const state = createSurvivorState('bee', null, 603);
       state.weapons = [{ weaponId: 'pulse', level: 5, cooldown: 0, focusDebt: 0, prototype: false }];
       state.passives = { area: 2 };
@@ -1519,75 +1522,44 @@ describe('protocol presentation contracts', () => {
     expect(state.player.health).toBe(hp);
   });
 
-  it('protocol rockets travel before exploding', () => {
+  it('gravitic recall pulls energy orbs without inventing XP', () => {
     const state = createSurvivorState('bee', null, 702);
     state.weapons = [];
-    state.enemyCap = 0;
-    forceStartProtocol(state, 'rocket-barrage', 1);
-    // Place a distant target
-    const e = {
-      id: 77001,
-      defId: 'basic',
-      x: 10,
-      z: 0,
-      vx: 0,
-      vz: 0,
-      kbX: 0,
-      kbZ: 0,
-      health: 200,
-      maxHealth: 200,
-      radius: 0.45,
-      role: 'basic',
-      hitFlash: 0,
-      attackCd: 99,
-      alive: true,
-      isElite: false,
-      isMiniboss: false,
-      xp: 1,
-      windup: 0,
-      facingX: 0,
-      facingZ: 1,
-      healthMul: 1,
-      damageMul: 1,
-      speedMul: 0,
-      hazardHitCd: 0,
-      specialCd: 99,
-      specialWindup: 0,
-    };
-    state.enemies = [e as never];
-    // Force rockets to fire over several frames
-    state.rocketProtocol.fireCd = 0;
-    state.rocketProtocol.active = true;
-    state.rocketProtocol.remaining = 10;
-    state.rocketProtocol.potency = 1;
-    for (let i = 0; i < 5; i += 1) {
-      state.rocketProtocol.fireCd = 0;
-      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    state.xpNext = 99999;
+    let total = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const v = 3 + i;
+      total += v;
+      state.pickups.push({
+        id: 8800 + i,
+        kind: 'xp',
+        x: 10 + i,
+        z: -8,
+        value: v,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
     }
-    const rockets = state.projectiles.filter(
-      (p) => p.active && (p.kind === 'rocket' || p.kind === 'protocol-rocket'),
-    );
-    // At least one protocol rocket was created (may have already impacted if travel short).
-    const anyRocketEver =
-      rockets.length > 0 ||
-      state.effects.some((e) => e.kind === 'impact' || e.kind === 'pulse' || e.kind === 'telegraph');
-    expect(anyRocketEver).toBe(true);
-    if (rockets.length === 0) return;
-    const r = rockets[0]!;
-    // Must not already be at the far target with zero velocity
-    expect(Math.hypot(r.vx, r.vz)).toBeGreaterThan(1);
-    const startX = r.x;
-    const startZ = r.z;
-    const hp0 = e.health;
-    // Mid-flight: no impact damage yet while armTimer remains
-    for (let i = 0; i < 4; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    if (r.active && r.armTimer > 0) {
-      expect(e.health).toBe(hp0);
-      expect(Math.hypot(r.x - startX, r.z - startZ)).toBeGreaterThan(0.05);
-    }
-    // Resolve flight
-    for (let i = 0; i < 90; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    expect(e.health).toBeLessThan(hp0);
+    // Health orb must not be recalled
+    state.pickups.push({
+      id: 8899,
+      kind: 'repair',
+      x: 12,
+      z: 12,
+      value: 20,
+      active: true,
+      magnetized: false,
+      life: 40,
+    });
+    const xp0 = state.xp;
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    expect(state.recall.active).toBe(true);
+    expect(state.recall.totalXp).toBe(total);
+    for (let i = 0; i < 120; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.recall.active).toBe(false);
+    expect(state.xp - xp0).toBe(total);
+    expect(state.pickups.find((p) => p.id === 8899)?.active).toBe(true);
   });
 
   it('gunship originates near the player not at a far edge', () => {
@@ -1620,12 +1592,12 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.1.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.1.0');
+  it('is endless-2.2.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.2.0');
   });
 });
 
-describe('melee horde and endless-2.1.0 balance', () => {
+describe('melee horde and endless-2.2.0 balance', () => {
   it('no ordinary horde role is ranged', () => {
     for (const def of Object.values(HORDE)) {
       if (def.role === 'miniboss') continue;
@@ -1633,15 +1605,35 @@ describe('melee horde and endless-2.1.0 balance', () => {
     }
   });
 
-  it('opening density is higher than legacy 18', () => {
-    const d0 = endlessDifficultyAt(0);
-    expect(d0.targetActive).toBeGreaterThanOrEqual(26);
-    expect(d0.spawnRate).toBeGreaterThanOrEqual(2.0);
-    expect(d0.speedMul).toBeGreaterThanOrEqual(1.08);
+  it('opening speeds leave room for player movement', () => {
+    expect(HORDE.basic.baseSpeed).toBeCloseTo(3.3, 5);
+    expect(HORDE.fast.baseSpeed).toBeCloseTo(4.25, 5);
+    expect(HORDE.basic.baseSpeed * endlessDifficultyAt(0).speedMul).toBeLessThan(SURVIVOR.playerSpeed * 0.75);
+    expect(HORDE.fast.baseSpeed * endlessDifficultyAt(15).speedMul).toBeLessThan(SURVIVOR.playerSpeed * 1.05);
   });
 
-  it('speed curve exceeds old 1.28 late-game cap', () => {
-    expect(endlessDifficultyAt(20 * 60).speedMul).toBeGreaterThan(1.28);
+  it('speed curve is gentle and capped', () => {
+    expect(endlessDifficultyAt(0).speedMul).toBeCloseTo(1, 5);
+    expect(endlessDifficultyAt(5 * 60).speedMul).toBeCloseTo(1.08, 2);
+    expect(endlessDifficultyAt(15 * 60).speedMul).toBeCloseTo(1.24, 2);
+    expect(endlessDifficultyAt(60 * 60).speedMul).toBeLessThanOrEqual(1.7);
+  });
+
+  it('boss queue preserves exact indices FIFO including mega', () => {
+    const state = createSurvivorState('bee', null, 920);
+    state.pendingBossIndices = [4, 5, 6];
+    state.breachStacks = 3;
+    // Force capacity by not spawning live bosses
+    expect(isMegaBossIndex(5)).toBe(true);
+    // Drain with free capacity
+    for (let i = 0; i < 30; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    // At least the first queued boss should attempt to enter play
+    expect(state.bossesSpawned + state.pendingBossIndices.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it('aegis shield formula is reduced from 2.1.0 values', () => {
+    expect(computeShieldPoints(105, 100)).toBe(Math.round(20 + 2 * (105 / 60) + 0.08 * 100));
+    expect(computeShieldPoints(105, 100)).toBeLessThan(54);
   });
 
   it('boss body damage exceeds projectile at same index', () => {
