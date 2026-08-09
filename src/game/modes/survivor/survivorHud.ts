@@ -15,6 +15,15 @@ import {
   type ActionId,
   type KeybindMap,
 } from './survivorKeybinds';
+import { SURGE_LABEL } from './survivorSim';
+import {
+  DEATH_LOG_WINDOW,
+  damageTakenLabel,
+  deathLogEntries,
+  formReport,
+  sourceLabel,
+  sourceReport,
+} from './survivorTelemetry';
 import {
   formatSurvivalTime,
   getHeroLeaderboard,
@@ -23,6 +32,9 @@ import {
 } from './survivorRecords';
 import { aliveBossCount, primaryBoss } from './survivorState';
 import type { HeroId } from '../../content/heroes';
+
+/** Run-report views. Source and form are deliberately separate. */
+type StatsTab = 'source' | 'form' | 'run';
 
 export type HudPublishOpts = {
   settingsOpen: boolean;
@@ -108,6 +120,7 @@ export class SurvivorHud {
           <div id="sv-bosses-queued" class="sv-bosses-active hidden"></div>
         </div>
         <div class="sv-meta">
+          <span id="sv-pressure" class="sv-pressure sv-pressure-normal">NORMAL</span>
           <span>LVL <strong id="sv-level">1</strong></span>
           <span>KILLS <strong id="sv-kills">0</strong></span>
           <span>BOSSES <strong id="sv-bosses">0</strong></span>
@@ -162,9 +175,12 @@ export class SurvivorHud {
           </button>
         </div>
       </div>
+      <div id="sv-surge-banner" class="sv-surge-banner hidden">SURGE INCOMING</div>
+      <div id="sv-surge-arrows" class="sv-surge-arrows hidden"></div>
       <div id="sv-build" class="sv-build"></div>
       <div id="sv-mech-toast" class="sv-mech-toast hidden">MECH CORE READY</div>
 
+      <div id="sv-hit-vignette" class="sv-hit-vignette"></div>
       <div id="sv-metrics" class="sv-metrics hidden"></div>
       <div id="sv-dmg" class="sv-dmg-layer"></div>
 
@@ -173,6 +189,7 @@ export class SurvivorHud {
         <h2>Paused</h2>
         <div class="sv-end-actions sv-pause-actions">
           <button type="button" id="sv-resume" class="sv-btn">RESUME</button>
+          <button type="button" id="sv-pause-stats" class="sv-btn ghost">RUN STATS</button>
           <button type="button" id="sv-settings" class="sv-btn">SETTINGS</button>
           <button type="button" id="sv-leaderboard" class="sv-btn ghost">LEADERBOARDS</button>
           <button type="button" id="sv-pause-restart" class="sv-btn ghost">RESTART RUN</button>
@@ -237,10 +254,22 @@ export class SurvivorHud {
         <p id="sv-end-body"></p>
         <p id="sv-end-record" class="sv-end-record hidden">NEW RECORD</p>
         <div id="sv-end-build" class="sv-end-build"></div>
+        <div id="sv-death-log" class="sv-death-log"></div>
         <div class="sv-end-actions">
           <button type="button" id="sv-restart" class="sv-btn">RUN AGAIN</button>
+          <button type="button" id="sv-end-stats" class="sv-btn">RUN STATS</button>
           <button type="button" id="sv-end-lb" class="sv-btn ghost">LEADERBOARDS</button>
           <button type="button" id="sv-crew" class="sv-btn ghost">CREW SELECT</button>
+        </div>
+      </div>
+
+      <div id="sv-stats-modal" class="sv-modal sv-stats hidden">
+        <p class="eyebrow">RUN TELEMETRY</p>
+        <h2>Run Report</h2>
+        <div id="sv-stats-tabs" class="sv-lb-tabs"></div>
+        <div id="sv-stats-body" class="sv-stats-body"></div>
+        <div class="sv-end-actions">
+          <button type="button" id="sv-close-stats" class="sv-btn">BACK</button>
         </div>
       </div>
       <div id="sv-help" class="sv-help">
@@ -260,6 +289,10 @@ export class SurvivorHud {
     this.root.querySelector('#sv-pause-crew')?.addEventListener('click', this.onCrew);
     this.root.querySelector('#sv-close-settings')?.addEventListener('click', this.onCloseSettings);
     this.root.querySelector('#sv-reset-binds')?.addEventListener('click', this.onResetKeybinds);
+
+    this.root.querySelector('#sv-pause-stats')?.addEventListener('click', () => this.setStatsOpen(true));
+    this.root.querySelector('#sv-end-stats')?.addEventListener('click', () => this.setStatsOpen(true));
+    this.root.querySelector('#sv-close-stats')?.addEventListener('click', () => this.setStatsOpen(false));
 
     this.buildBindList();
     this.root.querySelector('#sv-leaderboard')?.addEventListener('click', () => this.setLeaderboardOpen(true));
@@ -475,7 +508,10 @@ export class SurvivorHud {
     if (xp) xp.style.width = `${Math.min(100, (state.xp / state.xpNext) * 100)}%`;
     set('sv-xp-num', `${Math.floor(state.xp)} / ${state.xpNext}`);
 
+    this.statsState = state;
+    this.publishHitFeedback(state);
     this.publishAbilities(state);
+    this.publishPressure(state);
     this.publishShield(state);
     this.publishBanners(state);
     this.publishProtocol(state);
@@ -483,6 +519,7 @@ export class SurvivorHud {
     this.publishWeapons(state);
     this.publishPause(state);
     this.root.querySelector('#sv-settings-modal')?.classList.toggle('hidden', !this.settingsOpen);
+    this.root.querySelector('#sv-stats-modal')?.classList.toggle('hidden', !this.statsOpen);
 
     const metrics = this.root.querySelector('#sv-metrics');
     if (metrics) {
@@ -526,7 +563,7 @@ export class SurvivorHud {
     this.setCooldownOverlay(dEl, p.dodgeCd, SURVIVOR.dodge.cooldown);
 
     // Mech ready flourish
-    if (p.mechCharge >= 1 && !p.mechReadyAnnounced && p.form === 'astronaut' && state.phase === 'playing') {
+    if (p.mechCd <= 0 && !p.mechReadyAnnounced && p.form === 'astronaut' && state.phase === 'playing') {
       p.mechReadyAnnounced = true;
       const toast = this.root.querySelector('#sv-mech-toast');
       if (toast) {
@@ -574,8 +611,9 @@ export class SurvivorHud {
     if (eActive) this.setCooldownOverlay(eEl, 0, 1);
     else this.setCooldownOverlay(eEl, p.shipCd, SURVIVOR.ship.cooldown);
 
+    // Mech is a fixed-cooldown ultimate: the meter shows readiness, not kill charge.
     const rActive = p.form === 'mech';
-    const rReady = p.mechCharge >= 1 && p.form === 'astronaut' && p.alive;
+    const rReady = p.mechCd <= 0 && p.form === 'astronaut' && p.alive;
     const rBlocked = p.form === 'ship';
     rEl?.classList.toggle('ready', rReady);
     rEl?.classList.toggle('pulse-ready', rReady);
@@ -585,14 +623,67 @@ export class SurvivorHud {
       if (rActive) rState.textContent = `${Math.max(0, p.mechDuration).toFixed(1)}s`;
       else if (rBlocked) rState.textContent = 'SHIP';
       else if (rReady) rState.textContent = 'READY';
-      else rState.textContent = `${Math.floor(p.mechCharge * 100)}%`;
+      else rState.textContent = this.formatCd(p.mechCd);
     }
     if (rActive) {
-      this.setCooldownOverlay(rEl, SURVIVOR.mech.duration - p.mechDuration, SURVIVOR.mech.duration);
+      this.setCooldownOverlay(rEl, p.mechDuration, SURVIVOR.mech.duration);
     } else {
-      this.setChargeOverlay(rEl, p.mechCharge);
+      this.setCooldownOverlay(rEl, p.mechCd, Math.max(0.001, p.mechCdMax));
+      rEl?.classList.toggle('charged', p.mechCd <= 0);
     }
   }
+
+  /** Compact pressure-director indicator: NORMAL / SURGE INCOMING / SURGE / RECOVERY. */
+  private publishPressure(state: SurvivorState): void {
+    const chip = this.root.querySelector('#sv-pressure');
+    const banner = this.root.querySelector('#sv-surge-banner');
+    const arrows = this.root.querySelector('#sv-surge-arrows');
+    const s = state.surge;
+    if (chip) {
+      const label =
+        s.phase === 'telegraph'
+          ? 'INCOMING'
+          : s.phase === 'surge'
+            ? 'SURGE'
+            : s.phase === 'recovery'
+              ? 'RECOVERY'
+              : 'NORMAL';
+      chip.textContent = label;
+      chip.className = `sv-pressure sv-pressure-${s.phase}`;
+    }
+    if (banner) {
+      const show = s.phase === 'telegraph' && state.phase === 'playing';
+      banner.classList.toggle('hidden', !show);
+      if (show) {
+        banner.textContent = SURGE_LABEL[s.kind] ?? 'SURGE INCOMING';
+      }
+    }
+    if (arrows instanceof HTMLElement) {
+      const show =
+        (s.phase === 'telegraph' || s.phase === 'surge') &&
+        state.phase === 'playing' &&
+        s.activeEdges.length > 0;
+      arrows.classList.toggle('hidden', !show);
+      if (show) {
+        // One arrow per edge the wave will actually arrive from.
+        const key = `${s.phase}:${s.activeEdges.join(',')}`;
+        if (key !== this.lastSurgeArrowKey) {
+          this.lastSurgeArrowKey = key;
+          arrows.replaceChildren();
+          for (const edge of s.activeEdges) {
+            const el = document.createElement('span');
+            el.className = `sv-surge-arrow sv-surge-edge-${edge}`;
+            el.textContent = '▲';
+            arrows.appendChild(el);
+          }
+        }
+      } else {
+        this.lastSurgeArrowKey = '';
+      }
+    }
+  }
+
+  private lastSurgeArrowKey = '';
 
   private setCooldownOverlay(el: Element | null | undefined, remaining: number, max: number): void {
     if (!(el instanceof HTMLElement)) return;
@@ -811,35 +902,73 @@ export class SurvivorHud {
             formatKeyCode(binds.choice2),
             formatKeyCode(binds.choice3),
           ];
-          const kindLabel = (c: (typeof state.choices)[0]) => {
+          const fallbackLabel = (c: (typeof state.choices)[0]) => {
             if (c.kind === 'passive' && c.passiveId) {
-              const owned = (state.passives[c.passiveId] ?? 0) > 0;
-              return owned ? 'PASSIVE' : 'NEW PASSIVE';
+              return (state.passives[c.passiveId] ?? 0) > 0 ? 'PASSIVE UPGRADE' : 'NEW PASSIVE';
             }
             if (c.kind === 'new-weapon') return 'NEW WEAPON';
             if (c.kind === 'protocol') return 'PROTOCOL';
-            if (c.kind === 'weapon' && c.weaponId) {
-              const slot = state.weapons.find((w) => w.weaponId === c.weaponId);
-              if (slot && slot.level >= 5) return 'WEAPON OVERCLOCK';
-            }
-            return 'WEAPON';
+            return 'WEAPON UPGRADE';
           };
-          box.innerHTML = state.choices
-            .map(
-              (c, i) =>
-                `<button type="button" class="sv-choice" data-i="${i}">
-                  <span class="eyebrow">${kindLabel(c)} · ${labels[i] ?? i + 1}</span>
-                  <strong>${c.title}</strong>
-                  <small>${c.body.replace(/\n/g, '<br/>')}</small>
-                </button>`,
-            )
-            .join('');
-          box.querySelectorAll<HTMLButtonElement>('.sv-choice').forEach((btn) => {
+          // Built with DOM nodes and textContent — card copy is data, never markup.
+          box.replaceChildren();
+          state.choices.forEach((c, i) => {
+            const card = c.card;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sv-choice sv-card';
+            btn.dataset.i = String(i);
+
+            const badge = document.createElement('span');
+            badge.className = 'eyebrow sv-card-badge';
+            badge.textContent = `${card?.category ?? fallbackLabel(c)} · ${labels[i] ?? i + 1}`;
+            btn.appendChild(badge);
+
+            // Parent weapon/passive and the exact level transition.
+            const parent = document.createElement('span');
+            parent.className = 'sv-card-parent';
+            parent.textContent = card
+              ? card.levels
+                ? `${card.parent} · ${card.levels}`
+                : card.parent
+              : '';
+            if (parent.textContent) btn.appendChild(parent);
+
+            const name = document.createElement('strong');
+            name.className = 'sv-card-name';
+            name.textContent = card?.name ?? c.title;
+            btn.appendChild(name);
+
+            const summary = document.createElement('small');
+            summary.className = 'sv-card-summary';
+            summary.textContent = card?.summary ?? c.body;
+            btn.appendChild(summary);
+
+            if (card && card.stats.length > 0) {
+              const stats = document.createElement('span');
+              stats.className = 'sv-card-stats';
+              for (const line of card.stats) {
+                const row = document.createElement('span');
+                row.className = 'sv-card-stat';
+                row.textContent = line;
+                stats.appendChild(row);
+              }
+              btn.appendChild(stats);
+            }
+
+            if (card?.tradeoff) {
+              const trade = document.createElement('span');
+              trade.className = 'sv-card-tradeoff';
+              trade.textContent = card.tradeoff;
+              btn.appendChild(trade);
+            }
+
             btn.addEventListener('pointerdown', (ev) => {
               ev.preventDefault();
               ev.stopPropagation();
-              this.onChoice(Number(btn.dataset.i));
+              this.onChoice(i);
             });
+            box.appendChild(btn);
           });
         }
       }
@@ -882,6 +1011,7 @@ export class SurvivorHud {
       );
       const nr = this.root.querySelector('#sv-end-record');
       if (nr) nr.classList.toggle('hidden', !(rec?.isNewOverall || rec?.isNewHeroBest));
+      this.renderDeathLog(state);
       const eb = this.root.querySelector('#sv-end-build');
       if (eb) {
         eb.innerHTML = state.weapons
@@ -889,6 +1019,204 @@ export class SurvivorHud {
           .join(' · ');
       }
     }
+  }
+
+  /** Red screen-edge vignette on damage — strong but brief, never opaque. */
+  private publishHitFeedback(state: SurvivorState): void {
+    const el = this.root.querySelector<HTMLElement>('#sv-hit-vignette');
+    if (!el) return;
+    const p = state.player;
+    // Cap well below 1 so the arena stays readable even on a heavy hit.
+    el.style.opacity = String(Math.min(0.85, Math.max(0, p.hitVignette)));
+  }
+
+  private statsOpen = false;
+  private statsTab: StatsTab = 'source';
+  private statsState: SurvivorState | null = null;
+
+  setStatsOpen(open: boolean): void {
+    this.statsOpen = open;
+    this.root.querySelector('#sv-stats-modal')?.classList.toggle('hidden', !open);
+    if (open && this.statsState) this.renderStats(this.statsState);
+  }
+
+  /** Small helper: a labelled row in the run report. */
+  private statRow(parent: Element, cells: string[], cls = ''): void {
+    const row = document.createElement('div');
+    row.className = `sv-stats-row ${cls}`.trim();
+    for (const c of cells) {
+      const el = document.createElement('span');
+      el.textContent = c;
+      row.appendChild(el);
+    }
+    parent.appendChild(row);
+  }
+
+  /**
+   * Recount-style run report.
+   *
+   * Source and form are separate views on purpose. A Mech-form Rail Lance hit belongs
+   * to both "Rail Lance" and "Mech"; presenting them as one nested tree would make the
+   * percentages sum past 100%.
+   */
+  private renderStats(state: SurvivorState): void {
+    const tabs = this.root.querySelector('#sv-stats-tabs');
+    const body = this.root.querySelector('#sv-stats-body');
+    if (!tabs || !body) return;
+    const t = state.telemetry;
+
+    tabs.replaceChildren();
+    const tabDefs: Array<{ id: StatsTab; label: string }> = [
+      { id: 'source', label: 'BY SOURCE' },
+      { id: 'form', label: 'BY FORM' },
+      { id: 'run', label: 'RUN' },
+    ];
+    for (const def of tabDefs) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `sv-lb-tab${def.id === this.statsTab ? ' active' : ''}`;
+      btn.textContent = def.label;
+      btn.addEventListener('click', () => {
+        this.statsTab = def.id;
+        this.renderStats(state);
+      });
+      tabs.appendChild(btn);
+    }
+
+    body.replaceChildren();
+    const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+    const num = (v: number) => Math.round(v).toLocaleString();
+
+    if (this.statsTab === 'source') {
+      const rows = sourceReport(t);
+      this.statRow(body, ['Source', 'Damage', '%', 'DPS', 'Hits', 'Kills', 'Boss dmg', 'Max hit'], 'head');
+      if (rows.length === 0) {
+        this.statRow(body, ['No damage recorded yet']);
+      }
+      for (const r of rows) {
+        this.statRow(body, [
+          sourceLabel(r.id, (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id),
+          num(r.damage),
+          pct(r.share),
+          r.dps.toFixed(1),
+          String(r.hits),
+          String(r.kills),
+          num(r.bossDamage),
+          num(r.maxHit),
+        ]);
+      }
+      const note = document.createElement('p');
+      note.className = 'sv-stats-note';
+      note.textContent =
+        'Damage is health actually removed. Overkill on an already-dying target is not counted.';
+      body.appendChild(note);
+    } else if (this.statsTab === 'form') {
+      this.statRow(body, ['Form', 'Damage', '%', 'Uptime', 'Time', 'DPS while active'], 'head');
+      for (const r of formReport(t)) {
+        this.statRow(body, [
+          r.form === 'astronaut' ? 'Astronaut' : r.form === 'ship' ? 'Ship' : 'Mech',
+          num(r.damage),
+          pct(r.share),
+          pct(r.uptime),
+          formatSurvivalTime(r.time),
+          r.dps.toFixed(1),
+        ]);
+      }
+    } else {
+      this.statRow(body, ['Metric', 'Value'], 'head');
+      this.statRow(body, ['Elite kills', String(t.eliteKills)]);
+      this.statRow(body, ['Miniboss kills', String(t.minibossKills)]);
+      this.statRow(body, ['Healed by repair orbs', num(t.healedByOrbs)]);
+      this.statRow(body, ['Healed by Nanite Bleed', num(t.healedByRegen)]);
+      this.statRow(body, ['Absorbed by Aegis', num(t.shieldAbsorbed)]);
+      const forms = formReport(t);
+      const mech = forms.find((f) => f.form === 'mech');
+      const ship = forms.find((f) => f.form === 'ship');
+      this.statRow(body, ['Mech uptime', mech ? pct(mech.uptime) : '0%']);
+      this.statRow(body, ['Ship uptime', ship ? pct(ship.uptime) : '0%']);
+
+      if (t.bossKills.length > 0) {
+        this.statRow(body, ['Boss', 'Time to kill'], 'head');
+        for (const b of t.bossKills) {
+          this.statRow(body, [
+            `#${b.index} ${b.displayName}${b.isMega ? ' (Mega)' : ''}`,
+            `${b.timeToKill.toFixed(1)}s`,
+          ]);
+        }
+      }
+      if (t.damageTaken.size > 0) {
+        this.statRow(body, ['Damage taken by source', 'Total'], 'head');
+        const taken = [...t.damageTaken.entries()].sort((a, b) => b[1] - a[1]);
+        for (const [kind, amount] of taken) {
+          this.statRow(body, [damageTakenLabel(kind), num(amount)]);
+        }
+      }
+      const choices = [...t.cacheChoices.entries()];
+      if (choices.length > 0) {
+        this.statRow(body, ['Protocol Cache picks', 'Count'], 'head');
+        for (const [id, n] of choices) this.statRow(body, [id.replace(/-/g, ' '), String(n)]);
+      }
+      const megas = [...t.megaChoices.entries()];
+      if (megas.length > 0) {
+        this.statRow(body, ['Mega Protocol picks', 'Count'], 'head');
+        for (const [id, n] of megas) this.statRow(body, [id.replace(/-/g, ' '), String(n)]);
+      }
+    }
+  }
+
+  /**
+   * Exact death log.
+   *
+   * States what killed the player and with which mechanic, then lists the recent hits
+   * that got them there. Built entirely with DOM nodes and textContent — enemy and
+   * attack names are data and never become markup.
+   */
+  private renderDeathLog(state: SurvivorState): void {
+    const host = this.root.querySelector('#sv-death-log');
+    if (!host) return;
+    host.replaceChildren();
+    const t = state.telemetry;
+    const blow = t.killingBlow;
+
+    const headline = document.createElement('p');
+    headline.className = 'sv-death-headline';
+    headline.textContent = blow
+      ? `Killed by ${blow.source.displayName} — ${blow.source.attackName}`
+      : 'Containment lost';
+    host.appendChild(headline);
+
+    if (blow) {
+      const detail = document.createElement('p');
+      detail.className = 'sv-death-detail';
+      detail.textContent = `Final hit ${Math.round(blow.applied)} damage (${Math.round(blow.raw)} raw)`;
+      host.appendChild(detail);
+    }
+
+    const recent = deathLogEntries(t, state.time);
+    if (recent.length === 0) return;
+    const list = document.createElement('div');
+    list.className = 'sv-death-list';
+    const title = document.createElement('span');
+    title.className = 'eyebrow';
+    title.textContent = `LAST ${Math.round(DEATH_LOG_WINDOW)} SECONDS`;
+    list.appendChild(title);
+    for (const r of recent) {
+      const row = document.createElement('div');
+      row.className = 'sv-death-row';
+      const add = (text: string, cls?: string) => {
+        const el = document.createElement('span');
+        if (cls) el.className = cls;
+        el.textContent = text;
+        row.appendChild(el);
+      };
+      add(formatSurvivalTime(r.time), 'sv-death-time');
+      add(`${r.source.displayName} · ${r.source.attackName}`, 'sv-death-src');
+      add(`−${Math.round(r.applied)}`, 'sv-death-amt');
+      if (r.shieldAbsorbed > 0) add(`◈${Math.round(r.shieldAbsorbed)}`, 'sv-death-shield');
+      add(`${Math.round(r.remaining)} left`, 'sv-death-left');
+      list.appendChild(row);
+    }
+    host.appendChild(list);
   }
 
   private publishDamage(state: SurvivorState): void {

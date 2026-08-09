@@ -1,4 +1,20 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import type { DamageSource } from './survivorTelemetry';
+
+/** Minimal typed sources for tests that only care about mitigation, not attribution. */
+const TEST_HORDE_SOURCE: DamageSource = {
+  kind: 'horde-contact',
+  displayName: 'Blob',
+  attackName: 'Contact',
+  role: 'fodder',
+};
+const TEST_BOSS_SOURCE: DamageSource = {
+  kind: 'boss-body',
+  displayName: 'Breach Demon',
+  attackName: 'Body Slam',
+  bossIndex: 1,
+  isMega: false,
+};
 import { focusLossTransition, shouldHandleVisibility } from './survivorFocus';
 import type { ActionId } from './survivorKeybinds';
 import {
@@ -53,6 +69,7 @@ import {
   bossTimeForIndex,
   endlessDifficultyAt,
   isEnemyEligibleAt,
+  moveSpeedBonus,
   formatOverclockLabel,
   heroStarterWeapon,
   hullPlatingGainAtLevel,
@@ -509,9 +526,9 @@ describe('per-hero leaderboards', () => {
 });
 
 describe('mech and choices', () => {
-  it('mech activates when charged', () => {
+  it('mech activates when off cooldown', () => {
     const state = createSurvivorState('flamingo', 'survivor-mech', 9);
-    expect(state.player.mechCharge).toBe(1);
+    expect(state.player.mechCd).toBe(0);
     stepSurvivor(state, { ...EMPTY_SURVIVOR_INPUT, mechPressed: true }, SURVIVOR.fixedDt);
     expect(state.player.form).toBe('mech');
   });
@@ -526,7 +543,7 @@ describe('mech and choices', () => {
 
   it('ship and mech mutual exclusion', () => {
     const state = createSurvivorState('flamingo', null, 3);
-    state.player.mechCharge = 1;
+    state.player.mechCd = 0;
     expect(tryShip(state)).toBe(true);
     expect(tryMech(state)).toBe(false);
   });
@@ -549,11 +566,11 @@ describe('breach shielding', () => {
     state.passives['breach-shielding'] = 5;
     state.player.invuln = 0;
     const hp = state.player.health;
-    damagePlayer(state, 50, 'boss');
+    damagePlayer(state, 50, TEST_BOSS_SOURCE);
     expect(hp - state.player.health).toBeCloseTo(30, 1);
     state.player.health = 100;
     state.player.invuln = 0;
-    damagePlayer(state, 50, 'enemy');
+    damagePlayer(state, 50, TEST_HORDE_SOURCE);
     expect(100 - state.player.health).toBeCloseTo(50, 1);
   });
 });
@@ -664,7 +681,7 @@ describe('shield system', () => {
     const hp = state.player.health;
     const sh = state.player.shieldPoints;
     state.player.invuln = 0;
-    damagePlayer(state, sh + 20, 'enemy');
+    damagePlayer(state, sh + 20, TEST_HORDE_SOURCE);
     expect(state.player.shieldPoints).toBe(0);
     expect(state.player.health).toBeLessThan(hp);
   });
@@ -890,7 +907,9 @@ describe('mixed level-up offers (passives not starved)', () => {
       const ids = new Set(choices.map((c) => c.id));
       expect(ids.size).toBe(3);
       if (choices.some((c) => c.kind === 'passive')) passiveHits += 1;
-      if (choices.some((c) => c.kind === 'weapon' && (c.title.includes('L6') || c.title.includes('L7') || c.title.includes('L8') || c.title.includes('L9')))) {
+      // Category is now explicit on the card, so this asserts the real thing instead of
+      // pattern-matching a level number out of the title text.
+      if (choices.some((c) => c.card?.category === 'OVERCLOCK')) {
         overclockHits += 1;
       }
     }
@@ -1220,11 +1239,26 @@ describe('protocol cache and gunship', () => {
 });
 
 describe('boss visual scale contract', () => {
-  it('normal boss visualScale is large and mega is ~2x', () => {
+  it('normal boss sizes are unchanged and Mega is 1.5x, not 2x', () => {
     for (const def of BOSS_DEFS) {
+      // Regular boss sizes read well and are deliberately untouched by 2.3.0.
       expect(def.visualScale).toBeGreaterThanOrEqual(3.4);
-      expect(def.visualScale * SURVIVOR.megaVisualMul).toBeGreaterThanOrEqual(def.visualScale * 1.9);
     }
+    // 2.0 -> 1.5 is the authored 25% reduction to the presented Mega-Boss.
+    expect(SURVIVOR.megaVisualMul).toBeCloseTo(1.5, 5);
+    // Still unmistakably larger than a regular boss.
+    expect(SURVIVOR.megaVisualMul).toBeGreaterThan(1.25);
+  });
+
+  it('mega collider tracks the reduced visible body', () => {
+    // The collider must shrink with the model, or Repulse, exhaust, weapon hits and
+    // body contact would all resolve against a hitbox larger than what is drawn.
+    expect(SURVIVOR.megaColliderMul).toBeLessThan(SURVIVOR.megaVisualMul);
+    expect(SURVIVOR.megaColliderMul).toBeGreaterThan(1.15);
+    // Collider growth stays proportional to visual growth within a tight tolerance.
+    const ratio = SURVIVOR.megaColliderMul / SURVIVOR.megaVisualMul;
+    expect(ratio).toBeGreaterThan(0.8);
+    expect(ratio).toBeLessThan(0.95);
   });
 });
 
@@ -1458,7 +1492,7 @@ describe('protocol presentation contracts', () => {
     expect(state.player.shieldTime).toBeGreaterThan(0);
     const hp = state.player.health;
     state.player.invuln = 0;
-    damagePlayer(state, 20, 'enemy');
+    damagePlayer(state, 20, TEST_HORDE_SOURCE);
     expect(state.player.shieldPoints).toBeLessThan(80);
     expect(state.player.health).toBe(hp);
   });
@@ -1493,12 +1527,12 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.2.1', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.2.1');
+  it('is endless-2.3.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.3.0');
   });
 });
 
-describe('melee horde and endless-2.2.1 balance', () => {
+describe('melee horde and endless-2.3.0 balance', () => {
   it('no ordinary horde role is ranged', () => {
     for (const def of Object.values(HORDE)) {
       if (def.role === 'miniboss') continue;
@@ -1506,18 +1540,27 @@ describe('melee horde and endless-2.2.1 balance', () => {
     }
   });
 
-  it('opening speeds leave room for player movement', () => {
-    expect(HORDE.basic.baseSpeed).toBeCloseTo(3.3, 5);
-    expect(HORDE.fast.baseSpeed).toBeCloseTo(4.25, 5);
-    expect(HORDE.basic.baseSpeed * endlessDifficultyAt(0).speedMul).toBeLessThan(SURVIVOR.playerSpeed * 0.75);
-    expect(HORDE.fast.baseSpeed * endlessDifficultyAt(15).speedMul).toBeLessThan(SURVIVOR.playerSpeed * 1.05);
-  });
-
-  it('speed curve is gentle and capped', () => {
-    expect(endlessDifficultyAt(0).speedMul).toBeCloseTo(1, 5);
-    expect(endlessDifficultyAt(5 * 60).speedMul).toBeCloseTo(1.08, 2);
-    expect(endlessDifficultyAt(15 * 60).speedMul).toBeCloseTo(1.24, 2);
-    expect(endlessDifficultyAt(60 * 60).speedMul).toBeLessThanOrEqual(1.7);
+  it('opening speeds match the published table', () => {
+    const expected: Record<string, number> = {
+      basic: 3.0,
+      mush: 2.8,
+      fast: 3.7,
+      spiky: 3.8,
+      flyer: 3.5,
+      bee: 3.6,
+      ghost: 3.55,
+      bruiser: 2.6,
+      elite: 3.3,
+      miniboss: 2.8,
+    };
+    for (const [id, speed] of Object.entries(expected)) {
+      expect(HORDE[id]!.baseSpeed, `${id} opening speed`).toBeCloseTo(speed, 5);
+    }
+    expect(SURVIVOR.playerSpeed).toBeCloseTo(6.4, 5);
+    // Every opening speed leaves real kiting headroom against the player.
+    for (const def of Object.values(HORDE)) {
+      expect(def.baseSpeed).toBeLessThan(SURVIVOR.playerSpeed * 0.62);
+    }
   });
 
   it('boss queue drains 4 → 5 → 6 in exact order with 5 as Mega, losing none', () => {
@@ -1620,9 +1663,13 @@ describe('melee horde and endless-2.2.1 balance', () => {
     expect(bossCategoryDamage('body', 1, true)).toBeGreaterThan(bossCategoryDamage('body', 1, false));
   });
 
-  it('thruster boost is +5% per level', () => {
+  it('thruster boost is +6% per level and hard-capped at +30%', () => {
     const thr = PASSIVES.find((p) => p.id === 'move-speed')!;
-    expect(thr.perLevel).toBeCloseTo(0.05, 5);
+    expect(thr.perLevel).toBeCloseTo(0.06, 5);
+    expect(thr.maxLevel).toBe(5);
+    expect(moveSpeedBonus(5)).toBeCloseTo(0.3, 5);
+    // Hard cap holds even if a level somehow exceeds the authored maximum.
+    expect(moveSpeedBonus(99)).toBeCloseTo(0.3, 5);
   });
 
   it('ordinary enemies never spawn enemy projectiles in 30s', () => {
@@ -2292,6 +2339,10 @@ function runSurge(
   state.surge.kind = kind;
   state.surge.phaseEndsAt = 1e9;
   state.surge.nextSurgeAt = 1e9;
+  // Composition is measured in isolation. A live boss now ends ordinary surges by
+  // design (see the boss-interaction tests), which would otherwise silently turn every
+  // composition assertion into a measurement of the recovery window.
+  state.nextBossTime = 1e9;
 
   const seen = new Set<number>();
   const defs: string[] = [];

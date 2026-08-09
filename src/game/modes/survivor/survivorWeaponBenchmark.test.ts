@@ -269,7 +269,7 @@ function collectDamageEvents(state: SurvivorState): {
   };
 }
 
-describe('endless-2.2.1 systems', () => {
+describe('endless-2.3.0 systems', () => {
   it('pressure director cycles normal→telegraph→surge→recovery without stacking', () => {
     const state = createSurvivorState('bee', null, 4401);
     state.player.invuln = 999;
@@ -409,14 +409,22 @@ describe('endless-2.2.1 systems', () => {
   });
 
   it('speed curve boundary points', () => {
+    /*
+     * endless-2.3.0 anchors. 1.24x moved from fifteen minutes to fifty: raw speed is no
+     * longer the reason runs end. Containment Collapse deliberately contributes nothing
+     * to speed, so every anchor is exact at any survival time.
+     */
     expect(endlessDifficultyAt(0).speedMul).toBeCloseTo(1.0, 5);
-    expect(endlessDifficultyAt(5 * 60).speedMul).toBeCloseTo(1.08, 2);
-    expect(endlessDifficultyAt(10 * 60).speedMul).toBeCloseTo(1.16, 2);
-    expect(endlessDifficultyAt(15 * 60).speedMul).toBeCloseTo(1.24, 2);
-    // 30m before collapse adds: 1 + 0.016*15 + 0.008*15 = 1.36; first collapse step +0.02
-    expect(endlessDifficultyAt(30 * 60).speedMul).toBeCloseTo(1.38, 2);
-    expect(endlessDifficultyAt(40 * 60).speedMul).toBeLessThanOrEqual(1.7);
-    expect(endlessDifficultyAt(60 * 60).speedMul).toBeLessThanOrEqual(1.7);
+    expect(endlessDifficultyAt(10 * 60).speedMul).toBeCloseTo(1.03, 5);
+    expect(endlessDifficultyAt(20 * 60).speedMul).toBeCloseTo(1.06, 5);
+    expect(endlessDifficultyAt(30 * 60).speedMul).toBeCloseTo(1.1, 5);
+    expect(endlessDifficultyAt(40 * 60).speedMul).toBeCloseTo(1.16, 5);
+    expect(endlessDifficultyAt(45 * 60).speedMul).toBeCloseTo(1.2, 5);
+    expect(endlessDifficultyAt(50 * 60).speedMul).toBeCloseTo(1.24, 5);
+    expect(endlessDifficultyAt(60 * 60).speedMul).toBeCloseTo(1.32, 5);
+    // The fifteen-minute value that used to be 1.24x is now a mild 1.045x.
+    expect(endlessDifficultyAt(15 * 60).speedMul).toBeCloseTo(1.045, 3);
+    expect(endlessDifficultyAt(90 * 60).speedMul).toBeLessThanOrEqual(1.7);
   });
 
   it('every boss pattern completes to recover/idle', () => {

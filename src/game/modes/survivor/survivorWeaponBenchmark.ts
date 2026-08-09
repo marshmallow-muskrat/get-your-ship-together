@@ -12,12 +12,17 @@ import {
   HORDE,
   SURVIVOR,
   WEAPONS,
+  bossTimeForIndex,
   heroStarterWeapon,
+  isMegaBossIndex,
   weaponStatsAtLevel,
+  type PassiveId,
+  type SurvivorForm,
   type WeaponId,
 } from './survivorContent';
 import { createSurvivorState, emptyEnemy, nextEntityId, type SurvivorState } from './survivorState';
 import { EMPTY_SURVIVOR_INPUT, stepSurvivor } from './survivorSim';
+import { totalOutgoing } from './survivorTelemetry';
 
 export type BenchmarkScenario =
   /** One durable boss-sized target: sustained single-target output. */
@@ -342,17 +347,47 @@ export function benchmarkHeroStarters(): StarterScore[] {
  * Effective value of a weapon level in the situation it is authored for.
  * `pulse` is general-purpose, so its score is the weighted mean of every scenario.
  */
-export function intendedScore(weaponId: WeaponId, level: number, windowSec = BENCH_WINDOW): number {
+/**
+ * Minimum volleys a level must fire for its score to be a measurement rather than a
+ * rounding artefact.
+ *
+ * A weapon that fires ten times in the window carries ±10% quantisation noise from a
+ * single shot landing inside or outside the window — the same magnitude as the
+ * per-level gain bounds themselves. Slow weapons therefore get a proportionally longer
+ * window so every weapon is judged with comparable precision.
+ */
+export const MIN_BENCH_VOLLEYS = 34;
+
+/**
+ * Measurement window for a weapon.
+ *
+ * The standard window already gives most weapons 20+ volleys, which is plenty. It is
+ * only extended for weapons so slow that they would otherwise fire fewer than
+ * `MIN_RELIABLE_VOLLEYS` times — today that is Orbital Lance alone, whose ~11 shots in
+ * the standard window made a single shot landing inside or outside the window worth
+ * more than a whole authored level step.
+ */
+export function benchWindowFor(weaponId: WeaponId): number {
+  const cadence = weaponStatsAtLevel(weaponId, 1).cadence;
+  if (BENCH_WINDOW / cadence >= MIN_RELIABLE_VOLLEYS) return BENCH_WINDOW;
+  return cadence * MIN_BENCH_VOLLEYS;
+}
+
+/** Below this volley count the standard window is not a reliable measurement. */
+export const MIN_RELIABLE_VOLLEYS = 16;
+
+export function intendedScore(weaponId: WeaponId, level: number, windowSec?: number): number {
+  const win = windowSec ?? benchWindowFor(weaponId);
   const intended = INTENDED_SCENARIO[weaponId];
   if (intended === 'general') {
     let sum = 0;
     for (const scenario of ALL_SCENARIOS) {
-      sum += runWeaponBenchmark(weaponId, level, scenario, windowSec).damageDealt *
+      sum += runWeaponBenchmark(weaponId, level, scenario, win).damageDealt *
         SCENARIO_WEIGHTS[scenario];
     }
     return sum;
   }
-  return runWeaponBenchmark(weaponId, level, intended, windowSec).damageDealt;
+  return runWeaponBenchmark(weaponId, level, intended, win).damageDealt;
 }
 
 /** L5 / L1 effective ratio in the weapon's intended scenario. */
@@ -410,6 +445,169 @@ export const BREAKPOINT_LEVEL: Record<WeaponId, number> = {
 
 /** Starter fairness band: weighted L1 output versus the four-starter mean. */
 export const STARTER_BAND = { min: 0.85, max: 1.15 } as const;
+
+/**
+ * Representative builds used to choose boss health.
+ *
+ * These are what a player who has kept pace actually has at each boss window — not a
+ * theoretical maximum. Boss durability is tuned against these, because "how long does
+ * the boss live" is only meaningful relative to a real build.
+ */
+export const REPRESENTATIVE_BUILDS: Array<{
+  label: string;
+  atBossIndex: number;
+  weapons: Array<{ id: WeaponId; level: number }>;
+  passives: Partial<Record<PassiveId, number>>;
+  level: number;
+}> = [
+  {
+    label: '2:00 — first boss',
+    atBossIndex: 1,
+    weapons: [
+      { id: 'pulse', level: 3 },
+      { id: 'microdrone', level: 2 },
+    ],
+    passives: { 'weapon-haste': 1, area: 1, 'move-speed': 1 },
+    level: 8,
+  },
+  {
+    label: '10:00 — fifth boss (Mega)',
+    atBossIndex: 5,
+    weapons: [
+      { id: 'pulse', level: 5 },
+      { id: 'microdrone', level: 5 },
+      { id: 'rail', level: 4 },
+      { id: 'bioplasma', level: 3 },
+    ],
+    passives: { 'weapon-haste': 3, area: 3, 'max-health': 4 },
+    level: 22,
+  },
+  {
+    label: '20:00 — tenth boss (Mega)',
+    atBossIndex: 10,
+    weapons: [
+      { id: 'pulse', level: 8 },
+      { id: 'microdrone', level: 8 },
+      { id: 'rail', level: 7 },
+      { id: 'bioplasma', level: 6 },
+      { id: 'gravity', level: 6 },
+    ],
+    passives: { 'weapon-haste': 5, area: 5, 'max-health': 10 },
+    level: 42,
+  },
+];
+
+export interface BossTtkResult {
+  bossIndex: number;
+  isMega: boolean;
+  heroId: HeroId;
+  form: SurvivorForm;
+  maxHealth: number;
+  /** Seconds to reduce the boss to zero, or `windowSec` if it survived. */
+  timeToKill: number;
+  killed: boolean;
+  /** Recorded player DPS across the measured window. */
+  dps: number;
+}
+
+/**
+ * Deterministic boss time-to-kill against a representative moving build.
+ *
+ * The player kites exactly as in the weapon benchmark, so the number reflects damage
+ * a moving player actually lands rather than a stationary turret's theoretical output.
+ */
+export function bossTimeToKill(opts: {
+  bossIndex: number;
+  heroId?: HeroId;
+  form?: SurvivorForm;
+  weapons: Array<{ id: WeaponId; level: number }>;
+  passives: Partial<Record<PassiveId, number>>;
+  level?: number;
+  windowSec?: number;
+}): BossTtkResult {
+  const windowSec = opts.windowSec ?? 90;
+  const heroId = opts.heroId ?? 'bee';
+  const form = opts.form ?? 'astronaut';
+  const state = createSurvivorState(heroId, null, 0x51f0 + opts.bossIndex);
+  state.time = bossTimeForIndex(opts.bossIndex) - 0.02;
+  state.nextBossIndex = opts.bossIndex;
+  state.nextBossTime = bossTimeForIndex(opts.bossIndex);
+  state.nextCacheTime = 1e9;
+  state.surge.nextSurgeAt = 1e9;
+  state.spawnAcc = -1e9;
+  state.player.invuln = 1e9;
+  state.weapons = opts.weapons.map((w) => ({
+    weaponId: w.id,
+    level: w.level,
+    cooldown: 0,
+    focusDebt: 0,
+    prototype: !!WEAPONS[w.id]?.prototype,
+  }));
+  state.passives = { ...opts.passives };
+  state.level = opts.level ?? 10;
+  const plating = opts.passives['max-health'] ?? 0;
+  if (plating > 0) {
+    let bonus = 0;
+    for (let i = 1; i <= plating; i += 1) bonus += i <= 5 ? 14 : 7;
+    state.player.maxHealth = SURVIVOR.playerMaxHealth + bonus;
+    state.player.health = state.player.maxHealth;
+  }
+  if (form === 'mech') {
+    state.player.mechCd = 0;
+  }
+
+  const steps = Math.floor(windowSec / SURVIVOR.fixedDt);
+  const input = { ...EMPTY_SURVIVOR_INPUT };
+  let killed = false;
+  let ttk = windowSec;
+  let spawnedAt = -1;
+  let maxHealth = 0;
+  for (let i = 0; i < steps; i += 1) {
+    state.spawnAcc = -1e9;
+    /*
+     * Hold the build fixed for the whole window.
+     *
+     * Boss summons feed energy, and without this the run banks a level, opens the
+     * choice modal and freezes the simulation — which silently reads as "the boss
+     * survived". The measurement must be of the build under test, not of a build that
+     * grew mid-fight.
+     */
+    state.xp = 0;
+    state.xpNext = Number.MAX_SAFE_INTEGER;
+    state.pendingLevelUps = 0;
+    // Hold Mech for the whole window when measuring the Mech figure.
+    if (form === 'mech') {
+      state.player.mechDuration = Math.max(state.player.mechDuration, 5);
+      if (state.player.form !== 'mech') state.player.mechCd = 0;
+      input.mechPressed = state.player.form !== 'mech';
+    }
+    const ang = i * SURVIVOR.fixedDt * KITE_RATE;
+    input.moveX = Math.cos(ang);
+    input.moveY = Math.sin(ang);
+    stepSurvivor(state, input, SURVIVOR.fixedDt);
+    const boss = state.bosses.find((b) => b.index === opts.bossIndex);
+    if (boss && spawnedAt < 0) {
+      spawnedAt = i * SURVIVOR.fixedDt;
+      maxHealth = boss.maxHealth;
+    }
+    if (boss && spawnedAt >= 0 && boss.health <= 0) {
+      killed = true;
+      ttk = i * SURVIVOR.fixedDt - spawnedAt;
+      break;
+    }
+  }
+  const elapsed = Math.max(0.001, state.telemetry.elapsed);
+  return {
+    bossIndex: opts.bossIndex,
+    isMega: isMegaBossIndex(opts.bossIndex),
+    heroId,
+    form,
+    maxHealth,
+    timeToKill: ttk,
+    killed,
+    dps: totalOutgoing(state.telemetry) / elapsed,
+  };
+}
 
 export function allOrdinaryWeapons(): WeaponId[] {
   return (Object.keys(WEAPONS) as WeaponId[]).filter((id) => !WEAPONS[id]!.prototype);

@@ -14,7 +14,38 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.2.1';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.3.0';
+
+/**
+ * Piecewise-linear interpolation over ascending `[x, y]` anchors.
+ *
+ * Anchors are the authoritative balance contract: `curveAt` reproduces every
+ * published table value exactly, so the balance tests assert the same numbers the
+ * design tables state. Below the first anchor the first value is held; past the last
+ * anchor the final segment's slope continues, which is how the late game keeps
+ * escalating without a second hand-authored table.
+ */
+export function curveAt(anchors: ReadonlyArray<readonly [number, number]>, x: number): number {
+  const n = anchors.length;
+  if (n === 0) return 0;
+  const first = anchors[0]!;
+  if (x <= first[0]) return first[1];
+  for (let i = 1; i < n; i += 1) {
+    const a = anchors[i - 1]!;
+    const b = anchors[i]!;
+    if (x <= b[0]) {
+      const span = b[0] - a[0];
+      if (span <= 0) return b[1];
+      return a[1] + ((x - a[0]) / span) * (b[1] - a[1]);
+    }
+  }
+  const last = anchors[n - 1]!;
+  const prev = anchors[n - 2] ?? last;
+  const span = last[0] - prev[0];
+  if (span <= 0) return last[1];
+  const slope = (last[1] - prev[1]) / span;
+  return last[1] + (x - last[0]) * slope;
+}
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.07;
@@ -25,7 +56,14 @@ export const SURVIVOR = {
   endless: true,
   bossInterval: 120, // every 2 minutes
   maxSimultaneousBosses: 3,
-  firstBossBaseHealth: 2200,
+  /**
+   * First regular boss base health.
+   *
+   * Chosen against the deterministic boss benchmark (see `bossTimeToKill`) so the
+   * 2:00 boss survives ~18–25s for a representative astronaut build and ~10–15s
+   * with Mech, instead of the ~2s deletion the 2,200 value produced.
+   */
+  firstBossBaseHealth: 5600,
   arenaHalf: 32, // 64×64 playable
   cameraHalf: 12,
   actorScale: {
@@ -62,12 +100,23 @@ export const SURVIVOR = {
   /** Reserve free slots so XP cannot starve health/boss rewards. */
   pickupReserveImportant: 24,
   /** Seconds after taking damage before Nanite Bleed resumes. */
-  regenDamagePause: 3.0,
-  /** Pressure director timing (seconds). */
-  surgeInterval: 52,
-  surgeTelegraph: 1.1,
+  regenDamagePause: 2.0,
+  /**
+   * Pressure director timing (seconds).
+   *
+   * A surge is an *event*: long enough to telegraph and react to, followed by a real
+   * breathing window. The 1.1s telegraph and 52s cadence of endless-2.2.1 were both
+   * shorter than a player's reaction-and-reposition loop, so surges read as noise.
+   */
+  surgeIntervalMin: 60,
+  surgeIntervalMax: 75,
+  surgeTelegraph: 3.5,
   surgeDuration: 10,
-  surgeRecovery: 10,
+  surgeRecovery: 13.5,
+  /** Surge-spawned enemies only — never the standing horde. */
+  surgeWaveSpeedBonus: 0.22,
+  /** Recovery holds replacements until population falls to this fraction of target. */
+  surgeRecoveryPopulationFactor: 0.55,
   /** Elite specialist earliest appearance (seconds). */
   eliteGateTime: 90,
   /** Visible Gravitic Recall pull window (seconds). */
@@ -98,14 +147,46 @@ export const SURVIVOR = {
   shieldDurationEnhanced: 45,
   shieldEnhancedMul: 1.35,
   megaEvery: 5,
-  megaHealthMul: 2.2,
+  megaHealthMul: 1.6,
   megaDamageMul: 1.25,
-  megaVisualMul: 2.0,
-  megaColliderMul: 1.55,
+  /**
+   * Mega-Boss size relative to a regular boss.
+   *
+   * Reduced from 2.0 → 1.5 (a 25% cut to the presented Mega-Boss). Regular boss
+   * sizes are unchanged. The collider follows the visible body via `megaColliderMul`
+   * so Repulse, exhaust, weapon hits, body contact and telegraph origins stay honest.
+   */
+  megaVisualMul: 1.5,
+  megaColliderMul: 1.32,
   megaMoveMul: 0.85,
   fixedDt: 1 / 60,
-  repairDropChance: 0.04,
-  regenPerLevel: 0.45,
+  /**
+   * Bounded repair economy.
+   *
+   * A flat per-kill chance turned into an unlimited faucet once kill rate climbed:
+   * at late kill rates a 4% roll produced an orb every couple of seconds and erased
+   * every chip mistake. Drops are now paced by a timer/budget with a pity floor and
+   * are gated on the player actually being injured.
+   */
+  repair: {
+    /** Earliest gap between ordinary repair drops (seconds). */
+    minInterval: 12,
+    /** Typical gap once the player is meaningfully injured (seconds). */
+    targetInterval: 15,
+    /** Pity: an injured player is guaranteed an orb by this gap (seconds). */
+    pityInterval: 18,
+    /** Below this health fraction the drop is considered "meaningfully injured". */
+    injuredFraction: 0.9,
+    /** Health fraction under which the pity floor tightens toward minInterval. */
+    criticalFraction: 0.45,
+    /** Ordinary orb value. */
+    value: 22,
+    /** Miniboss guaranteed reward. */
+    minibossValue: 45,
+    /** Boss guaranteed reward. */
+    bossValue: 55,
+    megaBonus: 30,
+  },
   gunship: {
     /** Warning lane duration before damage begins. */
     warnDuration: 0.9,
@@ -125,13 +206,54 @@ export const SURVIVOR = {
     invuln: 0.42,
     distance: 13.5,
   },
+  /**
+   * Mech Overdrive is a fixed-cooldown ultimate.
+   *
+   * endless-2.2.1 filled the meter from kills (1.2%/kill, 8%/elite, 35%/miniboss,
+   * 25%/boss, plus Core Siphon). At the kill rates this game actually reaches that
+   * was near-permanent uptime — the defect was availability, not power. Nothing
+   * refills the cooldown now; it is wall-clock only, and it runs *while* Mech is
+   * active so a transformation costs 45s of schedule, not 45s of astronaut time.
+   */
   mech: {
     duration: 14,
-    chargePerKill: 0.012,
-    chargePerElite: 0.08,
-    chargePerMiniboss: 0.35,
-    chargePerBoss: 0.25,
+    /** Activation-to-activation. Counts down during Mech, so ~31s of non-Mech time. */
+    cooldown: 45,
+    /** The run opens with Mech unavailable; first readiness is one full cooldown in. */
+    initialCooldown: 45,
     damageTakenMul: 0.65,
+  },
+  /**
+   * Elites are rare, unmistakable and durable.
+   *
+   * Durability comes from real health and knockback resistance, never from
+   * invulnerability windows — a focused, Repulsed or Mech-countered elite still dies.
+   */
+  elite: {
+    /** Telegraph before the lunge commits. Long enough to read and sidestep. */
+    lungeWindup: 0.55,
+    lungeDash: 0.26,
+    lungeSpeed: 15.5,
+    lungeRange: 7.5,
+    lungeCooldown: 3.2,
+    /** Elite lunge impact relative to its ordinary contact damage. */
+    lungeDamageMul: 1.6,
+    /** Show the compact elite bar within this distance of the player. */
+    barVisibleRange: 16,
+    /** Concurrent elite bars, nearest first, so the screen never fills with bars. */
+    maxVisibleBars: 4,
+  },
+  /**
+   * Aegis must be a real emergency button, not just a slab of delayed HP —
+   * otherwise Gravitic Recall wins every ordinary Cache by default.
+   */
+  aegis: {
+    invulnOnSelect: 1.5,
+    pulseRadius: 14.5,
+    pulseDamage: 12,
+    pulsePush: 13.0,
+    pulseElitePushMul: 0.45,
+    pulseMinibossPushMul: 0.2,
   },
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
@@ -268,11 +390,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     levels: [
       // Reliability hero: measured against moving, off-axis targets so homing is
       // credited for what it actually does rather than for standing still.
-      { level: 1, label: 'Microdrone I', damage: 72, cadence: 0.599, count: 3, speed: 14, life: 2.45, radius: 0.2 },
-      { level: 2, label: 'Microdrone II', damage: 80, cadence: 0.672, count: 4, speed: 14.5, life: 2.5, radius: 0.2 },
-      { level: 3, label: 'Swarm Cadre', damage: 89, cadence: 0.57, count: 4, speed: 15, life: 2.55, radius: 0.21 },
-      { level: 4, label: 'Hunter Net', damage: 99, cadence: 0.64, count: 5, speed: 15.5, life: 2.65, radius: 0.22 },
-      { level: 5, label: 'Hive Overdrive', damage: 110, cadence: 0.591, count: 6, speed: 16.5, life: 2.8, radius: 0.23 },
+      { level: 1, label: 'Microdrone I', damage: 55, cadence: 0.599, count: 3, speed: 14, life: 2.45, radius: 0.2 },
+      { level: 2, label: 'Microdrone II', damage: 61, cadence: 0.672, count: 4, speed: 14.5, life: 2.5, radius: 0.2 },
+      { level: 3, label: 'Swarm Cadre', damage: 68, cadence: 0.57, count: 4, speed: 15, life: 2.55, radius: 0.21 },
+      { level: 4, label: 'Hunter Net', damage: 76, cadence: 0.64, count: 5, speed: 15.5, life: 2.65, radius: 0.22 },
+      { level: 5, label: 'Hive Overdrive', damage: 85, cadence: 0.591, count: 6, speed: 16.5, life: 2.8, radius: 0.23 },
     ],
   },
   rail: {
@@ -285,7 +407,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       { level: 1, label: 'Rail Lance I', damage: 110, cadence: 1.885, count: 1, width: 0.72, length: 16 },
       { level: 2, label: 'Rail Lance II', damage: 122, cadence: 1.6288, count: 1, width: 0.78, length: 16.5 },
       { level: 3, label: 'Focused Lance', damage: 129, cadence: 1.3568, count: 1, width: 0.8, length: 17 },
-      { level: 4, label: 'Wide Beam', damage: 152, cadence: 1.254, count: 1, width: 0.9, length: 17.5 },
+      { level: 4, label: 'Wide Beam', damage: 158, cadence: 1.254, count: 1, width: 0.9, length: 17.5 },
       { level: 5, label: 'Lance Battery', damage: 182, cadence: 2.1183, count: 2, width: 0.82, length: 18 },
     ],
   },
@@ -300,7 +422,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       { level: 2, label: 'Gravity Pulse II', damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 0.38 },
       { level: 3, label: 'Gravity Pulse III', damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 0.42 },
       { level: 4, label: 'Deep Well', damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 0.45 },
-      { level: 5, label: 'Event Horizon', damage: 67, cadence: 2.605, count: 2, radius: 3.1, life: 0.5 },
+      { level: 5, label: 'Event Horizon', damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 0.5 },
     ],
   },
   rocket: {
@@ -311,7 +433,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     levels: [
       // Cluster specialist: salvo size doubles across the span, blast radius grows gently.
       { level: 1, label: 'Rocket Barrage I', damage: 42, cadence: 2.1404, count: 3, radius: 1.5, life: 0.36 },
-      { level: 2, label: 'Rocket Barrage II', damage: 47, cadence: 2.4, count: 4, radius: 1.54, life: 0.34 },
+      { level: 2, label: 'Rocket Barrage II', damage: 49, cadence: 2.4, count: 4, radius: 1.54, life: 0.34 },
       { level: 3, label: 'Salvo', damage: 52, cadence: 2.0224, count: 4, radius: 1.58, life: 0.32 },
       { level: 4, label: 'Cluster', damage: 58, cadence: 2.1216, count: 5, radius: 1.63, life: 0.3 },
       { level: 5, label: 'Carpet Fire', damage: 61, cadence: 1.8936, count: 6, radius: 1.68, life: 0.28 },
@@ -424,11 +546,14 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     unlockTime: 900,
     levels: [
       // Second lance is the explicit breakpoint at L4.
+      // Orbital grows through strike power, not cadence: its identity is a small number
+      // of heavy, telegraphed impacts, and a slow weapon measured over a fixed window is
+      // dominated by shot quantisation if growth is pushed through cadence instead.
       { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 1.6, life: 0.85 },
-      { level: 2, label: 'Orbital Lance II', damage: 144, cadence: 2.8918, count: 1, radius: 1.68, life: 0.8 },
-      { level: 3, label: 'Orbital Lance III', damage: 168, cadence: 3.1804, count: 1, radius: 1.76, life: 0.78 },
-      { level: 4, label: 'Sustained Lance', damage: 179, cadence: 3.0329, count: 1, radius: 1.92, life: 0.72 },
-      { level: 5, label: 'Judgment Array', damage: 266, cadence: 4.5363, count: 2, radius: 1.88, life: 0.68 },
+      { level: 2, label: 'Orbital Lance II', damage: 168, cadence: 4.0, count: 1, radius: 1.68, life: 0.8 },
+      { level: 3, label: 'Orbital Lance III', damage: 205, cadence: 3.8, count: 1, radius: 1.76, life: 0.78 },
+      { level: 4, label: 'Sustained Lance', damage: 250, cadence: 3.6, count: 1, radius: 1.92, life: 0.72 },
+      { level: 5, label: 'Judgment Array', damage: 290, cadence: 5.9, count: 2, radius: 1.88, life: 0.68 },
     ],
   },
 
@@ -441,7 +566,8 @@ export type PassiveId =
   | 'regen'
   | 'weapon-haste'
   | 'area'
-  | 'mech-charge'
+  /** Mech cooldown reduction. Replaces the removed kill-charge passive 'mech-charge'. */
+  | 'mech-cycle'
   | 'mech-duration'
   | 'breach-shielding';
 
@@ -460,16 +586,18 @@ export const PASSIVES: PassiveDef[] = [
   {
     id: 'move-speed',
     name: 'Thruster Boost',
-    description: 'Move faster through the horde (+5% per level, max +25%).',
+    description:
+      'Move 6% faster per level, up to +30%. Useful for spacing and dodging without being mandatory — the enemy speed curve leaves kiting headroom on its own.',
     maxLevel: 5,
-    perLevel: 0.05,
+    perLevel: 0.06,
   },
   {
     id: 'pickup-radius',
     name: 'Magnet Field',
-    description: 'Pull energy and health pickups from farther away. Health reach gains more per level.',
+    description:
+      'Energy reach +0.55 and repair reach +1.0 world units per level, and pickups fly to you faster. Ship and Mech forms keep their larger collection radii on top.',
     maxLevel: 5,
-    perLevel: 0.35,
+    perLevel: 0.55,
   },
   {
     id: 'max-health',
@@ -482,9 +610,10 @@ export const PASSIVES: PassiveDef[] = [
   {
     id: 'regen',
     name: 'Nanite Bleed',
-    description: 'Automatic repair over time. Pauses briefly after taking damage.',
+    description:
+      'Repair 0.4% of maximum integrity per second per level (2.0%/s at L5) after two seconds without taking damage, and collect 10% more from repair orbs per level.',
     maxLevel: Infinity,
-    perLevel: 0.22,
+    perLevel: 0.004,
     repeatable: true,
   },
   {
@@ -502,18 +631,18 @@ export const PASSIVES: PassiveDef[] = [
     perLevel: 0.055,
   },
   {
-    id: 'mech-charge',
-    name: 'Core Siphon',
-    description: 'Mech meter fills faster from kills (+10% per level).',
+    id: 'mech-cycle',
+    name: 'Core Cycling',
+    description: 'Mech Overdrive comes back 3% sooner per level, up to 15% off its cooldown.',
     maxLevel: 5,
-    perLevel: 0.1,
+    perLevel: 0.03,
   },
   {
     id: 'mech-duration',
     name: 'Reactor Hold',
-    description: 'Longer mech transform window (+9% per level).',
+    description: 'Mech Overdrive lasts 5% longer per level, up to +25%.',
     maxLevel: 5,
-    perLevel: 0.09,
+    perLevel: 0.05,
   },
   {
     id: 'breach-shielding',
@@ -523,6 +652,31 @@ export const PASSIVES: PassiveDef[] = [
     perLevel: 0.08,
   },
 ];
+
+/** Hard-capped Mech cooldown reduction from Core Cycling. */
+export function mechCooldownReduction(level: number): number {
+  return Math.min(0.15, Math.max(0, level) * 0.03);
+}
+
+/** Hard-capped Mech duration bonus from Reactor Hold. */
+export function mechDurationBonus(level: number): number {
+  return Math.min(0.25, Math.max(0, level) * 0.05);
+}
+
+/** Hard-capped Thruster Boost movement bonus. */
+export function moveSpeedBonus(level: number): number {
+  return Math.min(0.3, Math.max(0, level) * 0.06);
+}
+
+/**
+ * Best achievable Mech uptime with both passives fully invested.
+ * Duration / cooldown, both hard-capped — deliberately far from permanent.
+ */
+export function maxMechUptimeFraction(): number {
+  const dur = SURVIVOR.mech.duration * (1 + mechDurationBonus(5));
+  const cd = SURVIVOR.mech.cooldown * (1 - mechCooldownReduction(5));
+  return dur / cd;
+}
 
 /** Integrity gained when taking Hull Plating to the given absolute level. */
 export function hullPlatingGainAtLevel(level: number): number {
@@ -539,11 +693,39 @@ export function hullPlatingTotal(levels: number): number {
   return t;
 }
 
-/** Regen per second at a given Nanite Bleed level (diminishing after 5). */
-export function regenPerSecondAtLevel(level: number): number {
-  if (level <= 0) return 0;
-  if (level <= 5) return level * 0.22;
-  return 5 * 0.22 + Math.sqrt(level - 5) * 0.18;
+/**
+ * Nanite Bleed regeneration, as a **fraction of maximum integrity per second**.
+ *
+ * This is the single authoritative implementation. endless-2.2.1 carried both a
+ * `regenPerLevel: 0.45` constant on `SURVIVOR` and a `level * 0.22` formula here that
+ * disagreed with it; the constant was dead and the flat 0.22 HP/s was worthless on a
+ * plated hull. Scaling with max integrity keeps the passive attractive at every stage
+ * without letting linear stacking trivialise Collapse.
+ *
+ * L1 0.4%/s · L3 1.2%/s · L5 2.0%/s, then strong diminishing returns.
+ */
+export function regenFractionAtLevel(level: number): number {
+  const lv = Math.max(0, Math.floor(level));
+  if (lv <= 0) return 0;
+  if (lv <= 5) return lv * 0.004;
+  return 0.02 + 0.0012 * Math.sqrt(lv - 5);
+}
+
+/** Absolute regeneration per second for a given Nanite Bleed level and hull size. */
+export function regenPerSecondAtLevel(level: number, maxHealth: number = SURVIVOR.playerMaxHealth): number {
+  return regenFractionAtLevel(level) * maxHealth;
+}
+
+/**
+ * Nanite Bleed also improves repair-orb healing: +10% per level through L5, then
+ * strong diminishing returns so endless levels cannot restore the unlimited faucet
+ * the bounded repair economy replaced.
+ */
+export function repairOrbBonusAtLevel(level: number): number {
+  const lv = Math.max(0, Math.floor(level));
+  if (lv <= 0) return 0;
+  if (lv <= 5) return lv * 0.1;
+  return 0.5 + 0.03 * Math.sqrt(lv - 5);
 }
 
 /** Total boss damage reduction from Breach Shielding (hard-capped ~0.6). */
@@ -841,14 +1023,24 @@ export interface HordeEnemyDef {
   isMiniboss?: boolean;
 }
 
+/**
+ * Opening horde statistics.
+ *
+ * `baseSpeed` is the value at 0:00; the global speed curve (`enemySpeedMulAt`) is the
+ * only thing that scales it over a run, and that curve is now deliberately shallow.
+ * `contactDamage` is likewise the 0:00 value, scaled by `contactDamageMulAt`.
+ *
+ * Player speed is 6.4, so every opening speed leaves real kiting headroom — the
+ * endless-2.2.1 opening (3.3–4.35) closed that gap far too early.
+ */
 export const HORDE: Record<string, HordeEnemyDef> = {
   basic: {
     id: 'basic',
     role: 'fodder',
     visual: MELEE_BLOB,
     xp: 3,
-    baseSpeed: 3.3,
-    contactDamage: 8,
+    baseSpeed: 3.0,
+    contactDamage: 10,
     healthScale: 0.85,
   },
   mush: {
@@ -856,8 +1048,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'fodder',
     visual: MELEE_MUSHNUB,
     xp: 3,
-    baseSpeed: 3.1,
-    contactDamage: 8,
+    baseSpeed: 2.8,
+    contactDamage: 10,
     healthScale: 0.9,
   },
   fast: {
@@ -865,8 +1057,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'sprinter',
     visual: MELEE_ALIEN,
     xp: 4,
-    baseSpeed: 4.25,
-    contactDamage: 9,
+    baseSpeed: 3.7,
+    contactDamage: 12,
     healthScale: 0.75,
   },
   spiky: {
@@ -874,8 +1066,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'sprinter',
     visual: MELEE_SPIKY,
     xp: 5,
-    baseSpeed: 4.35,
-    contactDamage: 10,
+    baseSpeed: 3.8,
+    contactDamage: 13,
     healthScale: 0.8,
   },
   // Former ranged models → melee pressure archetypes
@@ -884,8 +1076,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'flanker',
     visual: RANGED_GOLELING,
     xp: 6,
-    baseSpeed: 3.9,
-    contactDamage: 10,
+    baseSpeed: 3.5,
+    contactDamage: 12,
     healthScale: 1.0,
   },
   ghost: {
@@ -893,8 +1085,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'hunter',
     visual: RANGED_GHOST,
     xp: 6,
-    baseSpeed: 4.0,
-    contactDamage: 11,
+    baseSpeed: 3.55,
+    contactDamage: 14,
     healthScale: 1.05,
   },
   bee: {
@@ -902,8 +1094,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'flanker',
     visual: RANGED_ARMABEE,
     xp: 5,
-    baseSpeed: 4.05,
-    contactDamage: 9,
+    baseSpeed: 3.6,
+    contactDamage: 11,
     healthScale: 0.7,
   },
   bruiser: {
@@ -911,8 +1103,8 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'bruiser',
     visual: MELEE_ORC,
     xp: 12,
-    baseSpeed: 2.85,
-    contactDamage: 16,
+    baseSpeed: 2.6,
+    contactDamage: 20,
     healthScale: 2.4,
   },
   elite: {
@@ -920,9 +1112,14 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'elite',
     visual: RANGED_SQUIDLE,
     xp: 28,
-    baseSpeed: 3.7,
-    contactDamage: 18,
-    healthScale: 3.2,
+    baseSpeed: 3.3,
+    contactDamage: 24,
+    /**
+     * Sized so an elite carries ~10× a same-time fodder enemy's effective health
+     * (see `eliteHealthRatio`). This is the whole of its durability — elites take
+     * full damage and can always be focused down.
+     */
+    healthScale: 9.0,
     isElite: true,
   },
   miniboss: {
@@ -930,13 +1127,25 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     role: 'miniboss',
     visual: MELEE_ORC,
     xp: 120,
-    baseSpeed: 3.1,
-    contactDamage: 20,
+    baseSpeed: 2.8,
+    contactDamage: 28,
     healthScale: 1,
     isElite: true,
     isMiniboss: true,
   },
 };
+
+/**
+ * Effective elite health as a multiple of a same-time fodder enemy.
+ * Pure function of the content tables — the design target is 8–12×.
+ */
+export function eliteHealthRatio(): number {
+  const elite = HORDE.elite!;
+  const fodder = HORDE.basic!;
+  const eliteHp = elite.visual.maxHealth * elite.healthScale;
+  const fodderHp = fodder.visual.maxHealth * fodder.healthScale;
+  return eliteHp / fodderHp;
+}
 
 /**
  * Earliest survival time (seconds) at which each horde definition may enter play.
@@ -1024,9 +1233,9 @@ export type BossPhase = 1 | 2 | 3;
 export const SURVIVOR_BOSS = {
   ...BOSS_DEMON,
   /** Base health for first endless boss; scaled by bossDifficultyFor(n). */
-  maxHealth: 2200,
-  phase2Threshold: 0.65,
-  phase3Threshold: 0.35,
+  maxHealth: 5600,
+  phase2Threshold: 0.66,
+  phase3Threshold: 0.33,
   patterns: {
     pulse: { windup: 1.0, active: 0.7, recovery: 0.85, damage: 16, maxRadius: 8 },
     line: { windup: 0.9, active: 0.45, recovery: 0.95, damage: 20, length: 20, width: 1.25 },
@@ -1063,45 +1272,132 @@ export interface EndlessDifficulty {
 }
 
 /**
+ * Global enemy movement-speed multiplier, in minutes.
+ *
+ * Raw speed must not be the reason every run ends. endless-2.2.1 reached 1.24× at
+ * fifteen minutes, which made kiting impossible long before durability or density
+ * were the real threat; 1.24× is now a fifty-minute value. Difficulty before then
+ * comes from health, density, contact damage, specialists, bosses, boss backlog and
+ * surge pressure — not from outrunning the player.
+ *
+ * The Containment Collapse layer deliberately contributes nothing here, so every
+ * published anchor is exact at any survival time.
+ */
+export const ENEMY_SPEED_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1.0],
+  [10, 1.03],
+  [20, 1.06],
+  [30, 1.1],
+  [40, 1.16],
+  [45, 1.2],
+  [50, 1.24],
+  [60, 1.32],
+] as const;
+
+/** Hard ceiling on raw speed however deep the run goes. */
+export const ENEMY_SPEED_CAP = 1.7;
+
+export function enemySpeedMulAt(timeSec: number): number {
+  return Math.min(ENEMY_SPEED_CAP, curveAt(ENEMY_SPEED_ANCHORS, Math.max(0, timeSec) / 60));
+}
+
+/**
+ * Contact-damage multiplier, in minutes.
+ *
+ * Flatter than endless-2.2.1's early ramp: individual hits are meaningful from the
+ * opening (see the raised `contactDamage` bases) rather than becoming meaningful only
+ * through a steep multiplier that then made mid-run swarms delete the player outright.
+ * Past 45m the final segment's slope continues — that is the Collapse-era scaling.
+ */
+export const CONTACT_DAMAGE_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1.0],
+  [10, 1.25],
+  [20, 1.55],
+  [30, 1.9],
+  [45, 2.5],
+] as const;
+
+export const CONTACT_DAMAGE_CAP = 6.0;
+
+export function contactDamageMulAt(timeSec: number): number {
+  return Math.min(CONTACT_DAMAGE_CAP, curveAt(CONTACT_DAMAGE_ANCHORS, Math.max(0, timeSec) / 60));
+}
+
+/** Target concurrent living enemies, in minutes. Clamped to the hard enemy cap. */
+export const POPULATION_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [0, 26],
+  [5, 60],
+  [10, 92],
+  [15, 118],
+  [20, 140],
+  [25, 160],
+] as const;
+
+/** Spawns per second, in minutes. Collapse adds on top after 30m. */
+export const SPAWN_RATE_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [0, 2.1],
+  [5, 3.2],
+  [10, 4.5],
+  [15, 5.75],
+  [20, 7.0],
+  [25, 8.0],
+  // Authored late tail so extrapolation never runs away; Collapse layers on top.
+  [30, 8.5],
+  [45, 9.4],
+] as const;
+
+/**
+ * Elite share of the horde, in minutes.
+ *
+ * endless-2.2.1 reached ~31% at fifteen minutes, which is what made elites feel like
+ * ordinary enemies. They stay rare through the mid game and keep climbing after,
+ * with the Collapse layer adding on top past 30m.
+ */
+export const ELITE_CHANCE_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [0, 0.03],
+  [5, 0.07],
+  [10, 0.12],
+  [15, 0.16],
+  [20, 0.2],
+  [25, 0.25],
+  [35, 0.29],
+  [45, 0.33],
+] as const;
+
+export const ELITE_CHANCE_CAP = 0.4;
+
+/** Containment Collapse steps elapsed at a survival time (0 before 30:00). */
+export function collapseStepsAt(timeSec: number): number {
+  const t = Math.max(0, timeSec);
+  if (t < SURVIVOR.collapseStart) return 0;
+  return Math.floor((t - SURVIVOR.collapseStart) / SURVIVOR.collapseStep) + 1;
+}
+
+/**
  * Unbounded endless enemy difficulty (pure).
- * Opening is denser/faster; late game uses Containment Collapse layer after 30m.
+ *
+ * Every published anchor table above is reproduced exactly by this function, and the
+ * balance tests assert those anchors directly.
  */
 export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
   const t = Math.max(0, timeSec);
   const m = t / 60;
   const late = Math.max(0, m - 5);
-  // Collapse layer every 2 minutes after 30:00
-  const collapseSteps =
-    t >= SURVIVOR.collapseStart
-      ? Math.floor((t - SURVIVOR.collapseStart) / SURVIVOR.collapseStep) + 1
-      : 0;
-  const healthMul =
-    1 + 0.12 * m + 0.02 * late * late + collapseSteps * 0.08;
-  const damageMul =
-    1 + 0.06 * m + 0.03 * Math.max(0, m - 10) + collapseSteps * 0.07;
-  // Controllable opening: 1.00 @0, ~1.08 @5, ~1.16 @10, ~1.24 @15, ~1.36 @30 before collapse.
-  // Through 15m: 1 + 0.016*m; after 15m: slower slope +0.008/m; collapse steps add after 30m.
-  let speedMul: number;
-  if (m <= 15) speedMul = 1 + 0.016 * m;
-  else speedMul = 1 + 0.016 * 15 + 0.008 * (m - 15);
-  speedMul = Math.min(1.7, speedMul + collapseSteps * 0.02);
+  const collapseSteps = collapseStepsAt(t);
+
+  // Durability is the primary long-run pressure: it eventually outpaces player growth.
+  const healthMul = 1 + 0.12 * m + 0.02 * late * late + collapseSteps * 0.09;
+  const damageMul = contactDamageMulAt(t);
+  const speedMul = enemySpeedMulAt(t);
   const attackRateMul = Math.min(2.1, 1 + 0.03 * m + collapseSteps * 0.045);
-  // Density curve toward 160 cap
-  let targetActive: number;
-  if (m < 2) targetActive = Math.floor(28 + 10 * m);
-  else if (m < 5) targetActive = Math.floor(48 + 10 * (m - 2));
-  else if (m < 10) targetActive = Math.floor(78 + 10 * (m - 5));
-  else if (m < 15) targetActive = Math.floor(128 + 6.4 * (m - 10));
-  else targetActive = SURVIVOR.enemyCap;
-  targetActive = Math.min(SURVIVOR.enemyCap, targetActive);
-  const eliteChance = Math.min(0.42, 0.04 + 0.018 * m + collapseSteps * 0.02);
-  let spawnRate: number;
-  if (m < 2) spawnRate = 2.2 + 0.4 * m;
-  else if (m < 5) spawnRate = 3.0 + 0.43 * (m - 2);
-  else if (m < 10) spawnRate = 4.3 + 0.42 * (m - 5);
-  else if (m < 15) spawnRate = 6.4 + 0.32 * (m - 10);
-  else spawnRate = 8.0;
-  spawnRate = Math.min(9.5, spawnRate + collapseSteps * 0.15);
+
+  const targetActive = Math.min(SURVIVOR.enemyCap, Math.round(curveAt(POPULATION_ANCHORS, m)));
+  const spawnRate = Math.min(11.0, curveAt(SPAWN_RATE_ANCHORS, m) + collapseSteps * 0.18);
+  const eliteChance = Math.min(
+    ELITE_CHANCE_CAP,
+    curveAt(ELITE_CHANCE_ANCHORS, m) + collapseSteps * 0.012,
+  );
+
   return {
     healthMul,
     damageMul,
@@ -1135,11 +1431,19 @@ export interface BossDifficulty {
 }
 
 /** Boss index n begins at 1. */
-/** Quadratic regular boss HP growth (replaces 1.55^n exponential wall). */
+/**
+ * Quadratic regular boss HP growth (replaces the 1.55^n exponential wall).
+ *
+ * Flattened for endless-2.3.0. The first boss's base health nearly quadrupled to fix
+ * two-second deletion, so keeping the old 0.65k + 0.10k² slope on top of it would have
+ * rebuilt the impossible late wall this curve was written to remove. The reshaped
+ * slope keeps later regular bosses in the 25–40s band against a build that has kept
+ * pace, without multiplying every boss by the same factor as the first.
+ */
 export function bossHealthMulFor(index: number): number {
   const n = Math.max(1, Math.floor(index));
   const k = n - 1;
-  return 1 + 0.65 * k + 0.1 * k * k;
+  return 1 + 0.72 * k + 0.012 * k * k;
 }
 
 export function isMegaBossIndex(index: number): boolean {

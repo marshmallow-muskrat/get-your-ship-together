@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.2.1`
+**Current balance line:** `endless-2.3.0`
 
 ## Purpose
 
@@ -87,8 +87,8 @@ Overclock labels: Roman I–X, then Arabic (`Overclock 27`).
 | Passive | After L5 |
 |---|---|
 | Hull Plating | Continues forever; +20 integrity L1–5, then +10 per level |
-| Nanite Bleed | Continues forever; diminishing (sqrt) gains after L5 |
-| Thruster Boost, Magnet Field, Weapon Overclock, Containment Field, Core Siphon, Reactor Hold, Breach Shielding | Hard-capped at L5; card shows MAX and is no longer offered |
+| Nanite Bleed | Continues forever; `2.0% + 0.12%·√(level−5)` of max integrity per second after L5 |
+| Thruster Boost, Magnet Field, Weapon Overclock, Containment Field, Core Cycling, Reactor Hold, Breach Shielding | Hard-capped at L5; card shows MAX and is no longer offered |
 
 Breach Shielding maxes at 40% boss-damage reduction.
 
@@ -130,19 +130,95 @@ Every 120s (≈15s before each boss window): corner beacon. Choices:
 
 Mega-Boss death leaves an enhanced non-expiring cache. The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Caches.
 
-## Enemy speeds (endless-2.2.1)
+## Enemy speeds (endless-2.3.0)
 
-Base speeds (before global speedMul): basic 3.30, mush 3.10, fast 4.25, spiky 4.35, flyer 3.90, bee 4.05, ghost 4.00, bruiser 2.85, elite 3.70, miniboss 3.10. Player base speed 6.4.
+Base speeds at 0:00, before the global multiplier: basic 3.00, mush 2.80, fast 3.70, spiky 3.80,
+flyer 3.50, bee 3.60, ghost 3.55, bruiser 2.60, elite 3.30, miniboss 2.80. Player base speed 6.4.
 
-Global speedMul:
+Raw speed is deliberately **not** the primary reason a run ends. `1.24×` is a fifty-minute value,
+not a fifteen-minute one. The curve is a piecewise-linear anchor table (`ENEMY_SPEED_ANCHORS`):
 
-```text
-m = minutes
-through 15m: 1 + 0.016*m
-after 15m:   1.24 + 0.008*(m-15)
-+ Collapse steps after 30:00 (+0.02 each step)
-hard cap ≈ 1.70
-```
+| Time | Global enemy speed |
+|---|---:|
+| 0m | 1.00× |
+| 10m | 1.03× |
+| 20m | 1.06× |
+| 30m | 1.10× |
+| 40m | 1.16× |
+| 45m | 1.20× |
+| 50m | 1.24× |
+| 60m | 1.32× |
+
+Past 60m the final segment's slope continues, hard-capped at `1.70×`. **Containment Collapse
+contributes nothing to speed**, so every anchor above is exact at any survival time and the tests
+assert the table directly.
+
+Endless difficulty comes instead from enemy durability eventually outpacing player growth,
+increasing density, increasing contact damage, more specialists, more dangerous and durable bosses,
+boss backlog pressure, more frequent late-game surges and shorter recovery — with raw-speed
+inevitability only very late.
+
+## Pressure curves (endless-2.3.0)
+
+| Time | Target active | Spawn rate | Elite chance |
+|---|---:|---:|---:|
+| 0m | 26 | 2.10/s | 3% |
+| 5m | 60 | 3.20/s | 7% |
+| 10m | 92 | 4.50/s | 12% |
+| 15m | 118 | 5.75/s | 16% |
+| 20m | 140 | 7.00/s | 20% |
+| 25m | 160 | 8.00/s | 25% |
+
+The 160 enemy cap is unchanged. After 25m the population is capped and Containment Collapse layers
+additional spawn rate and elite chance on top; elite chance is hard-capped at 40%.
+
+## Contact damage (endless-2.3.0)
+
+Opening contact damage: basic/mush 10, fast 12, spiky 13, flyer 12, bee 11, ghost 14, bruiser 20,
+elite 24, miniboss 28.
+
+| Time | Contact damage multiplier |
+|---|---:|
+| 0m | 1.00× |
+| 10m | 1.25× |
+| 20m | 1.55× |
+| 30m | 1.90× |
+| 45m | 2.50× |
+
+Past 45m the same slope continues (the Collapse-era scaling), hard-capped at `6.0×`. The post-hit
+invulnerability window is preserved so simultaneous overlaps cannot instantly delete the player.
+
+## Mech Overdrive (endless-2.3.0)
+
+Mech is a **fixed-cooldown ultimate**. Nothing in the run refills it.
+
+| Property | Value |
+|---|---|
+| Duration | 14s (Reactor Hold +5%/level, hard cap +25%) |
+| Cooldown | 45s activation-to-activation (Core Cycling −3%/level, hard cap −15%) |
+| Cooldown timing | Set on activation, counts down **during** Mech |
+| Astronaut time after a transformation | ≈31s |
+| Run start | Unavailable; first readiness one full cooldown in |
+| Maximum invested uptime | 45.8% (17.5s of 38.25s) |
+
+Kills, elites, minibosses and bosses have **no** effect on the cooldown. The HUD meter shows
+readiness, not kill charge.
+
+## Bounded repair economy (endless-2.3.0)
+
+Ordinary repair drops are paced by wall clock, never by an independent per-kill roll:
+
+| Property | Value |
+|---|---|
+| Minimum interval | 12s |
+| Typical interval | ~15s |
+| Pity guarantee (injured) | 18s, tightening to 12s below 45% integrity |
+| Injured gate | Drops require missing integrity; pity requires <90% |
+| Ordinary orb | 22 |
+| Miniboss / boss | 45 / 55 (+30 Mega), guaranteed, outside the budget |
+
+Nanite Bleed increases orb healing by 10% per level through L5. Every collected orb heals exactly
+once.
 
 ### Specialist eligibility gates
 
@@ -169,7 +245,28 @@ rolled forward to `flood` so an early surge applies fodder pressure instead of a
 ## Pressure director
 
 `normal → telegraph → surge → recovery → normal`. One surge at a time. Kinds: sprinters, pincer,
-bruiser, encircle, elite, flood — all gated by enemy eligibility. Recovery ≈10s at ~60% spawn rate.
+bruiser, encircle, elite, flood — all gated by enemy eligibility.
+
+| Phase | Duration |
+|---|---|
+| Interval between surges | 60–75s, deterministic seeded variation |
+| Telegraph | 3.5s |
+| Surge | 10s |
+| Recovery | 13.5s |
+
+Surges never stack, and an ordinary surge never begins while a boss is alive. A boss arriving ends
+any running surge cleanly into recovery **without delaying the exact boss schedule** — which is also
+what stops a Mega-Boss from inheriting a director surge alongside its authored reinforcements.
+
+A surge grants **its own spawned wave** +22% movement speed. The modifier rides on those individual
+enemies; the standing horde never inherits it.
+
+Recovery is a real breathing window: replacements are withheld until population drains toward
+`targetActive × 0.55`, then trickle back. Living enemies are never despawned to manufacture it.
+
+Presentation: `SURGE INCOMING` banner, directional arrows on the exact edges in play, illuminated
+spawn edges for the full telegraph, and a HUD chip reading `NORMAL` / `INCOMING` / `SURGE` /
+`RECOVERY`. No audio in this release.
 
 Geometry surges step a perimeter cursor per spawn: `pincer` alternates between two facing edges of
 one axis pair and `encircle` walks all four. (Both previously keyed off the within-frame spawn index,

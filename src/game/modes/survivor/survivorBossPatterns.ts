@@ -42,6 +42,11 @@ import {
   spawnAttack,
   type SurvivorAttack,
 } from './survivorAttacks';
+import {
+  makeBossSource,
+  type DamageSource,
+  type PlayerDamageSourceKind,
+} from './survivorTelemetry';
 
 export type BossSimApi = {
   rng: (state: SurvivorState) => number;
@@ -55,7 +60,11 @@ export type BossSimApi = {
     scale?: number,
     extra?: Partial<SurvivorState['effects'][0]>,
   ) => void;
-  damagePlayer: (state: SurvivorState, amount: number, source?: 'enemy' | 'boss' | 'hazard' | 'self') => void;
+  damagePlayer: (
+    state: SurvivorState,
+    amount: number,
+    source: import('./survivorTelemetry').DamageSource,
+  ) => void;
   spawnEnemy: (state: SurvivorState, defId: string, x: number, z: number) => SurvivorEnemy | null;
   acquireProjectile: (state: SurvivorState) => SurvivorProjectile | null;
   resetProj: (
@@ -116,6 +125,52 @@ const PATTERN_COLOR: Record<BossPatternId, string> = {
 
 /** Explicitly non-damaging indicator colour — never part of the hostile palette. */
 const MARKER_COLOR = '#ffb066';
+
+/** Player-facing mechanic names, used by the death log and damage report. */
+export const PATTERN_DISPLAY_NAME: Record<BossPatternId, string> = {
+  pulse: 'Shock Pulse',
+  line: 'Breach Lance',
+  fan: 'Fan Volley',
+  summon: 'Breach Summon',
+  'breach-orb': 'Breach Orb',
+  contamination: 'Contamination',
+  'rupture-ring': 'Rupture Ring',
+  'cryo-lanes': 'Cryo Lanes',
+  'ravage-charge': 'Ravage Charge',
+  'sweeping-beam': 'Sweeping Beam',
+  'aerial-strafe': 'Aerial Strafe',
+  'spore-bloom': 'Spore Bloom',
+  'gravity-collapse': 'Gravity Collapse',
+  cataclysm: 'Cataclysm',
+};
+
+/**
+ * Damage category each pattern reports as, so the death log distinguishes a beam
+ * from a shockwave from a thrown orb rather than lumping them all under "boss".
+ */
+const PATTERN_DAMAGE_KIND: Record<BossPatternId, PlayerDamageSourceKind> = {
+  pulse: 'boss-radial',
+  line: 'boss-beam',
+  fan: 'boss-projectile',
+  summon: 'boss-pattern',
+  'breach-orb': 'boss-projectile',
+  contamination: 'boss-puddle',
+  'rupture-ring': 'boss-radial',
+  'cryo-lanes': 'boss-beam',
+  'ravage-charge': 'boss-charge',
+  'sweeping-beam': 'boss-beam',
+  'aerial-strafe': 'boss-beam',
+  'spore-bloom': 'boss-puddle',
+  'gravity-collapse': 'boss-radial',
+  cataclysm: 'boss-radial',
+};
+
+/** Identify the currently-executing pattern of a boss for damage attribution. */
+function patternSource(b: SurvivorBoss): DamageSource {
+  const id = b.pattern;
+  if (!id) return makeBossSource(b, 'boss-pattern', 'Breach Attack');
+  return makeBossSource(b, PATTERN_DAMAGE_KIND[id], PATTERN_DISPLAY_NAME[id]);
+}
 
 type PatternCfg = {
   windup: number;
@@ -199,6 +254,26 @@ function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number):
   b.attacksCompleted += 1;
   b.attacksSinceUnique += 1;
   b.attacksSinceMega += 1;
+  /*
+   * A phase threshold crossed mid-attack is consumed here, once the attack has
+   * actually finished. It plays as its own telegraphed, damaging beat — the boss is
+   * never made safer by the player hitting it hard.
+   */
+  if (b.pendingPhaseTransition) onPhaseTransitionReady?.(state, b);
+}
+
+/**
+ * Injected by the simulation so the pattern machine can play a deferred phase
+ * transition without importing the whole sim (which would be a cycle).
+ */
+let onPhaseTransitionReady:
+  | ((state: SurvivorState, b: SurvivorBoss) => void)
+  | null = null;
+
+export function setPhaseTransitionHandler(
+  fn: (state: SurvivorState, b: SurvivorBoss) => void,
+): void {
+  onPhaseTransitionReady = fn;
 }
 
 function beginRecover(state: SurvivorState, b: SurvivorBoss, id: BossPatternId): void {
@@ -595,7 +670,7 @@ function updateActive(
         // One authoritative expanding ring drives both the visual and the hit.
         a.shape = expandingRing(b.x, b.z, b.telegraphR, 0.85);
         if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
-          api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 12) * scale, patternSource(b));
           b.patternHitCd = 0.35;
         }
       }
@@ -606,7 +681,7 @@ function updateActive(
     case 'line': {
       const a = attacks[0];
       if (a && b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
-        api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
+        api.damagePlayer(state, (cfg.damage ?? 12) * scale, patternSource(b));
         b.patternHitCd = 0.4;
       }
       if (b.timer <= 0) beginRecover(state, b, pattern);
@@ -767,7 +842,7 @@ function updateActive(
         // `damaging` is the whole truth: no second hidden guard beside it.
         a.damaging = b.telegraphR > 1.6;
         if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
-          api.damagePlayer(state, (cfg.damage ?? 18) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 18) * scale, patternSource(b));
           b.patternHitCd = 0.4;
         }
       }
@@ -781,7 +856,7 @@ function updateActive(
         if (a.hasHit) continue;
         if (!attackHitsPlayer(state, a)) continue;
         a.hasHit = true;
-        api.damagePlayer(state, (cfg.damage ?? 14) * scale, 'boss');
+        api.damagePlayer(state, (cfg.damage ?? 14) * scale, patternSource(b));
         // Bounded slow — never below 72%
         p.slowMul = Math.max(0.72, 0.75);
         p.slowTimer = Math.max(p.slowTimer, 1.5);
@@ -806,7 +881,7 @@ function updateActive(
         if (!a.hasHit && attackHitsPlayer(state, a)) {
           a.hasHit = true;
           b.patternTriggered = true;
-          api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 22) * scale, patternSource(b));
         }
       }
       // Trail fissures at a fixed cadence rather than every frame.
@@ -838,7 +913,7 @@ function updateActive(
         // One moving line: the beam that is drawn is the beam that burns.
         setLine(a, b.x, b.z, b.x + fx * len, b.z + fz * len, half);
         if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
-          api.damagePlayer(state, (cfg.damage ?? 16) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 16) * scale, patternSource(b));
           b.patternHitCd = 0.32;
         }
       }
@@ -869,7 +944,7 @@ function updateActive(
         });
         if (hit && attackHitsPlayer(state, hit)) {
           hit.hasHit = true;
-          api.damagePlayer(state, (cfg.damage ?? 14) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 14) * scale, patternSource(b));
         }
       }
       if (b.timer <= 0) beginRecover(state, b, pattern);
@@ -900,7 +975,7 @@ function updateActive(
         if (!a.damaging || a.hasHit) continue;
         if (attackHitsPlayer(state, a)) {
           a.hasHit = true;
-          api.damagePlayer(state, (cfg.damage ?? 12) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 12) * scale, patternSource(b));
         }
       }
       if (b.timer <= 0) {
@@ -947,7 +1022,7 @@ function updateActive(
           a.shape = expandingRing(b.lockX, b.lockZ, b.telegraphR, 1.0);
           a.damaging = b.telegraphR > 2.2;
           if (b.patternHitCd <= 0 && attackHitsPlayer(state, a)) {
-            api.damagePlayer(state, (cfg.damage ?? 22) * scale, 'boss');
+            api.damagePlayer(state, (cfg.damage ?? 22) * scale, patternSource(b));
             b.patternHitCd = 0.45;
           }
         }
@@ -980,7 +1055,7 @@ function updateActive(
         }
         if (a.damaging && !a.hasHit && attackHitsPlayer(state, a)) {
           a.hasHit = true;
-          api.damagePlayer(state, (cfg.damage ?? 20) * scale, 'boss');
+          api.damagePlayer(state, (cfg.damage ?? 20) * scale, patternSource(b));
         }
       }
       if (b.timer <= 0) {

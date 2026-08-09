@@ -10,8 +10,273 @@ The version names below are retrospective product milestones unless a balance ve
 
 ### Remaining follow-up
 
-- Full run-balance telemetry export (weapon DPS, death source, etc.).
-- Bundle code splitting (main chunk is ~800 kB before gzip).
+- Bundle code splitting (main chunk is ~830 kB before gzip).
+- **Sections deferred from 2.3.0** (see the 2.3.0 entry for scope and status):
+  exclusive Mega Protocols (Titan / Fleet Annihilation / Singularity Event), the Aegis
+  emergency rework, the Arc Conductor chain-lightning renderer, the Orbital Lance
+  presentation, the boss animation state machine, and elite emissive/health-bar
+  presentation. The balance, telemetry and card work these depend on has landed.
+
+## [2.3.0] — 2026-08-09 — Readable pressure, fixed-cooldown Mech, upgrade clarity
+
+Balance line: `endless-2.3.0`. New leaderboard partition; `endless-2.2.1` and older records are
+retained in storage but the board defaults to the current partition only. No scores are deleted.
+
+This release attacks the reasons runs *felt* unfair rather than the reasons they were hard:
+raw speed as the universal killer, an invisible pressure director, upgrade cards that did not
+explain themselves, a Mech that was always available, bosses that died in seconds, and a healing
+faucet that erased every mistake.
+
+### 1. Raw speed is no longer why runs end
+
+- **Root cause:** the global speed multiplier reached `1.24×` at fifteen minutes. Combined with
+  opening base speeds of 3.3–4.35 against a player speed of 6.4, the horde closed the kiting gap
+  long before durability or density were the real threat, so every death read as "I could not
+  outrun them" instead of "I was overwhelmed".
+- Opening base speeds are lowered to the published table (basic 3.0, mush 2.8, fast 3.7,
+  spiky 3.8, flyer 3.5, bee 3.6, ghost 3.55, bruiser 2.6, elite 3.3, miniboss 2.8). Player
+  speed remains 6.4.
+- The curve is now a piecewise-linear anchor table: `1.00×` @0m, `1.03×` @10m, `1.06×` @20m,
+  `1.10×` @30m, `1.16×` @40m, `1.20×` @45m, `1.24×` @50m, `1.32×` @60m, hard-capped at `1.70×`.
+  `1.24×` moved from fifteen minutes to fifty. Fifteen minutes is now `1.045×`.
+- Containment Collapse deliberately contributes **nothing** to speed, so every published anchor
+  is exact at any survival time and the tests assert the table directly.
+
+### 2. Population, spawn rate and elite frequency retuned
+
+- The old curve reached the 160 cap, ~8 spawns/sec and ~31% elites by fifteen minutes.
+- New anchors — population 26/60/92/118/140/160 and spawn rate 2.1/3.2/4.5/5.75/7.0/8.0 at
+  0/5/10/15/20/25 minutes; elite chance 3%/7%/12%/16%/20%/25% over the same span, continuing to
+  climb afterwards with Collapse layering on top.
+- The 160 enemy cap is unchanged. Difficulty past 25 minutes comes from durability, contact
+  damage, specialist mix, boss backlog and Collapse — not from a lower cap or from raw speed.
+- Every specialist gate is preserved (fodder 0s, fast 30s, spiky/flankers 60s, bruisers/elites
+  90s, hunters 120s, at most one specialist alive before 60s).
+
+### 3. The pressure director now creates real events
+
+- **Root cause:** a 1.1-second telegraph and a 52-second cadence, layered on constantly-maximal
+  pressure, meant a surge was statistically indistinguishable from the background horde.
+- Cadence is 60–75s with deterministic seeded variation; telegraph 3.5s; surge 10s; recovery 13.5s.
+- Surges never stack, and an ordinary surge never begins while a boss is alive. A boss arriving
+  ends any running surge cleanly into recovery **without delaying the exact boss schedule** —
+  which also stops Mega-Bosses from inheriting a director surge they were never authored for.
+- Pincer now genuinely uses opposite edges (the previous `+2` wrap produced a perpendicular
+  edge); encircle distributes across all four; single-edge surges commit to their announced edge
+  so the arrows cannot lie.
+- Compositions are materially different per kind — sprinter, bruiser, elite, geometry and flood
+  waves each have their own bias, all still filtered through the specialist gates.
+- A surge grants **its own spawned wave** +22% movement speed. This rides on the individual
+  enemies the surge produced; the standing horde never inherits it, and it disappears with them.
+- Recovery is a real lull: replacements are withheld until population drains toward a recovery
+  target, then trickle back. Living enemies are never despawned to manufacture it.
+- Presentation: a prominent `SURGE INCOMING` banner, directional arrows on the exact edges in
+  play, illuminated spawn edges for the whole telegraph, and a compact HUD chip reading
+  `NORMAL` / `INCOMING` / `SURGE` / `RECOVERY`. No audio.
+
+### 4. Crowd movement and the accidental quadratic
+
+- **Root cause (performance):** the spatial hash stored entity ids, and every "bounded"
+  neighbourhood query then resolved each neighbour with a linear scan over `state.enemies`. At the
+  160 cap that is the O(enemy-count²) inner search the architecture guardrails forbid. The hash
+  now stores **array indices**, making resolution O(1).
+- Separation strengthened to full radii plus margin, so enemies occupy space instead of sharing a
+  position.
+- Exact and near-exact overlaps resolve along a direction derived deterministically from the pair's
+  ids — random jitter would both shimmer and break seeded determinism.
+- Enemies wedged behind a congested front rank now lose forward drive and steer laterally around
+  it, which keeps navigable gaps open without turning the horde into a harmless formation.
+- One neighbour pass per enemy per frame, into a reused scratch object — no per-frame allocation.
+
+### 5. Individual hits matter; swarms no longer delete you
+
+- Opening contact damage raised to basic/mush 10, fast 12, spiky 13, flyer 12, bee 11, ghost 14,
+  bruiser 20, elite 24, miniboss 28.
+- The steep early multiplier is replaced by a flat anchor curve: `1.00×` @0m, `1.25×` @10m,
+  `1.55×` @20m, `1.90×` @30m, `2.50×` @45m, continuing on the same slope afterwards.
+- The post-hit invulnerability window is preserved, so simultaneous overlaps cannot chain-delete
+  the player.
+- Feedback scales with the bite the hit took out of the hull: a stronger, brief red screen-edge
+  vignette (capped so the arena stays readable) and a camera impulse reserved for elite, miniboss
+  and boss physical hits.
+
+### 6. The repair faucet is bounded
+
+- **Root cause:** a flat 4% drop chance per kill is a faucet whose flow rate is the player's kill
+  rate. At late kill rates that produced an orb every few seconds and erased every chip mistake.
+- Ordinary repair drops are now paced by wall-clock since the last orb (12s minimum, ~15s typical,
+  18s pity), require the player to actually be missing integrity, and are never a pure per-kill roll.
+- An injured player who is unlucky — or simply not killing anything, which is when they most need
+  repair — is guaranteed an orb by the pity interval, which tightens toward the minimum below 45%
+  integrity.
+- Miniboss (45) and boss (55, +30 Mega) repair rewards remain guaranteed and larger, and are
+  independent of the ordinary budget.
+- Every collected orb heals exactly once.
+
+### 7. Nanite Bleed is real sustain
+
+- **Root cause:** two disagreeing definitions. `SURVIVOR.regenPerLevel = 0.45` was dead code, and
+  the live formula was a flat `0.22 HP/s` per level — worthless on a plated hull.
+- Regeneration is now a percentage of maximum integrity: **0.4%/s per level** through L5
+  (L1 0.4%, L3 1.2%, L5 2.0%), then `2.0% + 0.12%·√(level−5)`. One authoritative implementation;
+  the dead constant is gone.
+- It resumes after **two** seconds without damage (was three).
+- It also increases repair-orb healing by 10% per level through L5, with strong diminishing
+  returns afterwards so endless levels cannot rebuild the faucet.
+
+### 8. Underwhelming passives
+
+- **Thruster Boost:** 6%/level, five levels, hard cap +30%.
+- **Magnet Field:** energy reach +0.55/level, repair reach +1.0/level, and pickups travel faster as
+  it levels. Ship and Mech form scaling is preserved and stated on the card.
+- Hard safety caps retained for cooldown, area, movement speed, projectile count and damage
+  reduction.
+
+### 9. Mech Overdrive is a fixed-cooldown ultimate
+
+- **Root cause:** the meter filled from kills (1.2%/kill, 8%/elite, 35%/miniboss, 25%/boss, plus
+  Core Siphon). At the kill rates this game reaches, that is near-permanent uptime. The defect was
+  **availability, not power**.
+- New model: **14s duration, 45s activation-to-activation cooldown**, set on activation and counted
+  down *while Mech is active* — so a transformation costs ~31s of astronaut/ship time.
+- The run begins with Mech unavailable; first readiness is one full cooldown in.
+- Kills, elites, minibosses and bosses no longer fill or reduce the cooldown by any path. The
+  `mechCharge` field is removed outright.
+- `Core Siphon` is replaced by **Core Cycling**: 3% shorter cooldown per level, five levels, hard
+  cap 15%. **Reactor Hold** is 5% duration per level, five levels, hard cap 25%.
+- Fully invested maximum uptime is **45.8%** (17.5s of 38.25s) — powerful, never permanent.
+- The HUD meter is readiness, not kill charge; the large `MECH READY` presentation and glow are
+  preserved.
+- Mech damage is deliberately **not** gutted in this pass, per the release brief. Damage taken
+  remains `0.65×` pending live evidence.
+
+### 10. Elites
+
+- Effective health raised to **10.0×** a same-time fodder enemy (design band 8–12×), expressed
+  entirely in the content table — the hidden `1.8×` multiplier that used to be applied at spawn is
+  gone, so the published ratio is readable from the data.
+- Lunge windup lengthened to 0.55s with a pronounced, avoidable footprint and a charging shell, so
+  an elite normally lands at least one telegraphed mechanic unless deliberately answered.
+- Elite lunge impact is 1.6× its contact damage; knockback resistance is meaningful but never total.
+- Premium energy rewards preserved.
+- Frequency follows the revised elite curve, and the forced-elite floor was raised from 8s to a
+  14s+ event cadence.
+
+### 11. Boss durability and phase transitions
+
+- **Root cause (durability):** 2,200 base health meant the first boss could die in about two
+  seconds and was irrelevant.
+- First-boss base health is **5,600**, chosen against a new deterministic boss benchmark
+  (`bossTimeToKill`) rather than asserted. Later growth is reshaped to `1 + 0.72k + 0.012k²` and
+  the Mega health multiplier lowered from 2.2 to 1.6, so raising the floor did not rebuild an
+  impossible late wall.
+- Measured time-to-kill against representative moving builds:
+
+  | Boss | HP | Astronaut | Mech | Target |
+  |---|---:|---:|---:|---|
+  | 1 (appropriate build) | 5,600 | 24.6s | 12.8s | 18–25s / 10–15s |
+  | 1 (balanced build) | 5,600 | 36.3s | 14.9s | slower build, allowed |
+  | 3 | 13,933 | 26.8s | — | 25–40s |
+  | 5 (Mega) | 36,485 | 62.1s | — | 45–75s |
+  | 10 (Mega) | 75,730 | 92.5s | — | 45–75s (over — see limitations) |
+
+- **Root cause (phase transitions):** crossing 66%/33% dropped the boss straight into `recover`.
+  High single-hit damage therefore cancelled live attacks, and enough DPS could stun-lock the boss
+  out of ever landing a mechanic — being strong made the fight *safer*.
+- Transitions are now deferred. The current attack always runs to completion; the transition is
+  consumed when the attack ends and plays as a telegraphed, **damaging** phase surge followed by a
+  short 0.45s beat, so the boss is attacking again promptly.
+- Phase thresholds are exactly 66% and 33%.
+- Shared AttackShape telegraph/collision correctness and `sourceBossId`-scoped cleanup are unchanged.
+- No permanent red boss floor auras were restored.
+
+### 13. Upgrade cards explain the decision
+
+- **Root cause:** the card said `WEAPON • 1 / Twin Globs / Impact 42 → 47`. It did not say whether
+  this was a weapon, a passive or an upgrade; what "Twin Globs" changes; or that it also cuts the
+  fire rate by 62%.
+- A single authoritative diff generator now compares every mechanically relevant field —
+  projectile/strike/beam count, chains, bounces, splits, damage, puddle damage, volley interval and
+  rate, radius, splash, puddle radius and duration, width, length, speed and lifetime — and derives
+  the copy from the authored tables so it cannot drift.
+- Every card carries a category badge (`NEW WEAPON`, `WEAPON UPGRADE`, `NEW PASSIVE`,
+  `PASSIVE UPGRADE`, `NEW PROTOTYPE`, `PROTOTYPE UPGRADE`, `OVERCLOCK`), the parent name, the exact
+  level transition, the authored upgrade name, a plain-language sentence, the numeric diffs, and an
+  explicit tradeoff line when the upgrade has a downside.
+- A field appearing for the first time is reported rather than skipped — Virulent Cascade's bounce
+  and split are the whole identity of that level and used to be invisible.
+- Cards are built with DOM nodes and `textContent`; card copy is data and never becomes markup.
+
+### 14. Exact death log
+
+- A typed `DamageSource` model replaces the loose string tag. Every player-damage path — horde
+  contact by role, elite lunge, miniboss slam, boss body, boss charge, boss projectile, boss beam,
+  boss hazard, each boss pattern by name, and other hazards — must name itself. There is no default
+  and no fallback bucket, so nothing can kill the player anonymously.
+- A bounded 32-entry ring records survival timestamp, source display name, attack name, raw damage,
+  damage after mitigation, shield absorption and remaining integrity.
+- The death screen states `Killed by [enemy/boss] — [attack]`, the final damage, and a chronological
+  list of contributing hits from the last 12 seconds. Rendered with safe DOM APIs; no `innerHTML`.
+
+### 15. Recount-style run report
+
+- Available from the pause menu (`RUN STATS`) and from the death screen.
+- Damage is **health actually removed**, clamped to the target's remaining health, so overkill on a
+  dying enemy cannot inflate a weapon's share.
+- Two separate views so form attribution never double-counts source totals: by source (each weapon,
+  Repulsor, ship body/exhaust/wake, Gunship, and future ability sources) with total, share, DPS,
+  hits, kills, boss damage and max hit; and by form (astronaut/ship/mech) with damage, share,
+  uptime and DPS-while-active.
+- Also records Mech and Ship uptime, elite and miniboss kills, boss and Mega-Boss time-to-kill,
+  damage taken by source, healing by repair orbs and by Nanite Bleed, shield absorption, and
+  ordinary/Mega Cache selection counts.
+- Bounded and local; no backend.
+
+### Weapon rebalance forced by the speed change
+
+Lowering enemy speeds changed what the deterministic weapon benchmark measures, and several
+weapons fell outside the documented progression contract. They were re-tuned until the contract
+held again, not by widening the contract:
+
+- **Microdrone Swarm** damage cut ~24% across L1–L5. Homing gained reliability against the slower
+  opening speeds and pushed bee's starter to 1.37× the four-starter mean, outside the ±15% band.
+- **Rail Lance** L4 158 (was 152) so the L5 second-beam breakpoint stays inside the ceiling.
+- **Gravity Pulse** L5 69 (was 67) to restore the 3.0 minimum L5/L1 ratio.
+- **Rocket Barrage** L2 49 (was 47) to bring the L3 salvo step under the typical ceiling.
+- **Orbital Lance** re-authored (140/168/205/250/290 with cadences 4.2/4.0/3.8/3.6/5.6). The old
+  curve had a dead L3 step and a ~2× L5 jump.
+- The benchmark itself gained a per-weapon measurement window: a weapon firing ~11 times in the
+  standard 48s window carries ±10% quantisation noise from a single shot, which is the same
+  magnitude as the gain bounds. Windows are extended only for weapons that would otherwise fire
+  fewer than 16 volleys — today, Orbital Lance alone.
+
+Final contract state: starter band 0.89–1.14 (target 0.85–1.15); L5/L1 ratios 3.02–3.43
+(target 3.0–4.2); every per-level gain inside bounds with at most one declared breakpoint each.
+
+### 20. Mega-Boss size
+
+- `megaVisualMul` reduced from 2.0 to **1.5** — a 25% cut to the presented Mega-Boss. Regular boss
+  sizes are unchanged.
+- `megaColliderMul` reduced from 1.55 to **1.32** so the collider tracks the reduced visible body
+  and Repulse, ship exhaust, weapon hits, body contact and telegraph origins stay honest.
+
+### 22. Version and leaderboard
+
+- `SURVIVOR_BALANCE_VERSION = 'endless-2.3.0'`. New scores partition under 2.3.0; historical scores
+  are retained in storage and excluded from the default current-version board. Nothing is deleted.
+
+### Tests
+
+- New `survivorRelease230.test.ts` (79 tests) covering every speed/population/spawn/elite/contact
+  anchor, the repair economy's pacing, pity floor, injured gate and single-heal guarantee, Nanite
+  Bleed's percentage model and orb bonus, passive caps, the full Mech cooldown model including
+  first readiness and the absence of any kill-based recharge path, elite health/telegraph/knockback
+  contracts, the surge director's timing, non-stacking, boss interaction and edge geometry, crowd
+  separation including exact overlaps and full-cap stability, every authored upgrade card, the
+  typed damage sources and bounded death log, and the run report's overkill exclusion and
+  form-attribution independence.
+- Existing suites updated to the new balance rather than relaxed.
+- Total: 254 tests passing.
 
 ## [2.2.1] — 2026-08-09 — Containment Protocol repair release
 

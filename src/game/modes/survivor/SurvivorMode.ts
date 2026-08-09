@@ -353,7 +353,7 @@ export class SurvivorMode {
     } else if (this.fixture === 'survivor-damage') {
       surroundPlayer(state, 12, 3.8);
     } else if (this.fixture === 'survivor-mech') {
-      state.player.mechCharge = 1;
+      state.player.mechCd = 0;
     }
   }
 

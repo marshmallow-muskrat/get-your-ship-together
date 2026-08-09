@@ -1,6 +1,6 @@
 # Weapon Benchmark
 
-Balance version: `endless-2.2.1`
+Balance version: `endless-2.3.0`
 
 **This file is generated.** Every number below is produced by
 `src/game/modes/survivor/survivorWeaponBenchmark.ts` and printed by
@@ -46,38 +46,38 @@ Do not hand-edit the tables.
 
 | Weapon | Intended scenario | L1 | L2 | L3 | L4 | L5 | L5/L1 | L2 | L3 | L4 | L5 | Breakpoint |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Pulse Blaster | `general` | 1921 | 2580 | 3290 | 4576 | 6347 | 3.30 | 34% | 28% | 39% | 39% | L5 |
-| Microdrone Swarm | `mobile-offaxis` | 12312 | 16320 | 21449 | 26532 | 39160 | 3.18 | 33% | 31% | 24% | 48% | L5 |
-| Rail Lance | `lined-up` | 10560 | 13908 | 18189 | 23256 | 33488 | 3.17 | 32% | 31% | 28% | 44% | L5 |
-| Gravity Pulse | `dense` | 10208 | 13622 | 18036 | 22920 | 33634 | 3.29 | 33% | 32% | 27% | 47% | L5 |
-| Rocket Barrage | `clustered` | 16674 | 22560 | 30212 | 38280 | 56181 | 3.37 | 35% | 34% | 27% | 47% | L5 |
-| Bio-Plasma Glob | `clustered` | 14952 | 19992 | 25893 | 34074 | 48190 | 3.22 | 34% | 30% | 32% | 41% | L5 |
-| Arc Conductor | `mixed-elite` | 4310 | 5643 | 7403 | 9635 | 14417 | 3.35 | 31% | 31% | 30% | 50% | L5 |
-| Orbital Lance | `single-boss` | 980 | 1296 | 1680 | 2148 | 3192 | 3.26 | 32% | 30% | 28% | 49% | L5 |
+| Pulse Blaster | `general` | 1917 | 2574 | 3280 | 4558 | 6320 | 3.30 | 34% | 27% | 39% | 39% | L5 |
+| Microdrone Swarm | `mobile-offaxis` | 8415 | 11407 | 15300 | 19000 | 28305 | 3.36 | 36% | 34% | 24% | 49% | L5 |
+| Rail Lance | `lined-up` | 6160 | 8540 | 10965 | 13904 | 20566 | 3.34 | 39% | 28% | 27% | 48% | L5 |
+| Gravity Pulse | `dense` | 4444 | 5733 | 7992 | 10080 | 13662 | 3.07 | 29% | 39% | 26% | 36% | L5 |
+| Rocket Barrage | `clustered` | 9786 | 12789 | 17420 | 24070 | 32147 | 3.28 | 31% | 36% | 38% | 34% | L5 |
+| Bio-Plasma Glob | `clustered` | 6608 | 8844 | 11521 | 15167 | 22692 | 3.43 | 34% | 30% | 32% | 50% | L5 |
+| Arc Conductor | `mixed-elite` | 4157 | 5681 | 7413 | 9541 | 13715 | 3.30 | 37% | 30% | 29% | 44% | L5 |
+| Orbital Lance | `single-boss` | 2240 | 2856 | 3485 | 4750 | 6960 | 3.11 | 27% | 22% | 36% | 47% | L5 |
 
 ## Hero starter parity (L1, weighted)
 
 | Hero | Starter | Weighted output | vs mean |
 | --- | --- | ---: | ---: |
-| bee | microdrone | 2447 | 102.0% |
-| flamingo | rail | 2308 | 96.2% |
-| frog | bioplasma | 2347 | 97.9% |
-| red-panda | rocket | 2491 | 103.9% |
+| bee | microdrone | 1790 | 114.1% |
+| flamingo | rail | 1505 | 95.9% |
+| frog | bioplasma | 1404 | 89.5% |
+| red-panda | rocket | 1575 | 100.4% |
 
-Mean weighted output: 2398.
+Mean weighted output: 1568.
 
 ## Per-scenario output (L1 → L5)
 
 | Weapon | single-boss | sparse | dense | mixed-elite | mobile-offaxis | lined-up | clustered |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Pulse Blaster | 294 → 1056 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 406 → 1342 | 350 → 1144 |
-| Microdrone Swarm | 1440 → 4620 | 3456 → 10780 | 3816 → 11770 | 3672 → 12100 | 3672 → 11880 | 1872 → 6820 | 1800 → 6050 |
-| Rail Lance | 550 → 1820 | 1870 → 4732 | 7260 → 20930 | 3520 → 11830 | 1760 → 5824 | 2090 → 7644 | 3300 → 10738 |
-| Gravity Pulse | 176 → 536 | 880 → 2412 | 2860 → 9380 | 2156 → 6164 | 1144 → 2948 | 1100 → 2948 | 1760 → 5360 |
-| Rocket Barrage | 840 → 2013 | 1680 → 3904 | 6804 → 26596 | 4326 → 13725 | 2016 → 5856 | 2268 → 7808 | 4998 → 16958 |
-| Bio-Plasma Glob | 816 → 3578 | 2026 → 7780 | 5247 → 16699 | 3921 → 12991 | 2845 → 10055 | 2408 → 8456 | 3299 → 11236 |
-| Arc Conductor | 272 → 572 | 978 → 2964 | 1437 → 4407 | 1360 → 4446 | 1233 → 3237 | 1437 → 4446 | 995 → 3211 |
-| Orbital Lance | 560 → 1596 | 980 → 2394 | 2100 → 6118 | 1400 → 5320 | 1260 → 3990 | 1540 → 4256 | 2520 → 8246 |
+| Pulse Blaster | 294 → 968 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 378 → 1188 | 336 → 1056 |
+| Microdrone Swarm | 990 → 3315 | 2530 → 8415 | 2915 → 9265 | 2695 → 8840 | 2585 → 8585 | 1595 → 5100 | 1430 → 4505 |
+| Rail Lance | 550 → 1456 | 1540 → 4004 | 3520 → 13104 | 1650 → 7098 | 1540 → 4004 | 1760 → 6552 | 1650 → 5096 |
+| Gravity Pulse | 176 → 414 | 528 → 1656 | 1100 → 4278 | 968 → 2484 | 660 → 1932 | 704 → 1794 | 836 → 2622 |
+| Rocket Barrage | 756 → 2013 | 1050 → 3050 | 4242 → 14396 | 2184 → 7747 | 1260 → 3172 | 1890 → 6649 | 3024 → 9150 |
+| Bio-Plasma Glob | 816 → 3219 | 1639 → 6510 | 2559 → 9122 | 2056 → 7198 | 1733 → 6409 | 1712 → 5936 | 1612 → 5763 |
+| Arc Conductor | 272 → 520 | 952 → 2886 | 1437 → 4407 | 1335 → 4446 | 1207 → 3120 | 1105 → 3458 | 995 → 2964 |
+| Orbital Lance | 560 → 1740 | 560 → 1450 | 980 → 3190 | 420 → 1740 | 420 → 2030 | 560 → 3190 | 700 → 4930 |
 
 ## Endless progression beyond L5
 

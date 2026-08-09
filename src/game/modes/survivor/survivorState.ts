@@ -10,6 +10,7 @@ import {
   heroStarterWeapon,
   xpForLevel,
 } from './survivorContent';
+import { createTelemetry } from './survivorTelemetry';
 
 export type SurvivorPhase = 'playing' | 'levelup' | 'protocol' | 'victory' | 'defeat' | 'paused';
 
@@ -187,6 +188,12 @@ export interface UpgradeChoice {
   id: string;
   title: string;
   body: string;
+  /**
+   * Full card copy: category badge, parent name, level transition, named upgrade,
+   * plain-language summary, numeric diffs and any tradeoff. The HUD renders this; the
+   * flattened `title`/`body` remain for fixtures and older assertions.
+   */
+  card?: import('./survivorUpgradeCards').UpgradeCardCopy;
   weaponId?: WeaponId;
   passiveId?: PassiveId;
   protocolId?: import('./survivorContent').ProtocolId;
@@ -246,6 +253,13 @@ export interface SurvivorBoss {
   patternElapsed: number;
   /** Per-pattern hit throttle for continuous beams/rings. */
   patternHitCd: number;
+  /**
+   * A phase threshold was crossed while an attack was live.
+   *
+   * Consumed once the current attack finishes, so crossing 66%/33% can never cancel a
+   * live attack into a harmless recovery window.
+   */
+  pendingPhaseTransition: boolean;
   /** Attacks completed since last unique-pattern use. */
   attacksSinceUnique: number;
   /** Attacks completed since last mega-only pattern. */
@@ -312,7 +326,15 @@ export interface SurvivorState {
     maxHealth: number;
     form: SurvivorForm;
     formTimer: number;
-    mechCharge: number;
+    /**
+     * Remaining Mech cooldown in seconds.
+     *
+     * Replaces the removed `mechCharge` kill meter. Set on activation and counted down
+     * every frame including while Mech is active, so the cycle is activation-to-activation.
+     */
+    mechCd: number;
+    /** Cooldown length used for the current cycle (HUD readiness ring). */
+    mechCdMax: number;
     mechDuration: number;
     shipDuration: number;
     repulsorCd: number;
@@ -326,6 +348,12 @@ export interface SurvivorState {
     exhaustTickCd: number;
     invuln: number;
     hitFlash: number;
+    /** 0–1 bite the last hit took out of the hull; drives feedback intensity. */
+    hitSeverity: number;
+    /** Remaining red screen-edge vignette (seconds). Brief and strong, never opaque. */
+    hitVignette: number;
+    /** Remaining camera impulse (seconds). Only major specialist/boss physical hits. */
+    hitShake: number;
     alive: boolean;
     /** @deprecated hit-count barrier removed; use shieldPoints. */
     barrierHits: number;
@@ -346,6 +374,11 @@ export interface SurvivorState {
   /**
    * Pressure director:
    * normal → telegraph → surge → recovery → normal
+   *
+   * A surge is a readable event, not a background modifier. The telegraph is long
+   * enough to save a defensive cooldown for, the active window is bounded, and
+   * recovery is a genuine lull created by withholding replacements — never by
+   * despawning living enemies.
    */
   surge: {
     phase: 'normal' | 'telegraph' | 'surge' | 'recovery';
@@ -361,6 +394,25 @@ export interface SurvivorState {
      * spawn index alone left it pinned to a single edge.
      */
     edgeCursor: number;
+    /** Edges this surge actually uses, for arrows and edge illumination. */
+    activeEdges: number[];
+    /** Population the recovery window drains toward before replacements resume. */
+    recoveryTarget: number;
+    /** Banner presentation timer (seconds remaining). */
+    banner: number;
+  };
+  /**
+   * Bounded repair economy (see SURVIVOR.repair).
+   * Ordinary repair orbs are paced by elapsed time with a pity floor, never by an
+   * independent per-kill roll that scales with kill rate.
+   */
+  repairEconomy: {
+    /** Seconds since the last ordinary repair drop. */
+    sinceDrop: number;
+    /** Seconds spent meaningfully injured since the last ordinary drop. */
+    injuredFor: number;
+    /** Ordinary repair orbs produced this run (telemetry / tests). */
+    drops: number;
   };
   /** Ordered FIFO of deferred boss schedule indices (1-based). */
   pendingBossIndices: number[];
@@ -450,6 +502,8 @@ export interface SurvivorState {
     string,
     { amount: number; x: number; z: number; kind: DamageEvent['kind']; timer: number; pop: number }
   >;
+  /** Run telemetry: exact death attribution and the Recount-style damage report. */
+  telemetry: import('./survivorTelemetry').RunTelemetry;
   level: number;
   xp: number;
   xpNext: number;
@@ -528,6 +582,7 @@ export function emptyBoss(): SurvivorBoss {
     patternTriggered: false,
     patternElapsed: 0,
     patternHitCd: 0,
+    pendingPhaseTransition: false,
     attacksSinceUnique: 0,
     attacksSinceMega: 0,
     previousPattern: null,
@@ -639,7 +694,9 @@ export function createSurvivorState(
       maxHealth: SURVIVOR.playerMaxHealth,
       form: 'astronaut',
       formTimer: 0,
-      mechCharge: 0,
+      // The run opens with Mech unavailable; first readiness is one full cooldown in.
+      mechCd: SURVIVOR.mech.initialCooldown,
+      mechCdMax: SURVIVOR.mech.initialCooldown,
       mechDuration: 0,
       shipDuration: 0,
       repulsorCd: 0,
@@ -653,6 +710,9 @@ export function createSurvivorState(
       exhaustTickCd: 0,
       invuln: 1.2,
       hitFlash: 0,
+      hitSeverity: 0,
+      hitVignette: 0,
+      hitShake: 0,
       alive: true,
       barrierHits: 0,
       shieldPoints: 0,
@@ -675,12 +735,16 @@ export function createSurvivorState(
       phase: 'normal',
       kind: '',
       phaseEndsAt: 0,
-      nextSurgeAt: SURVIVOR.surgeInterval,
+      nextSurgeAt: SURVIVOR.surgeIntervalMin,
       edgeA: 0,
       // Facing edge of the same axis pair (-Z/+Z), matching the director's pairing.
       edgeB: 1,
       edgeCursor: 0,
+      activeEdges: [],
+      recoveryTarget: 0,
+      banner: 0,
     },
+    repairEconomy: { sinceDrop: 0, injuredFor: 0, drops: 0 },
     pendingBossIndices: [],
     cache: {
       active: false,
@@ -745,6 +809,7 @@ export function createSurvivorState(
     },
     damageEvents: [],
     damageAgg: new Map(),
+    telemetry: createTelemetry(),
     level: 1,
     xp: 0,
     xpNext: xpForLevel(1),
@@ -819,7 +884,8 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       6,
     );
   } else if (fixture === 'survivor-mech') {
-    state.player.mechCharge = 1;
+    // Mech immediately available for the fixture.
+    state.player.mechCd = 0;
     state.time = 120;
   } else if (fixture === 'survivor-pickups') {
     state.player.health = state.player.maxHealth * 0.45;
@@ -948,7 +1014,7 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     );
     state.unlocks.arc = true;
     state.unlocks.orbital = true;
-    state.player.mechCharge = 1;
+    state.player.mechCd = 0;
     state.player.repulsorCd = 0;
     state.player.shipCd = 0;
     // Prime the arena so the first frames are already at load.
@@ -997,7 +1063,7 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       8,
     );
     state.player.health = state.player.maxHealth;
-    state.player.mechCharge = 0.85;
+    state.player.mechCd = 6;
     state.player.invuln = 3;
   } else if (fixture === 'survivor-repulsor') {
     state.player.repulsorCd = 0;
