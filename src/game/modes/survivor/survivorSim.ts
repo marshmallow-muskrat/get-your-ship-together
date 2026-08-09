@@ -157,13 +157,12 @@ export function energyMagnetRadius(state: SurvivorState): number {
   return magnet;
 }
 
-/** Health/repair magnet radius — Magnet Field benefits health more. */
+/** Health/repair magnet radius — Magnet Field benefits health more than energy. */
 export function healthMagnetRadius(state: SurvivorState): number {
   let r = SURVIVOR.healthMagnetBase + passiveLevel(state, 'pickup-radius') * SURVIVOR.healthMagnetPerLevel;
   if (state.player.form === 'ship') {
-    r = Math.max(r, SURVIVOR.healthShipMagnet);
     const ship = SURVIVOR.heroShips[state.heroId];
-    r = Math.max(r, ship.collectionRadius + 1.5);
+    r = Math.max(r, SURVIVOR.healthShipMagnet, ship.collectionRadius + 3);
   } else if (state.player.form === 'mech') {
     r *= SURVIVOR.healthMechMagnetMul;
   }
@@ -182,9 +181,73 @@ export function energyDirectRadius(state: SurvivorState): number {
 }
 
 export function healthDirectRadius(state: SurvivorState): number {
-  if (state.player.form === 'ship') return Math.max(SURVIVOR.heroShips[state.heroId].pickupRadius, 2.2);
-  if (state.player.form === 'mech') return SURVIVOR.playerRadius * 1.6;
+  if (state.player.form === 'ship') {
+    const ship = SURVIVOR.heroShips[state.heroId];
+    return Math.max(ship.pickupRadius + 1, SURVIVOR.healthShipDirectMin);
+  }
+  if (state.player.form === 'mech') {
+    return Math.max(SURVIVOR.playerRadius * 1.6, SURVIVOR.healthMechDirectRadius);
+  }
   return SURVIVOR.healthDirectRadius;
+}
+
+/** Project a kill-position reward into a safe interior of the arena. */
+export function safePickupPosition(
+  x: number,
+  z: number,
+  jitterX = 0,
+  jitterZ = 0,
+): { x: number; z: number } {
+  const inset = SURVIVOR.pickupSafeInset;
+  const limit = SURVIVOR.arenaHalf - inset;
+  let px = x + jitterX;
+  let pz = z + jitterZ;
+  if (px > limit) px = limit;
+  if (px < -limit) px = -limit;
+  if (pz > limit) pz = limit;
+  if (pz < -limit) pz = -limit;
+  return { x: px, z: pz };
+}
+
+/** Closest distance from point to segment (for swept collection / gunship lane). */
+function distPointToSegment(
+  px: number,
+  pz: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): number {
+  const abx = bx - ax;
+  const abz = bz - az;
+  const apx = px - ax;
+  const apz = pz - az;
+  const ab2 = abx * abx + abz * abz;
+  if (ab2 < 1e-8) return Math.hypot(apx, apz);
+  let t = (apx * abx + apz * abz) / ab2;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const cx = ax + abx * t;
+  const cz = az + abz * t;
+  return Math.hypot(px - cx, pz - cz);
+}
+
+/** Inclusive circle / segment-vs-radius test for high-speed collection. */
+function playerCollectsPickup(
+  px: number,
+  pz: number,
+  prevX: number,
+  prevZ: number,
+  ox: number,
+  oz: number,
+  radius: number,
+): boolean {
+  const r2 = radius * radius;
+  const dx = px - ox;
+  const dz = pz - oz;
+  if (dx * dx + dz * dz <= r2) return true;
+  // Swept segment from previous player pos → current (dodge / ship tunneling).
+  return distPointToSegment(ox, oz, prevX, prevZ, px, pz) <= radius;
 }
 
 /** @deprecated Prefer energyDirectRadius. */
@@ -396,6 +459,37 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
   }
 }
 
+function isImportantPickup(kind: SurvivorPickup['kind']): boolean {
+  return kind === 'repair' || kind === 'supply';
+}
+
+function reclaimPickupSlot(state: SurvivorState, preferKind: SurvivorPickup['kind']): SurvivorPickup | null {
+  // Prefer inactive slots.
+  for (const p of state.pickups) {
+    if (!p.active) return p;
+  }
+  // Coalesce nearby XP when spawning XP.
+  if (preferKind === 'xp') {
+    return null;
+  }
+  // Important rewards: reclaim lowest-value XP (never discard repair/supply for XP pressure).
+  let worstXp: SurvivorPickup | null = null;
+  let worstVal = Infinity;
+  for (const p of state.pickups) {
+    if (!p.active || p.kind !== 'xp') continue;
+    if (p.value < worstVal) {
+      worstVal = p.value;
+      worstXp = p;
+    }
+  }
+  if (worstXp) {
+    worstXp.active = false;
+    worstXp.magnetized = false;
+    return worstXp;
+  }
+  return null;
+}
+
 function dropPickup(
   state: SurvivorState,
   x: number,
@@ -403,6 +497,41 @@ function dropPickup(
   kind: SurvivorPickup['kind'],
   value: number,
 ): void {
+  const pos = safePickupPosition(x, z);
+  // Light deterministic de-stack: nudge if another active pickup shares the exact cell.
+  let px = pos.x;
+  let pz = pos.z;
+  for (const other of state.pickups) {
+    if (!other.active) continue;
+    if (Math.abs(other.x - px) < 0.05 && Math.abs(other.z - pz) < 0.05) {
+      const n = (other.id % 7) + 1;
+      px += ((n % 3) - 1) * 0.35;
+      pz += (((n / 3) | 0) - 1) * 0.35;
+      const re = safePickupPosition(px, pz);
+      px = re.x;
+      pz = re.z;
+      break;
+    }
+  }
+
+  // Nearby XP coalesce (reliable).
+  if (kind === 'xp') {
+    let best: SurvivorPickup | null = null;
+    let bestD = 2.8 * 2.8;
+    for (const p of state.pickups) {
+      if (!p.active || p.kind !== 'xp') continue;
+      const d = (p.x - px) ** 2 + (p.z - pz) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    if (best) {
+      best.value += value;
+      return;
+    }
+  }
+
   let slot: SurvivorPickup | null = null;
   for (const p of state.pickups) {
     if (!p.active) {
@@ -410,44 +539,58 @@ function dropPickup(
       break;
     }
   }
+
   if (!slot) {
-    if (state.pickups.length >= SURVIVOR.pickupCap) {
+    const activeCount = state.pickups.reduce((n, p) => n + (p.active ? 1 : 0), 0);
+    const reserve = SURVIVOR.pickupReserveImportant;
+    const atHardCap = state.pickups.length >= SURVIVOR.pickupCap;
+    const atSoftCap = activeCount >= SURVIVOR.pickupCap - reserve && !isImportantPickup(kind);
+
+    if (atHardCap || atSoftCap) {
       if (kind === 'xp') {
-        let best: SurvivorPickup | null = null;
-        let bestD = 4;
+        // Already tried coalesce; reclaim lowest-value XP further away or drop silently.
+        let worst: SurvivorPickup | null = null;
+        let worstScore = -Infinity;
         for (const p of state.pickups) {
           if (!p.active || p.kind !== 'xp') continue;
-          const d = (p.x - x) ** 2 + (p.z - z) ** 2;
-          if (d < bestD) {
-            bestD = d;
-            best = p;
+          // Prefer reclaiming low value far from player.
+          const dist = Math.hypot(p.x - state.player.x, p.z - state.player.z);
+          const score = dist / (1 + p.value);
+          if (score > worstScore) {
+            worstScore = score;
+            worst = p;
           }
         }
-        if (best) {
-          best.value += value;
+        if (worst) {
+          worst.value += value;
           return;
         }
+        return;
       }
-      return;
+      slot = reclaimPickupSlot(state, kind);
+      if (!slot) return;
+    } else {
+      slot = {
+        id: 0,
+        kind: 'xp',
+        x: 0,
+        z: 0,
+        value: 0,
+        active: false,
+        magnetized: false,
+        life: Infinity,
+      };
+      state.pickups.push(slot);
     }
-    slot = {
-      id: 0,
-      kind: 'xp',
-      x: 0,
-      z: 0,
-      value: 0,
-      active: false,
-      magnetized: false,
-    };
-    state.pickups.push(slot);
   }
   slot.id = nextEntityId(state);
   slot.kind = kind;
-  slot.x = x;
-  slot.z = z;
+  slot.x = px;
+  slot.z = pz;
   slot.value = value;
   slot.active = true;
   slot.magnetized = false;
+  slot.life = kind === 'repair' ? SURVIVOR.repairPickupLife : Infinity;
 }
 
 function damageEnemy(
@@ -1773,15 +1916,30 @@ function updatePickups(state: SurvivorState, dt: number): void {
   const hMag = healthMagnetRadius(state);
   const eDirect = energyDirectRadius(state);
   const hDirect = healthDirectRadius(state);
-  const injured = p.health < p.maxHealth - 0.01;
+  // Previous position for swept collection (set each frame by movement systems).
+  const prevX = (p as { _prevX?: number })._prevX ?? p.x;
+  const prevZ = (p as { _prevZ?: number })._prevZ ?? p.z;
+
   for (const pk of state.pickups) {
     if (!pk.active) continue;
+
+    // Expire ordinary repair orbs (with brief warn window via short remaining life).
+    if (pk.kind === 'repair' && Number.isFinite(pk.life)) {
+      pk.life -= dt;
+      if (pk.life <= 0) {
+        pk.active = false;
+        pk.magnetized = false;
+        pushEffect(state, 'pulse', pk.x, pk.z, 0.25, '#ff88aa', 0.7);
+        continue;
+      }
+    }
+
     let dx = p.x - pk.x;
     let dz = p.z - pk.z;
     let d2 = dx * dx + dz * dz;
 
     if (pk.kind === 'xp') {
-      if (d2 < eMag * eMag) pk.magnetized = true;
+      if (d2 <= eMag * eMag) pk.magnetized = true;
       if (pk.magnetized) {
         const d = Math.sqrt(d2) || 1;
         const spd = SURVIVOR.xpMagnetSpeed;
@@ -1791,7 +1949,7 @@ function updatePickups(state: SurvivorState, dt: number): void {
         dz = p.z - pk.z;
         d2 = dx * dx + dz * dz;
       }
-      if (d2 < eDirect * eDirect) {
+      if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, eDirect)) {
         pk.active = false;
         pk.magnetized = false;
         gainXp(state, pk.value);
@@ -1801,12 +1959,15 @@ function updatePickups(state: SurvivorState, dt: number): void {
     }
 
     if (pk.kind === 'repair') {
-      // Never magnetize or consume while full — leave available for later
-      if (!injured) {
+      // Evaluate current health each pickup — never use a stale frame-level injured flag.
+      const missing = p.maxHealth - p.health;
+      const canHeal = missing > 0.01;
+      if (!canHeal) {
+        // Full health: leave orb available; cancel magnetization so it doesn't stick to player.
         pk.magnetized = false;
         continue;
       }
-      if (d2 < hMag * hMag) pk.magnetized = true;
+      if (d2 <= hMag * hMag) pk.magnetized = true;
       if (pk.magnetized) {
         const d = Math.sqrt(d2) || 1;
         const spd = SURVIVOR.healthMagnetSpeed;
@@ -1816,14 +1977,18 @@ function updatePickups(state: SurvivorState, dt: number): void {
         dz = p.z - pk.z;
         d2 = dx * dx + dz * dz;
       }
-      if (d2 < hDirect * hDirect) {
-        const before = p.health;
-        const need = p.maxHealth - p.health;
-        if (need <= 0) {
+      // Re-check after magnet travel — regen may have filled health mid-flight.
+      const needNow = p.maxHealth - p.health;
+      if (needNow <= 0.01) {
+        pk.magnetized = false;
+        continue;
+      }
+      if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, hDirect)) {
+        const restored = Math.min(pk.value, needNow);
+        if (restored <= 0) {
           pk.magnetized = false;
           continue;
         }
-        const restored = Math.min(pk.value, need);
         p.health = Math.min(p.maxHealth, p.health + restored);
         pk.active = false;
         pk.magnetized = false;
@@ -1835,13 +2000,14 @@ function updatePickups(state: SurvivorState, dt: number): void {
     }
 
     if (pk.kind === 'supply') {
-      if (d2 < eDirect * eDirect * 1.4) {
+      if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, eDirect * 1.2)) {
         pk.active = false;
         openSupply(state);
         pushEffect(state, 'levelup', p.x, p.z, 0.4, '#ffd46a', 1.6);
       }
     }
   }
+
 }
 
 function gainXp(state: SurvivorState, amount: number): void {
@@ -1871,11 +2037,12 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
   const authored: UpgradeChoice[] = [];
   const overclocks: UpgradeChoice[] = [];
   const passives: UpgradeChoice[] = [];
-  const prototypes: UpgradeChoice[] = [];
+  const forcedPrototypes: UpgradeChoice[] = [];
+  const freePrototypes: UpgradeChoice[] = [];
 
-  // Guarantee unlock offers once
+  // Guarantee unlock offers once (occupy at most one card later)
   if (state.unlocks.arc && !ownedWeaponLevel(state, 'arc') && !state.unlocks.arcOffered) {
-    prototypes.push({
+    forcedPrototypes.push({
       kind: 'new-weapon',
       id: 'new-arc-forced',
       title: WEAPONS.arc.name,
@@ -1884,7 +2051,7 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     });
   }
   if (state.unlocks.orbital && !ownedWeaponLevel(state, 'orbital') && !state.unlocks.orbitalOffered) {
-    prototypes.push({
+    forcedPrototypes.push({
       kind: 'new-weapon',
       id: 'new-orbital-forced',
       title: WEAPONS.orbital.name,
@@ -1916,8 +2083,8 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     if (!fam.prototype) continue;
     const unlocked = id === 'arc' ? state.unlocks.arc : state.unlocks.orbital;
     if (!unlocked) continue;
-    if (prototypes.some((c) => c.weaponId === id)) continue;
-    prototypes.push({
+    if (forcedPrototypes.some((c) => c.weaponId === id)) continue;
+    freePrototypes.push({
       kind: 'new-weapon',
       id: `new-${id}`,
       title: fam.name,
@@ -1981,18 +2148,24 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     return bag;
   };
 
-  // Forced prototype unlocks first, then permanent tiers only — never temps
-  const tiers = [
-    shuffle(prototypes.filter((c) => c.id.includes('forced'))),
-    shuffle(prototypes.filter((c) => !c.id.includes('forced'))),
-    shuffle(newWeapons),
-    shuffle(authored),
-    shuffle(overclocks),
-    shuffle(passives),
-  ];
+  // Mixed-category offers so endless Overclocks never starve passives.
+  // Card 1: offensive (new weapon / authored upgrade / overclock / free prototype)
+  // Card 2: passive/defensive whenever eligible
+  // Card 3: wildcard from remaining
+  // Forced prototype may occupy one card but never all three.
+  const offensivePool = shuffle([
+    ...shuffle(newWeapons),
+    ...shuffle(authored),
+    ...shuffle(overclocks),
+    ...shuffle(freePrototypes),
+  ]);
+  const passivePool = shuffle(passives);
+  const forcedPool = shuffle(forcedPrototypes);
+
   const choices: UpgradeChoice[] = [];
   const used = new Set<string>();
-  const tryAdd = (c: UpgradeChoice): boolean => {
+  const tryAdd = (c: UpgradeChoice | undefined): boolean => {
+    if (!c) return false;
     const key =
       c.kind === 'passive'
         ? `p:${c.passiveId}`
@@ -2004,57 +2177,61 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     choices.push(c);
     return true;
   };
-  for (const tier of tiers) {
-    for (const c of tier) {
-      if (choices.length >= 3) break;
-      tryAdd(c);
+
+  const takeFrom = (pool: UpgradeChoice[]): boolean => {
+    while (pool.length > 0) {
+      if (tryAdd(pool.shift())) return true;
     }
+    return false;
+  };
+
+  // Optional forced prototype occupies one card (prefer card 1).
+  const forced = forcedPool[0];
+  if (forced) tryAdd(forced);
+
+  // Card 1: offensive (if forced already filled, skip)
+  if (choices.length < 1) takeFrom(offensivePool);
+
+  // Card 2: passive whenever eligible
+  if (choices.length < 2) {
+    if (!takeFrom(passivePool)) takeFrom(offensivePool);
   }
-  // Absolute permanent fallback: overclock first owned weapon / hull plating
+
+  // Card 3: wildcard from remaining eligible (mix pools so late game still diversifies)
+  if (choices.length < 3) {
+    const wild = shuffle([...offensivePool, ...passivePool, ...forcedPool.slice(1)]);
+    takeFrom(wild);
+  }
+
+  // Deterministic fill: remaining offensive → passives → hard hull plating
   while (choices.length < 3) {
+    if (takeFrom(offensivePool)) continue;
+    if (takeFrom(passivePool)) continue;
     if (state.weapons[0]) {
       const w = state.weapons[choices.length % state.weapons.length]!;
       const nextLv = w.level + 1;
       const fam = WEAPONS[w.weaponId];
-      tryAdd({
-        kind: 'weapon',
-        id: `w-fill-${w.weaponId}-${nextLv}-${choices.length}`,
-        title: `${fam.name} L${nextLv}`,
-        body: weaponDamagePreview(w.weaponId, w.level, nextLv),
-        weaponId: w.weaponId,
-      });
-    } else {
-      tryAdd({
-        kind: 'passive',
-        id: `p-fill-max-health-${choices.length}`,
-        title: 'Hull Plating L1',
-        body: 'Integrity +20',
-        passiveId: 'max-health',
-      });
+      if (
+        tryAdd({
+          kind: 'weapon',
+          id: `w-fill-${w.weaponId}-${nextLv}-${choices.length}`,
+          title: `${fam.name} L${nextLv}`,
+          body: weaponDamagePreview(w.weaponId, w.level, nextLv),
+          weaponId: w.weaponId,
+        })
+      ) {
+        continue;
+      }
     }
-    if (choices.length < 3 && choices.every((c) => c.id.startsWith('p-fill'))) break;
-    // prevent infinite loop
-    if (choices.length === 0) break;
-    if (choices.length < 3 && tiers.flat().length === 0) {
-      choices.push({
-        kind: 'passive',
-        id: `p-fill-regen-${choices.length}`,
-        title: `Nanite Bleed L${(state.passives.regen ?? 0) + 1}`,
-        body: 'Automatic repair',
-        passiveId: 'regen',
-      });
-    }
-    if (choices.length >= 3) break;
-    // force push unique id
     const n = choices.length;
-    choices.push({
+    tryAdd({
       kind: 'passive',
       id: `p-hard-fill-${n}`,
-      title: `Hull Plating L${(state.passives['max-health'] ?? 0) + 1 + n}`,
+      title: `Hull Plating L${(state.passives['max-health'] ?? 0) + 1}`,
       body: 'Integrity',
       passiveId: 'max-health',
     });
-    break;
+    if (choices.length === n) break;
   }
   while (choices.length < 3) {
     choices.push({
@@ -2156,46 +2333,132 @@ export function applyProtocolChoice(state: SurvivorState, index: number): void {
   state.phase = 'playing';
 }
 
+function trackProtocol(state: SurvivorState, id: ProtocolId, remaining: number, potency: number): void {
+  const existing = state.protocolActive.find((p) => p.id === id);
+  if (existing) {
+    existing.remaining = Math.max(existing.remaining, remaining);
+    existing.potency = Math.max(existing.potency, potency);
+  } else {
+    state.protocolActive.push({ id, remaining, potency });
+  }
+}
+
 function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): void {
+  // Opening flash before protocol resolution
+  pushEffect(state, 'cache', state.player.x, state.player.z, 0.45, '#ffd46a', 2.4);
   if (id === 'aegis-barrier') {
     applyAegisBarrier(state, potency);
+    trackProtocol(state, id, SURVIVOR.shieldDuration * (potency > 1 ? 1.2 : 1), potency);
   } else if (id === 'rocket-barrage') {
     state.rocketProtocol.active = true;
     state.rocketProtocol.remaining = 15 * (potency > 1 ? 1.5 : 1);
     state.rocketProtocol.fireCd = 0.2;
     state.rocketProtocol.potency = potency;
+    trackProtocol(state, id, state.rocketProtocol.remaining, potency);
     pushEffect(state, 'transform', state.player.x, state.player.z, 0.5, '#ff8a4a', 2);
   } else if (id === 'gunship-flyby') {
     startGunship(state, potency);
+    trackProtocol(state, id, state.gunship.duration, potency);
   }
 }
 
+/** Prefer a lane through the primary boss, else densest enemy cluster, else near player. */
+function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: number; z1: number } {
+  const half = SURVIVOR.arenaHalf * 0.95;
+  let cx = state.player.x;
+  let cz = state.player.z;
+  const boss = primaryBoss(state);
+  if (boss && boss.active && boss.state !== 'dead') {
+    cx = boss.x;
+    cz = boss.z;
+  } else {
+    // Density sample on a coarse grid for the densest meaningful cluster.
+    let bestN = 0;
+    let bestX = state.player.x;
+    let bestZ = state.player.z;
+    for (let gx = -3; gx <= 3; gx += 1) {
+      for (let gz = -3; gz <= 3; gz += 1) {
+        const sx = gx * (half / 3.5);
+        const sz = gz * (half / 3.5);
+        let n = 0;
+        for (const e of state.enemies) {
+          if (!e.alive) continue;
+          const d2 = (e.x - sx) ** 2 + (e.z - sz) ** 2;
+          if (d2 < 64) n += e.isElite || e.isMiniboss ? 3 : 1;
+        }
+        if (n > bestN) {
+          bestN = n;
+          bestX = sx;
+          bestZ = sz;
+        }
+      }
+    }
+    if (bestN > 0) {
+      cx = bestX;
+      cz = bestZ;
+    }
+  }
+  // Edge-to-edge through the focus point. Prefer a lane not perfectly N-S for readability.
+  const ang = Math.atan2(cz, cx) + Math.PI / 2 + (rng(state) - 0.5) * 0.35;
+  const dx = Math.cos(ang);
+  const dz = Math.sin(ang);
+  // Extend from focus through both arena edges.
+  const x0 = cx - dx * half * 1.4;
+  const z0 = cz - dz * half * 1.4;
+  const x1 = cx + dx * half * 1.4;
+  const z1 = cz + dz * half * 1.4;
+  // Clamp endpoints to outer rim so the flyover crosses the full playable field.
+  const clampEdge = (x: number, z: number): { x: number; z: number } => {
+    const m = Math.max(Math.abs(x), Math.abs(z), 1e-6);
+    const s = half / m;
+    if (m <= half) {
+      // push out to rim
+      const len = Math.hypot(x, z) || 1;
+      return { x: (x / len) * half, z: (z / len) * half };
+    }
+    return { x: x * Math.min(1, s * 1.05), z: z * Math.min(1, s * 1.05) };
+  };
+  const a = clampEdge(x0, z0);
+  const b = clampEdge(x1, z1);
+  return { x0: a.x, z0: a.z, x1: b.x, z1: b.z };
+}
+
 function startGunship(state: SurvivorState, potency: number): void {
-  const p = state.player;
-  const ang = rng(state) * Math.PI * 2;
-  const half = SURVIVOR.arenaHalf * 0.9;
-  const x0 = Math.cos(ang) * half;
-  const z0 = Math.sin(ang) * half;
-  const x1 = -x0;
-  const z1 = -z0;
+  const lane = pickGunshipLane(state);
+  const g = SURVIVOR.gunship;
+  const warn = g.warnDuration;
+  const strafe = g.strafeDuration * (potency > 1 ? 1.25 : 1);
+  const fx = lane.x1 - lane.x0;
+  const fz = lane.z1 - lane.z0;
+  const fl = Math.hypot(fx, fz) || 1;
   state.gunship = {
     active: true,
     t: 0,
-    duration: 5.5 * (potency > 1 ? 1.35 : 1),
-    x0,
-    z0,
-    x1,
-    z1,
+    duration: warn + strafe,
+    warnDuration: warn,
+    x0: lane.x0,
+    z0: lane.z0,
+    x1: lane.x1,
+    z1: lane.z1,
     fireCd: 0,
     potency,
+    x: lane.x0,
+    z: lane.z0,
+    facingX: fx / fl,
+    facingZ: fz / fl,
+    firing: false,
   };
-  pushEffect(state, 'gunship', x0, z0, 0.8, state.accent, 3);
-  pushEffect(state, 'telegraph', (x0 + x1) / 2, (z0 + z1) / 2, 0.9, state.accent, half * 2, {
-    length: half * 2,
-    width: 2.2,
-    facingX: x1 - x0,
-    facingZ: z1 - z0,
+  const midX = (lane.x0 + lane.x1) / 2;
+  const midZ = (lane.z0 + lane.z1) / 2;
+  const len = Math.hypot(lane.x1 - lane.x0, lane.z1 - lane.z0);
+  // Warning lane only — no damage during warn.
+  pushEffect(state, 'telegraph', midX, midZ, warn, state.accent, len, {
+    length: len,
+    width: g.laneHalfWidth * 2,
+    facingX: fx / fl,
+    facingZ: fz / fl,
   });
+  pushEffect(state, 'gunship', lane.x0, lane.z0, warn + 0.2, state.accent, 2.5);
 }
 
 
@@ -2279,6 +2542,9 @@ export function tryDodge(state: SurvivorState, moveX: number, moveY: number): bo
 
 function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): void {
   const p = state.player;
+  // Capture pre-move position for swept pickup collection (dodge/ship tunneling).
+  (p as { _prevX?: number })._prevX = p.x;
+  (p as { _prevZ?: number })._prevZ = p.z;
   if (!p.alive) return;
   if (p.invuln > 0) p.invuln = Math.max(0, p.invuln - dt);
   if (p.hitFlash > 0) p.hitFlash = Math.max(0, p.hitFlash - dt);
@@ -2584,12 +2850,17 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     state.cache.life -= dt;
     const dx = state.player.x - state.cache.x;
     const dz = state.player.z - state.cache.z;
-    if (dx * dx + dz * dz < 2.2 * 2.2 && state.phase === 'playing') {
+    const r = SURVIVOR.cacheCollectRadius;
+    if (dx * dx + dz * dz <= r * r && state.phase === 'playing') {
       openProtocolCache(state);
     } else if (state.cache.life <= 0 && !state.cache.mega) {
       state.cache.active = false;
     }
   }
+
+  // Protocol active timers (HUD build panel)
+  for (const pa of state.protocolActive) pa.remaining -= dt;
+  state.protocolActive = state.protocolActive.filter((pa) => pa.remaining > 0);
 
   // Rocket protocol battery
   if (state.rocketProtocol.active) {
@@ -2601,34 +2872,61 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     }
     if (state.rocketProtocol.remaining <= 0) state.rocketProtocol.active = false;
   }
-  // Gunship
+  // Gunship flyby — warning then edge-to-edge strafe with proper boss/enemy damage.
   if (state.gunship.active) {
-    state.gunship.t += dt;
-    state.gunship.fireCd -= dt;
-    const u = Math.min(1, state.gunship.t / state.gunship.duration);
-    const gx = state.gunship.x0 + (state.gunship.x1 - state.gunship.x0) * u;
-    const gz = state.gunship.z0 + (state.gunship.z1 - state.gunship.z0) * u;
-    if (state.gunship.fireCd <= 0) {
-      state.gunship.fireCd = 0.18;
-      const tgt = nearestBoss(state, gx, gz, 28) || nearestEnemyOnly(state, gx, gz, 18);
-      const tx = tgt ? ('x' in tgt ? tgt.x : 0) : gx;
-      const tz = tgt ? ('z' in tgt ? tgt.z : 0) : gz;
-      // damage nearest
-      if (tgt && 'health' in tgt && 'alive' in tgt) {
-        damageEnemy(state, tgt as import('./survivorState').SurvivorEnemy, 28 * state.gunship.potency, {
-          kind: 'ability',
-          pop: 0.7,
-        });
-      } else if (tgt && 'isMega' in tgt) {
-        damageBoss(state, 45 * state.gunship.potency, {
-          kind: 'ability',
-          pop: 0.85,
-          boss: tgt as import('./survivorState').SurvivorBoss,
-        });
+    const g = state.gunship;
+    const cfg = SURVIVOR.gunship;
+    g.t += dt;
+    const warn = g.warnDuration;
+    const strafeT = Math.max(0, g.t - warn);
+    const strafeDur = Math.max(0.01, g.duration - warn);
+    // Position: hold at start during warning, then traverse the lane.
+    const u = g.t < warn ? 0 : Math.min(1, strafeT / strafeDur);
+    g.x = g.x0 + (g.x1 - g.x0) * u;
+    g.z = g.z0 + (g.z1 - g.z0) * u;
+    const fxl = g.x1 - g.x0;
+    const fzl = g.z1 - g.z0;
+    const fl = Math.hypot(fxl, fzl) || 1;
+    g.facingX = fxl / fl;
+    g.facingZ = fzl / fl;
+    g.firing = g.t >= warn && g.t < g.duration;
+
+    if (g.firing) {
+      g.fireCd -= dt;
+      if (g.fireCd <= 0) {
+        g.fireCd = cfg.fireInterval;
+        const power = playerPowerScale({ weapons: state.weapons, passives: state.passives });
+        const pot = g.potency * (1 + Math.min(0.55, power * 0.04));
+        const halfW = cfg.laneHalfWidth;
+        // Damage all hostiles near the current gunship position along the lane.
+        for (const e of state.enemies) {
+          if (!e.alive) continue;
+          const d = distPointToSegment(e.x, e.z, g.x0, g.z0, g.x1, g.z1);
+          const along = Math.hypot(e.x - g.x, e.z - g.z);
+          if (d <= halfW && along <= cfg.impactRadius + 1.2) {
+            const mul = e.isMiniboss ? 0.7 : e.isElite ? 0.85 : 1;
+            damageEnemy(state, e, cfg.enemyDamage * pot * mul, { kind: 'ability', pop: 0.75 });
+          }
+        }
+        for (const b of livingBosses(state)) {
+          if (!b.active || b.state === 'dead') continue;
+          const d = distPointToSegment(b.x, b.z, g.x0, g.z0, g.x1, g.z1);
+          const along = Math.hypot(b.x - g.x, b.z - g.z);
+          const br = b.colliderRadius;
+          if (d <= halfW + br * 0.4 && along <= cfg.impactRadius + br) {
+            // Bounded late-game: does not delete bosses automatically.
+            const bossDmg = cfg.bossDamage * pot * (b.isMega ? 0.75 : 1);
+            damageBoss(state, bossDmg, { kind: 'ability', pop: 0.9, boss: b, x: b.x, z: b.z });
+          }
+        }
+        pushEffect(state, 'impact', g.x, g.z, 0.22, state.accent, 1.4);
+        pushEffect(state, 'muzzle', g.x, g.z, 0.12, '#fff6d0', 0.9);
       }
-      pushEffect(state, 'impact', tx, tz, 0.2, state.accent, 1.1);
     }
-    if (state.gunship.t >= state.gunship.duration) state.gunship.active = false;
+    if (g.t >= g.duration) {
+      g.active = false;
+      g.firing = false;
+    }
   }
 }
 
@@ -2654,7 +2952,8 @@ function spawnProtocolCache(state: SurvivorState, mega: boolean): void {
     mega,
     potency: mega ? 1.5 : 1,
   };
-  pushEffect(state, 'cache', pick.x, pick.z, 1.2, '#ffd46a', 3.5);
+  // Brief spawn flash — persistent cache actor is owned by the renderer for full lifetime.
+  pushEffect(state, 'cache', pick.x, pick.z, 0.55, '#ffd46a', 2.2);
 }
 
 function openProtocolCache(state: SurvivorState): void {

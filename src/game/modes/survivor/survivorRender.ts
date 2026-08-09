@@ -29,6 +29,7 @@ export class SurvivorRenderer {
   private exhaustR: THREE.Group | null = null;
   private exhaustMats: THREE.MeshBasicMaterial[] = [];
   private heroAccent = '#88e0ff';
+  private heroShipUrl: string | null = null;
   private enemies = new Map<number, ActorVis>();
   private bosses = new Map<number, ActorVis>();
   private projectiles = new Map<number, THREE.Mesh>();
@@ -36,6 +37,12 @@ export class SurvivorRenderer {
   private hazards = new Map<number, THREE.Object3D>();
   private effects = new Map<number, THREE.Object3D>();
   private rails: THREE.Object3D[] = [];
+  /** Persistent Protocol Cache world actor (not a short-lived effect). */
+  private cacheActor: THREE.Group | null = null;
+  private cacheMats: THREE.MeshBasicMaterial[] = [];
+  /** Separate gunship flyover — never reuses the player ship transform. */
+  private gunshipRoot: THREE.Object3D | null = null;
+  private gunshipMats: THREE.MeshBasicMaterial[] = [];
   private boltGeo = new THREE.SphereGeometry(0.14, 8, 8);
   private animFrame = 0;
   private readonly mats = new Map<string, THREE.MeshStandardMaterial>();
@@ -49,6 +56,7 @@ export class SurvivorRenderer {
   async setupPlayer(heroId: keyof typeof HEROES): Promise<void> {
     const hero = HEROES[heroId];
     this.heroAccent = hero.accent;
+    this.heroShipUrl = hero.shipUrl;
     this.playerAstro = this.makeFromUrl(hero.astronaut.url, hero.astronaut.anim, 'astro');
     this.playerMech = this.makeFromUrl(hero.mech.url, hero.mech.anim, 'mech');
     const shipClone = this.assets.clone(hero.shipUrl);
@@ -175,6 +183,8 @@ export class SurvivorRenderer {
     this.syncProjectiles(state);
     this.syncHazards(state);
     this.syncPickups(state);
+    this.syncCache(state);
+    this.syncGunship(state, dt);
     this.syncEffects(state);
     this.syncRails(state);
   }
@@ -344,9 +354,15 @@ export class SurvivorRenderer {
         this.bosses.set(b.id, vis);
         this.root.add(vis.root);
       }
+      // CRITICAL: apply simulation position, facing, and visualScale.
+      // Without place(), bosses animate at world origin at native GLTF size.
+      const scale = b.visualScale > 0.1 ? b.visualScale : def.visualScale * (b.isMega ? SURVIVOR.megaVisualMul : 1);
+      this.place(vis, b.x, b.z, b.facingX, b.facingZ, scale);
       if (vis.animator) {
         if (b.state === 'dead') vis.animator.play('death', 0.08);
         else if (b.state === 'windup' || b.state === 'active') vis.animator.play('shoot', 0.06);
+        else if (b.hitFlash > 0.08) vis.animator.play('hit', 0.05);
+        else if (b.state === 'idle' || b.state === 'recover') vis.animator.play('walk');
         else vis.animator.play('idle');
         vis.animator.update(dt);
       }
@@ -526,6 +542,167 @@ export class SurvivorRenderer {
       const bob = 0.55 + Math.sin(performance.now() * 0.008 + p.id) * 0.12;
       obj.position.set(p.x, bob, p.z);
       obj.rotation.y += 0.04;
+      // Dim/dormant repair orbs when player is full health or orb is expiring soon.
+      if (p.kind === 'repair') {
+        const full = state.player.health >= state.player.maxHealth - 0.01;
+        const expiring = Number.isFinite(p.life) && p.life < SURVIVOR.repairPickupWarnLife;
+        const pulse = expiring ? 0.45 + Math.sin(performance.now() * 0.02) * 0.35 : 1;
+        obj.traverse((c) => {
+          if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
+            if (!c.userData.baseOp) c.userData.baseOp = c.material.opacity;
+            const base = c.userData.baseOp as number;
+            c.material.opacity = base * (full ? 0.35 : pulse);
+          }
+        });
+        obj.scale.setScalar(full ? 0.75 : expiring ? 0.9 + Math.sin(performance.now() * 0.025) * 0.12 : 1);
+      }
+    }
+  }
+
+  private ensureCacheActor(): THREE.Group {
+    if (this.cacheActor) return this.cacheActor;
+    const g = new THREE.Group();
+    g.name = 'protocol-cache';
+    // Core container
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.55, 1),
+      this.effectMat('#ffd46a', 0.95, true),
+    );
+    const shell = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.85, 0),
+      this.effectMat('#66e8ff', 0.35, true),
+    );
+    // Animated rings
+    const ringA = new THREE.Mesh(
+      new THREE.TorusGeometry(1.15, 0.06, 8, 40),
+      this.effectMat('#ffd46a', 0.85, true),
+    );
+    ringA.rotation.x = Math.PI / 2;
+    ringA.name = 'cache-ring-a';
+    const ringB = new THREE.Mesh(
+      new THREE.TorusGeometry(1.45, 0.045, 8, 48),
+      this.effectMat('#66e8ff', 0.7, true),
+    );
+    ringB.rotation.x = Math.PI / 2;
+    ringB.name = 'cache-ring-b';
+    // Vertical light beam
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.35, 8, 12, 1, true),
+      this.effectMat('#ffe8a0', 0.4, true),
+    );
+    beam.position.y = 4;
+    beam.name = 'cache-beam';
+    // Ground marker
+    const ground = new THREE.Mesh(
+      new THREE.RingGeometry(1.2, 1.85, 48),
+      this.effectMat('#ffd46a', 0.55, true),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0.04;
+    // Inner pulse light
+    const pulse = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 12, 12),
+      this.effectMat('#ffffff', 0.9, true),
+    );
+    pulse.name = 'cache-pulse';
+    g.add(ground, shell, core, ringA, ringB, beam, pulse);
+    g.visible = false;
+    this.root.add(g);
+    this.cacheActor = g;
+    return g;
+  }
+
+  private syncCache(state: SurvivorState): void {
+    const g = this.ensureCacheActor();
+    const c = state.cache;
+    if (!c.active) {
+      g.visible = false;
+      return;
+    }
+    g.visible = true;
+    g.position.set(c.x, 0, c.z);
+    const t = performance.now() * 0.001;
+    const near =
+      Math.hypot(state.player.x - c.x, state.player.z - c.z) <= SURVIVOR.cacheCollectRadius + 1.5;
+    const intensity = near ? 1.35 : 1;
+    const ringA = g.getObjectByName('cache-ring-a');
+    const ringB = g.getObjectByName('cache-ring-b');
+    const pulse = g.getObjectByName('cache-pulse');
+    const beam = g.getObjectByName('cache-beam');
+    if (ringA) {
+      ringA.rotation.z = t * 1.2;
+      ringA.scale.setScalar(intensity);
+    }
+    if (ringB) {
+      ringB.rotation.z = -t * 0.85;
+      ringB.scale.setScalar(0.95 + Math.sin(t * 3) * 0.08 * intensity);
+    }
+    if (pulse) {
+      pulse.scale.setScalar((0.85 + Math.sin(t * 5) * 0.25) * intensity);
+    }
+    if (beam) {
+      beam.scale.y = 1 + Math.sin(t * 2.4) * 0.08;
+    }
+    // Proximity feedback: slight lift + brighter scale
+    g.scale.setScalar(near ? 1.18 : 1);
+    g.position.y = near ? 0.15 : 0;
+  }
+
+  private ensureGunship(): THREE.Object3D {
+    if (this.gunshipRoot) return this.gunshipRoot;
+    let root: THREE.Object3D | null = null;
+    if (this.heroShipUrl) {
+      const cloned = this.assets.clone(this.heroShipUrl);
+      if (cloned) root = cloned.root;
+    }
+    if (!root) {
+      // Procedural fallback ship if asset missing
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.ConeGeometry(0.6, 2.4, 8),
+        this.effectMat(this.heroAccent, 0.95, true),
+      );
+      body.rotation.x = Math.PI / 2;
+      g.add(body);
+      root = g;
+    }
+    root.visible = false;
+    // Thrusters for the flyover
+    const thruster = new THREE.Group();
+    thruster.name = 'gunship-thrusters';
+    const makeCone = (x: number, color: string) => {
+      const m = this.effectMat(color, 0.85, true);
+      this.gunshipMats.push(m);
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.18, 1.4, 8, 1, true), m);
+      cone.rotation.x = Math.PI / 2;
+      cone.position.set(x, 0.15, -1.1);
+      thruster.add(cone);
+    };
+    makeCone(-0.28, '#fffef5');
+    makeCone(0.28, this.heroAccent);
+    root.add(thruster);
+    this.root.add(root);
+    this.gunshipRoot = root;
+    return root;
+  }
+
+  private syncGunship(state: SurvivorState, _dt: number): void {
+    const g = state.gunship;
+    const root = this.ensureGunship();
+    if (!g.active) {
+      root.visible = false;
+      return;
+    }
+    root.visible = true;
+    const height = SURVIVOR.gunship.flyHeight;
+    // During warning, park just off the start edge slightly raised; then fly the lane.
+    root.position.set(g.x, height, g.z);
+    root.rotation.y = Math.atan2(g.facingX, g.facingZ);
+    root.scale.setScalar(SURVIVOR.actorScale.ship * 1.35);
+    const thr = root.getObjectByName('gunship-thrusters');
+    if (thr) {
+      const flicker = 0.85 + Math.sin(performance.now() * 0.05) * 0.2;
+      thr.scale.set(1, 1, g.firing ? 1.2 * flicker : 0.7);
     }
   }
 
@@ -600,6 +777,56 @@ export class SurvivorRenderer {
       mesh.rotation.y = Math.atan2(e.facingX ?? 0, e.facingZ ?? 1);
       g.add(mesh);
       g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'telegraph' && (e.length ?? 0) > 2) {
+      // Lane telegraph for gunship / boss charges — readable floor strip, not a generic ring.
+      const len = e.length ?? 10;
+      const w = e.width ?? 2.2;
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, len),
+        this.effectMat(color, 0.35, true),
+      );
+      floor.userData.baseOpacity = 0.35;
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = 0.06;
+      const edge = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 1.08, len),
+        this.effectMat('#ffffff', 0.18, true),
+      );
+      edge.userData.baseOpacity = 0.18;
+      edge.rotation.x = -Math.PI / 2;
+      edge.position.y = 0.04;
+      const rimL = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.12, len),
+        this.effectMat(color, 0.75, true),
+      );
+      rimL.userData.baseOpacity = 0.75;
+      rimL.position.set(-w * 0.5, 0.1, 0);
+      const rimR = rimL.clone();
+      rimR.position.x = w * 0.5;
+      g.add(edge, floor, rimL, rimR);
+      g.position.set(e.x, 0, e.z);
+      g.rotation.y = Math.atan2(e.facingX ?? 0, e.facingZ ?? 1);
+      return g;
+    }
+    if (e.kind === 'gunship') {
+      // Ingress marker at lane start
+      const r = e.radius ?? e.scale ?? 2;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.4, r, 32),
+        this.effectMat(color, 0.8, true),
+      );
+      ring.userData.baseOpacity = 0.8;
+      ring.rotation.x = -Math.PI / 2;
+      const chevron = new THREE.Mesh(
+        new THREE.ConeGeometry(0.5, 1.2, 6),
+        this.effectMat('#fff6d0', 0.9, true),
+      );
+      chevron.userData.baseOpacity = 0.9;
+      chevron.position.y = 1.2;
+      g.add(ring, chevron);
+      g.position.set(e.x, 0.08, e.z);
       return g;
     }
     const r = e.radius ?? e.scale ?? 1;
@@ -699,6 +926,8 @@ export class SurvivorRenderer {
     this.hazards.clear();
     this.effects.clear();
     this.rails = [];
+    this.cacheActor = null;
+    this.gunshipRoot = null;
     this.boltGeo.dispose();
     for (const m of this.mats.values()) m.dispose();
     this.mats.clear();
@@ -706,6 +935,10 @@ export class SurvivorRenderer {
     this.basicMats.clear();
     for (const m of this.exhaustMats) m.dispose();
     this.exhaustMats = [];
+    for (const m of this.cacheMats) m.dispose();
+    this.cacheMats = [];
+    for (const m of this.gunshipMats) m.dispose();
+    this.gunshipMats = [];
     this.playerAstro = null;
     this.playerMech = null;
     this.playerShip = null;

@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.1';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.2';
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.08;
@@ -44,17 +44,28 @@ export const SURVIVOR = {
   xpMagnetBase: 3.2,
   /** Magnet Field energy gain per level. */
   xpMagnetPerLevel: 0.35,
-  /** Health/repair magnet base — larger than energy. */
-  healthMagnetBase: 4.25,
-  healthMagnetPerLevel: 0.6,
-  healthDirectRadius: 0.8,
-  healthMagnetSpeed: 20,
+  /** Health/repair magnet base — larger than energy for reliable collection. */
+  healthMagnetBase: 6.0,
+  healthMagnetPerLevel: 0.88,
+  healthDirectRadius: 1.25,
+  healthMagnetSpeed: 24,
   xpMagnetSpeed: 14,
-  healthShipMagnet: 6.5,
-  healthMechMagnetMul: 1.25,
+  healthShipMagnet: 9.0,
+  healthMechMagnetMul: 1.4,
+  /** Mech direct health collection radius floor. */
+  healthMechDirectRadius: 1.5,
+  /** Ship direct health collection: max(ship pickupRadius, this). */
+  healthShipDirectMin: 3.2,
   enemyCap: 160,
   projectileCap: 220,
-  pickupCap: 120,
+  pickupCap: 160,
+  /** Reserve free slots so XP cannot starve health/supply/boss rewards. */
+  pickupReserveImportant: 24,
+  /** Ordinary repair orbs expire so full-health players cannot fill the pool forever. */
+  repairPickupLife: 48,
+  repairPickupWarnLife: 8,
+  /** Keep XP from packing against perimeter walls. */
+  pickupSafeInset: 2.75,
   hazardCap: 80,
   damageEventCap: 48,
   maxWeaponSlots: 5,
@@ -66,6 +77,8 @@ export const SURVIVOR = {
   cacheLeadBeforeBoss: 15,
   cacheLifetime: 38,
   cacheOfferDuration: 0,
+  /** Collection radius for Protocol Cache (world units). */
+  cacheCollectRadius: 3.25,
   shieldDuration: 60,
   megaEvery: 5,
   megaHealthMul: 2.2,
@@ -76,6 +89,18 @@ export const SURVIVOR = {
   fixedDt: 1 / 60,
   repairDropChance: 0.04,
   regenPerLevel: 0.45,
+  gunship: {
+    /** Warning lane duration before damage begins. */
+    warnDuration: 0.9,
+    /** Active strafing duration after warning. */
+    strafeDuration: 4.6,
+    fireInterval: 0.16,
+    laneHalfWidth: 3.4,
+    enemyDamage: 38,
+    bossDamage: 95,
+    impactRadius: 3.8,
+    flyHeight: 6.5,
+  },
   dodge: {
     cooldown: 10,
     /** Distance tripled from prior 4.5 → 13.5 */
@@ -408,7 +433,13 @@ export interface PassiveDef {
 
 export const PASSIVES: PassiveDef[] = [
   { id: 'move-speed', name: 'Thruster Boost', description: 'Move faster through the horde.', maxLevel: 5, perLevel: 0.08 },
-  { id: 'pickup-radius', name: 'Magnet Field', description: 'Pull energy cells from farther away.', maxLevel: 5, perLevel: 0.35 },
+  {
+    id: 'pickup-radius',
+    name: 'Magnet Field',
+    description: 'Pull energy and health pickups from farther away. Health reach gains more per level.',
+    maxLevel: 5,
+    perLevel: 0.35,
+  },
   {
     id: 'max-health',
     name: 'Hull Plating',

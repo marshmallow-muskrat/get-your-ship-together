@@ -116,6 +116,8 @@ export interface SurvivorPickup {
   value: number;
   active: boolean;
   magnetized: boolean;
+  /** Remaining life for expiring pickups (repair). Infinity for non-expiring. */
+  life: number;
 }
 
 export interface SurvivorWeaponSlot {
@@ -339,13 +341,23 @@ export interface SurvivorState {
   gunship: {
     active: boolean;
     t: number;
+    /** Total lifecycle including warning. */
     duration: number;
+    /** Time spent in warning lane before damage. */
+    warnDuration: number;
     x0: number;
     z0: number;
     x1: number;
     z1: number;
     fireCd: number;
     potency: number;
+    /** World-space ship position for renderer. */
+    x: number;
+    z: number;
+    facingX: number;
+    facingZ: number;
+    /** True while damage pulses are active. */
+    firing: boolean;
   };
   rocketProtocol: { active: boolean; remaining: number; fireCd: number; potency: number };
 
@@ -591,12 +603,18 @@ export function createSurvivorState(
       active: false,
       t: 0,
       duration: 0,
+      warnDuration: 0,
       x0: 0,
       z0: 0,
       x1: 0,
       z1: 0,
       fireCd: 0,
       potency: 1,
+      x: 0,
+      z: 0,
+      facingX: 0,
+      facingZ: 1,
+      firing: false,
     },
     rocketProtocol: { active: false, remaining: 0, fireCd: 0, potency: 1 },
     enemies: [],

@@ -206,7 +206,11 @@ export class SurvivorHud {
       <div id="sv-banner-arc" class="sv-unlock-banner hidden">PROTOTYPE UNLOCKED · ARC CONDUCTOR</div>
       <div id="sv-banner-orbital" class="sv-unlock-banner hidden">PROTOTYPE UNLOCKED · ORBITAL LANCE</div>
       <div id="sv-banner-mega" class="sv-unlock-banner mega hidden">MEGA BREACH</div>
-      <div id="sv-cache-arrow" class="sv-cache-arrow hidden">◀ CACHE</div>
+      <div id="sv-cache-arrow" class="sv-cache-arrow hidden">
+        <span class="sv-cache-icon" aria-hidden="true">▶</span>
+        <span class="sv-cache-label">CACHE</span>
+        <span class="sv-cache-meta">—</span>
+      </div>
       <div id="sv-levelup" class="sv-modal hidden">
         <p class="eyebrow">SYSTEM UPLINK</p>
         <h2>Choose Upgrade</h2>
@@ -600,9 +604,29 @@ export class SurvivorHud {
       if (show) {
         const dx = state.cache.x - state.player.x;
         const dz = state.cache.z - state.player.z;
-        const ang = Math.atan2(dx, dz);
-        (arrow as HTMLElement).style.transform = `translateX(-50%) rotate(${(ang * 180) / Math.PI}deg)`;
-        arrow.textContent = `CACHE ${Math.ceil(state.cache.life)}s`;
+        const dist = Math.hypot(dx, dz);
+        // Screen-basis: world +Z is "up-right" on isometric; use atan2 for edge marker.
+        const ang = Math.atan2(dx, -dz);
+        // Keep label horizontal — rotate only the icon.
+        (arrow as HTMLElement).style.transform = 'translateX(-50%)';
+        const icon = arrow.querySelector('.sv-cache-icon') as HTMLElement | null;
+        if (icon) icon.style.transform = `rotate(${(ang * 180) / Math.PI}deg)`;
+        const label = arrow.querySelector('.sv-cache-label');
+        if (label) label.textContent = 'CACHE';
+        const meta = arrow.querySelector('.sv-cache-meta');
+        if (meta) {
+          const lifeBit =
+            state.cache.mega || state.cache.life > 100
+              ? '∞'
+              : `${Math.max(0, Math.ceil(state.cache.life))}s`;
+          meta.textContent = `— ${lifeBit} · ${dist.toFixed(0)}m`;
+        }
+        // Edge-clamped offset toward cache direction without covering center combat HUD.
+        const el = arrow as HTMLElement;
+        const ox = Math.sin(ang) * 42;
+        const oy = -Math.cos(ang) * 18;
+        el.style.marginLeft = `${ox}px`;
+        el.style.marginTop = `${oy}px`;
       }
     }
   }
@@ -675,7 +699,10 @@ export class SurvivorHud {
         .map(([k, v]) => `${k}:${v}`)
         .join('|') +
       '|' +
-      state.tempBuffs.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|');
+      state.tempBuffs.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|') +
+      '|' +
+      state.protocolActive.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|') +
+      `|sh:${state.player.shieldPoints.toFixed(0)}`;
     if (key === this.lastWeaponsKey) return;
     this.lastWeaponsKey = key;
     const build = this.root.querySelector('#sv-build');
@@ -688,10 +715,12 @@ export class SurvivorHud {
           oc > 0
             ? `<small class="sv-build-oc">${formatOverclockLabel(oc)} · Dmg +${Math.round(oc * 8)}%</small>`
             : '';
-        return `<div class="sv-build-item" style="--wep:${fam.color}"><span>${fam.name}${ocBit}</span><strong>L${w.level}</strong></div>`;
+        const proto = w.prototype || fam.prototype ? ' · PROTO' : '';
+        return `<div class="sv-build-item" style="--wep:${fam.color}"><span>${fam.name}${proto}${ocBit}</span><strong>L${w.level}</strong></div>`;
       })
       .join('');
     const pass = Object.entries(state.passives)
+      .filter(([, lv]) => (lv ?? 0) > 0)
       .map(([id, lv]) => {
         const def = PASSIVES.find((p) => p.id === id);
         const capped =
@@ -699,13 +728,27 @@ export class SurvivorHud {
         return `<div class="sv-build-item passive"><span>${def?.name ?? id}</span><strong>L${lv}${capped}</strong></div>`;
       })
       .join('');
+    const protos = state.protocolActive
+      .map(
+        (t) =>
+          `<div class="sv-build-item temp protocol-fx"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.ceil(t.remaining)}s</strong></div>`,
+      )
+      .join('');
+    const shield =
+      state.player.shieldPoints > 0
+        ? `<div class="sv-build-item temp"><span>Aegis Shield</span><strong>${Math.ceil(state.player.shieldPoints)} · ${Math.ceil(state.player.shieldTime)}s</strong></div>`
+        : '';
     const temps = state.tempBuffs
       .map(
         (t) =>
           `<div class="sv-build-item temp"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.ceil(t.remaining)}s</strong></div>`,
       )
       .join('');
-    build.innerHTML = `<div class="eyebrow">BUILD</div>${weps}${pass}${temps}`;
+    const tempSection =
+      protos || shield || temps
+        ? `<div class="sv-build-section">TEMP / PROTOCOL</div>${protos}${shield}${temps}`
+        : '';
+    build.innerHTML = `<div class="eyebrow">BUILD</div><div class="sv-build-scroll"><div class="sv-build-section">WEAPONS</div>${weps || '<div class="sv-build-item"><span>None</span></div>'}<div class="sv-build-section">PASSIVES</div>${pass || '<div class="sv-build-item passive"><span>None</span></div>'}${tempSection}</div>`;
   }
 
   private publishPause(state: SurvivorState): void {
