@@ -114,6 +114,14 @@ export class SurvivorHud {
         </div>
       </div>
 
+      <div id="sv-aegis-float" class="sv-aegis-float hidden">
+        <span class="sv-aegis-icon" aria-hidden="true">◈</span>
+        <div class="sv-aegis-body">
+          <span class="eyebrow">AEGIS</span>
+          <span id="sv-shield-num" class="sv-num">0</span>
+          <div class="sv-track shield"><i id="sv-shield"></i></div>
+        </div>
+      </div>
       <div class="sv-command">
         <div class="sv-vitals">
           <div class="sv-vital">
@@ -122,11 +130,6 @@ export class SurvivorHud {
               <span id="sv-hp-num" class="sv-num">100 / 100</span>
             </div>
             <div class="sv-track"><i id="sv-hp"></i></div>
-            <div id="sv-shield-row" class="sv-shield-row hidden">
-              <span class="eyebrow">SHIELD</span>
-              <span id="sv-shield-num" class="sv-num">0</span>
-              <div class="sv-track shield"><i id="sv-shield"></i></div>
-            </div>
           </div>
           <div class="sv-vital">
             <div class="sv-vital-label">
@@ -208,9 +211,15 @@ export class SurvivorHud {
       <div id="sv-banner-orbital" class="sv-unlock-banner hidden">PROTOTYPE UNLOCKED · ORBITAL LANCE</div>
       <div id="sv-banner-mega" class="sv-unlock-banner mega hidden">MEGA BREACH</div>
       <div id="sv-cache-arrow" class="sv-cache-arrow hidden">
-        <span class="sv-cache-icon" aria-hidden="true">▶</span>
-        <span class="sv-cache-label">CACHE</span>
-        <span class="sv-cache-meta">—</span>
+        <span class="sv-cache-icon" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="28" height="28" focusable="false">
+            <path d="M16 2 L28 16 L20 16 L20 30 L12 30 L12 16 L4 16 Z" fill="currentColor"/>
+          </svg>
+        </span>
+        <div class="sv-cache-text">
+          <span class="sv-cache-label">CACHE</span>
+          <span class="sv-cache-meta">—</span>
+        </div>
       </div>
       <div id="sv-levelup" class="sv-modal hidden">
         <p class="eyebrow">SYSTEM UPLINK</p>
@@ -595,7 +604,8 @@ export class SurvivorHud {
 
 
   private publishShield(state: SurvivorState): void {
-    const row = this.root.querySelector('#sv-shield-row');
+    // Independent float above command HUD — never reflows vitals/abilities.
+    const row = this.root.querySelector('#sv-aegis-float');
     const p = state.player;
     const show = p.shieldPoints > 0 && p.shieldTime > 0;
     row?.classList.toggle('hidden', !show);
@@ -790,7 +800,10 @@ export class SurvivorHud {
             formatKeyCode(binds.choice3),
           ];
           const kindLabel = (c: (typeof state.choices)[0]) => {
-            if (c.kind === 'passive') return 'PASSIVE';
+            if (c.kind === 'passive' && c.passiveId) {
+              const owned = (state.passives[c.passiveId] ?? 0) > 0;
+              return owned ? 'PASSIVE' : 'NEW PASSIVE';
+            }
             if (c.kind === 'new-weapon') return 'NEW WEAPON';
             if (c.kind === 'protocol') return 'PROTOCOL';
             if (c.kind === 'weapon' && c.weaponId) {
@@ -891,8 +904,11 @@ export class SurvivorHud {
       const drift = t * 42 + (ev.kind === 'kill' ? t * 12 : 0);
       node.classList.remove('hidden');
       node.className = `sv-dmg sv-dmg-${ev.kind}`;
-      node.textContent = String(ev.amount);
-      const sizeScale = SURVIVOR.damageNumbers.sizeScale;
+      // Semantic labels: heal +, absorb BLOCK, otherwise raw amount.
+      if (ev.kind === 'heal') node.textContent = `+${Math.round(ev.amount)}`;
+      else if (ev.kind === 'absorb') node.textContent = `◈${Math.round(ev.amount)}`;
+      else node.textContent = String(Math.round(ev.amount));
+      const sizeScale = SURVIVOR.damageNumbers.sizeScale * 1.2;
       node.style.transform = `translate(-50%, -50%) translate(${scr.x + Math.sin(ev.id * 1.7) * 10}px, ${scr.y - drift}px) scale(${pop * sizeScale})`;
       node.style.opacity = String(Math.max(0, 1 - t * 1.05));
     }

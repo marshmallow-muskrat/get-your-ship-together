@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.0.3`
+**Current balance line:** `endless-2.1.0`
 
 ## Purpose
 

@@ -14,7 +14,7 @@ export interface LoadedModel {
 function withoutRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
   const tracks = clip.tracks.filter((track) => {
     const normalized = track.name.toLowerCase().replaceAll('"', '');
-    return !(/(^|[./\]])root([./\[]|$)/.test(normalized) && normalized.endsWith('.position'));
+    return !(/(^|[./\]])root([./\[]|$)/.test(normalized) && normalized.endsWith('.position')); // eslint-disable-line no-useless-escape
   });
   return tracks.length === clip.tracks.length ? clip : new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }

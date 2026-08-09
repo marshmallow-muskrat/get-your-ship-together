@@ -28,6 +28,9 @@ import {
   weaponStatsAtLevel,
   xpForLevel,
   isMegaBossIndex,
+  breachShieldingReduction,
+  bossCategoryDamage,
+  type BossDamageCategory,
   type PassiveId,
   type ProtocolId,
   type TempBuffId,
@@ -143,7 +146,7 @@ function passiveLevel(state: SurvivorState, id: PassiveId): number {
 }
 
 function moveMul(state: SurvivorState): number {
-  return 1 + passiveLevel(state, 'move-speed') * 0.08;
+  return 1 + passiveLevel(state, 'move-speed') * 0.05;
 }
 
 /** Energy/XP magnet radius. */
@@ -261,30 +264,39 @@ export function thrusterPower(state: SurvivorState): number {
   return base * (state.player.damageMul > 1 ? state.player.damageMul : 1);
 }
 
-export type DamageSourceKind = 'enemy' | 'boss' | 'hazard' | 'self';
+export type DamageSourceKind =
+  | 'enemy'
+  | 'boss'
+  | 'boss-body'
+  | 'boss-charge'
+  | 'boss-projectile'
+  | 'boss-beam'
+  | 'boss-puddle'
+  | 'boss-radial'
+  | 'hazard'
+  | 'self';
 
-/** Breach Shielding: up to 40% reduction on boss-tagged damage only. */
+/** Breach Shielding: hard-capped reduction on boss-tagged damage. */
 export function bossDamageReduction(state: SurvivorState): number {
-  const lv = passiveLevel(state, 'breach-shielding');
-  return Math.min(0.4, lv * 0.08);
+  return breachShieldingReduction(passiveLevel(state, 'breach-shielding'));
 }
 
 function hasteMul(state: SurvivorState): number {
-  const base = 1 + passiveLevel(state, 'weapon-haste') * 0.08;
+  const base = 1 + passiveLevel(state, 'weapon-haste') * 0.055;
   return state.player.form === 'mech' ? base * 1.35 : base;
 }
 
 function areaMul(state: SurvivorState): number {
-  const base = 1 + passiveLevel(state, 'area') * 0.1;
+  const base = 1 + passiveLevel(state, 'area') * 0.055;
   return state.player.form === 'mech' ? base * 1.25 : base;
 }
 
 function mechChargeMul(state: SurvivorState): number {
-  return 1 + passiveLevel(state, 'mech-charge') * 0.15;
+  return 1 + passiveLevel(state, 'mech-charge') * 0.1;
 }
 
 function mechDurationMul(state: SurvivorState): number {
-  return 1 + passiveLevel(state, 'mech-duration') * 0.12;
+  return 1 + passiveLevel(state, 'mech-duration') * 0.09;
 }
 
 /** Emit damage for presentation (aggregated). */
@@ -371,9 +383,8 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   const v = def.visual;
   const diff = endlessDifficultyAt(state.time);
   const isMb = !!def.isMiniboss;
-  const healthMul = isMb ? MINIBOSS.healthMul : diff.healthMul * (def.isElite ? 2.2 : 1);
+  const healthMul = isMb ? MINIBOSS.healthMul : diff.healthMul * (def.isElite ? 1.8 : 1);
   const dmgMul = isMb ? MINIBOSS.damageMul : diff.damageMul;
-  const spdMul = isMb ? MINIBOSS.speedMul : Math.min(1.1, diff.speedMul);
 
   slot.id = nextEntityId(state);
   slot.defId = defId;
@@ -383,14 +394,13 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   slot.vz = 0;
   slot.kbX = 0;
   slot.kbZ = 0;
-  slot.health = v.maxHealth * healthMul;
+  const hScale = def.healthScale ?? 1;
+  slot.health = v.maxHealth * healthMul * hScale;
   slot.maxHealth = slot.health;
-  // attack cooldown scaled by endless attack rate
-  const atkMul = isMb ? 1 : diff.attackRateMul;
   slot.radius = v.colliderRadius * (isMb ? MINIBOSS.radiusMul : def.isElite ? 1.45 : 1.25);
   slot.role = def.role;
   slot.hitFlash = 0;
-  slot.attackCd = (0.4 + rng(state) * 0.6) / Math.max(0.6, isMb ? 1 : endlessDifficultyAt(state.time).attackRateMul);
+  slot.attackCd = (0.4 + rng(state) * 0.6) / Math.max(0.6, isMb ? 1 : diff.attackRateMul);
   slot.alive = true;
   slot.isElite = !!def.isElite || isMb;
   slot.isMiniboss = isMb;
@@ -400,10 +410,20 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   slot.facingZ = -z;
   slot.healthMul = healthMul;
   slot.damageMul = dmgMul;
-  slot.speedMul = spdMul;
+  // Role baseSpeed drives movement; speedMul is global difficulty layer.
+  slot.speedMul = isMb ? MINIBOSS.speedMul : diff.speedMul;
+  slot.contactDamage = def.contactDamage;
   slot.hazardHitCd = 0;
   slot.specialCd = isMb ? 2.5 : 0;
   slot.specialWindup = 0;
+  slot.lungeCd = 1.5 + rng(state) * 1.5;
+  slot.lungeTimer = 0;
+  slot.lungeFx = 0;
+  slot.lungeFz = 0;
+  slot.interceptTimer = 0;
+  slot.interceptX = x;
+  slot.interceptZ = z;
+  slot.huntMomentum = 0;
   pushEffect(state, 'impact', x, z, 0.25, isMb ? '#ffcc44' : '#ff6688', isMb ? 1.8 : 0.8);
   return slot;
 }
@@ -444,15 +464,15 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
   if (state.player.form !== 'mech') {
     state.player.mechCharge = Math.min(1, state.player.mechCharge + chargeBase * mechChargeMul(state));
   }
+  // Elites: larger energy reward (same pickup type, premium visual).
   if (e.isElite && !e.isMiniboss) {
-    dropPickup(state, e.x + 0.3, e.z, 'supply', 1);
+    dropPickup(state, e.x + 0.3, e.z, 'xp', 22, { premium: true });
   }
   if (e.isMiniboss) {
     state.miniboss.alive = false;
     state.miniboss.health = 0;
-    dropPickup(state, e.x, e.z + 0.4, 'xp', 40);
+    dropPickup(state, e.x, e.z + 0.4, 'xp', 55, { premium: true });
     dropPickup(state, e.x - 0.4, e.z, 'repair', 45);
-    dropPickup(state, e.x + 0.4, e.z, 'supply', 1);
   }
   if (rng(state) < SURVIVOR.repairDropChance) {
     dropPickup(state, e.x + 0.2, e.z - 0.2, 'repair', 18);
@@ -460,7 +480,7 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
 }
 
 function isImportantPickup(kind: SurvivorPickup['kind']): boolean {
-  return kind === 'repair' || kind === 'supply';
+  return kind === 'repair';
 }
 
 function reclaimPickupSlot(state: SurvivorState, preferKind: SurvivorPickup['kind']): SurvivorPickup | null {
@@ -496,6 +516,7 @@ function dropPickup(
   z: number,
   kind: SurvivorPickup['kind'],
   value: number,
+  opts?: { premium?: boolean },
 ): void {
   const pos = safePickupPosition(x, z);
   // Light deterministic de-stack: nudge if another active pickup shares the exact cell.
@@ -591,6 +612,7 @@ function dropPickup(
   slot.active = true;
   slot.magnetized = false;
   slot.life = kind === 'repair' ? SURVIVOR.repairPickupLife : Infinity;
+  slot.premium = !!opts?.premium;
 }
 
 function damageEnemy(
@@ -622,7 +644,10 @@ export function damagePlayer(
   let mul = 1;
   if (p.form === 'mech') mul = SURVIVOR.mech.damageTakenMul;
   else if (p.form === 'ship') mul = SURVIVOR.ship.damageTakenMul;
-  if (source === 'boss') mul *= 1 - bossDamageReduction(state);
+  const isBossSrc =
+    source === 'boss' ||
+    source.startsWith('boss-');
+  if (isBossSrc) mul *= 1 - bossDamageReduction(state);
   let dealt = amount * mul;
   // Shield absorbs first
   if (p.shieldPoints > 0 && p.shieldTime > 0) {
@@ -647,6 +672,7 @@ export function damagePlayer(
   p.health = Math.max(0, p.health - dealt);
   p.hitFlash = 0.15;
   p.invuln = SURVIVOR.playerInvuln;
+  p.regenPause = SURVIVOR.regenDamagePause;
   emitDamage(state, 'player', p.x, p.z + 0.8, dealt, 'player');
   if (p.health <= 0) {
     p.alive = false;
@@ -1485,7 +1511,7 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
   // Large rewards — never victory
   dropPickup(state, b.x, b.z, 'xp', 80 + b.index * 25 + (b.isMega ? 120 : 0));
   dropPickup(state, b.x + 0.5, b.z, 'repair', 45 + (b.isMega ? 30 : 0));
-  dropPickup(state, b.x - 0.5, b.z, 'supply', 1);
+  dropPickup(state, b.x - 0.5, b.z, 'xp', 70, { premium: true });
   if (b.isMega) {
     // Guaranteed enhanced cache at death location (does not expire soon)
     state.cache = {
@@ -1546,16 +1572,24 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       continue;
     }
 
-    if (proj.kind === 'rocket' || proj.kind === 'orbital-marker') {
+    if (proj.kind === 'rocket' || proj.kind === 'protocol-rocket' || proj.kind === 'orbital-marker') {
       // Travel while arming; damage only on impact after armTimer elapses.
       proj.x += proj.vx * dt;
       proj.z += proj.vz * dt;
       proj.armTimer -= dt;
       proj.life -= dt;
-      if (proj.kind === 'rocket' && proj.armTimer > 0) {
-        // Bound trail sparkles (no unbounded allocation — reuse short effect).
-        if ((proj.id + Math.floor(state.time * 30)) % 3 === 0) {
-          pushEffect(state, 'muzzle', proj.x, proj.z, 0.08, proj.color, 0.45);
+      if ((proj.kind === 'rocket' || proj.kind === 'protocol-rocket') && proj.armTimer > 0) {
+        const trailEvery = proj.kind === 'protocol-rocket' ? 2 : 3;
+        if ((proj.id + Math.floor(state.time * 30)) % trailEvery === 0) {
+          pushEffect(
+            state,
+            'muzzle',
+            proj.x,
+            proj.z,
+            proj.kind === 'protocol-rocket' ? 0.14 : 0.08,
+            proj.color,
+            proj.kind === 'protocol-rocket' ? 0.9 : 0.45,
+          );
         }
       }
       if (proj.armTimer > 0 && proj.life > 0) continue;
@@ -1565,13 +1599,22 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         proj.kind === 'orbital-marker' ? 'orbital' : 'impact',
         proj.x,
         proj.z,
-        0.4,
+        proj.kind === 'protocol-rocket' ? 0.55 : 0.4,
         proj.color,
-        er * 1.4,
+        er * (proj.kind === 'protocol-rocket' ? 1.8 : 1.4),
         { radius: er },
       );
-      if (proj.kind === 'rocket') {
-        pushEffect(state, 'pulse', proj.x, proj.z, 0.28, '#fff6d0', er * 0.9, { radius: er * 0.9 });
+      if (proj.kind === 'rocket' || proj.kind === 'protocol-rocket') {
+        pushEffect(
+          state,
+          'pulse',
+          proj.x,
+          proj.z,
+          proj.kind === 'protocol-rocket' ? 0.4 : 0.28,
+          '#fff6d0',
+          er * (proj.kind === 'protocol-rocket' ? 1.15 : 0.9),
+          { radius: er * (proj.kind === 'protocol-rocket' ? 1.15 : 0.9) },
+        );
       }
       for (const e of state.enemies) {
         if (!e.alive) continue;
@@ -1776,13 +1819,25 @@ function updateHazards(state: SurvivorState, dt: number): void {
   }
 }
 
+function contactDamageOf(e: SurvivorEnemy): number {
+  return Math.max(4, e.contactDamage * e.damageMul);
+}
+
+function enemyBaseSpeed(e: SurvivorEnemy): number {
+  const def = HORDE[e.defId];
+  return (def?.baseSpeed ?? 4) * e.speedMul;
+}
+
 function updateEnemies(state: SurvivorState, dt: number): void {
   const p = state.player;
+  const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
   for (const e of state.enemies) {
     if (!e.alive) continue;
     if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
     if (e.hazardHitCd > 0) e.hazardHitCd = Math.max(0, e.hazardHitCd - dt);
     e.attackCd = Math.max(0, e.attackCd - dt);
+    e.lungeCd = Math.max(0, e.lungeCd - dt);
+    e.interceptTimer = Math.max(0, e.interceptTimer - dt);
 
     // Knockback first — AI must not cancel same-frame
     const kbMag = Math.hypot(e.kbX, e.kbZ);
@@ -1792,7 +1847,6 @@ function updateEnemies(state: SurvivorState, dt: number): void {
       const damp = Math.exp(-8 * dt);
       e.kbX *= damp;
       e.kbZ *= damp;
-      // While strongly knocked, skip chase so push is legible
       if (kbMag > 2.5) {
         const c = clampArena(e.x, e.z, e.radius * 0.5);
         e.x = c.x;
@@ -1807,16 +1861,33 @@ function updateEnemies(state: SurvivorState, dt: number): void {
     const dx = p.x - e.x;
     const dz = p.z - e.z;
     const dist = Math.hypot(dx, dz) || 1;
-    const ndx = dx / dist;
-    const ndz = dz / dist;
+    let ndx = dx / dist;
+    let ndz = dz / dist;
     e.facingX = ndx;
     e.facingZ = ndz;
+    const role = e.role;
+    let speed = enemyBaseSpeed(e);
 
-    const visual = HORDE[e.defId]?.visual;
-    const baseSpeed = (visual?.moveSpeed ?? 3) * (e.role === 'fast' ? 1.15 : 1);
-    const speed = baseSpeed * e.speedMul;
+    // Elite lunge dash
+    if (role === 'elite' && e.lungeTimer > 0) {
+      e.lungeTimer -= dt;
+      e.x += e.lungeFx * 18 * dt;
+      e.z += e.lungeFz * 18 * dt;
+      if (dist < e.radius + pr + 0.15 && e.attackCd <= 0) {
+        e.attackCd = 0.9;
+        damagePlayer(state, contactDamageOf(e) * 1.35);
+        e.lungeTimer = 0;
+        e.lungeCd = 2.8;
+      } else if (e.lungeTimer <= 0) {
+        e.lungeCd = 2.2; // recovery after miss
+      }
+      const c = clampArena(e.x, e.z, e.radius * 0.5);
+      e.x = c.x;
+      e.z = c.z;
+      continue;
+    }
 
-    // Miniboss special slam
+    // Miniboss telegraphed AOE slam (melee only)
     if (e.isMiniboss) {
       e.specialCd = Math.max(0, e.specialCd - dt);
       if (e.specialWindup > 0) {
@@ -1826,7 +1897,7 @@ function updateEnemies(state: SurvivorState, dt: number): void {
             radius: MINIBOSS.specialRadius,
           });
           const d = Math.hypot(p.x - e.x, p.z - e.z);
-          if (d <= MINIBOSS.specialRadius + SURVIVOR.playerRadius) {
+          if (d <= MINIBOSS.specialRadius + pr) {
             damagePlayer(state, MINIBOSS.specialDamage * e.damageMul);
           }
           e.specialCd = MINIBOSS.specialCd;
@@ -1837,52 +1908,82 @@ function updateEnemies(state: SurvivorState, dt: number): void {
           radius: MINIBOSS.specialRadius,
         });
       }
-      // slow advance while winding up
-      if (e.specialWindup > 0) {
-        e.x += ndx * speed * 0.25 * dt;
-        e.z += ndz * speed * 0.25 * dt;
-      } else {
-        e.x += ndx * speed * dt;
-        e.z += ndz * speed * dt;
-      }
-      if (dist < e.radius + SURVIVOR.playerRadius + 0.05 && e.attackCd <= 0) {
+      const adv = e.specialWindup > 0 ? 0.25 : 1;
+      e.x += ndx * speed * adv * dt;
+      e.z += ndz * speed * adv * dt;
+      if (dist < e.radius + pr + 0.05 && e.attackCd <= 0) {
         e.attackCd = 1.0;
-        damagePlayer(state, Math.max(6, (visual?.damage ?? 14) * 0.7 * e.damageMul));
+        damagePlayer(state, contactDamageOf(e));
       }
-    } else if (e.role === 'ranged') {
-      if (dist < 4.5) {
-        e.x -= ndx * speed * dt;
-        e.z -= ndz * speed * dt;
-      } else if (dist > 8) {
-        e.x += ndx * speed * dt;
-        e.z += ndz * speed * dt;
-      } else {
-        e.x += -ndz * speed * 0.7 * dt;
-        e.z += ndx * speed * 0.7 * dt;
+    } else if (role === 'flanker') {
+      // Predict intercept toward player facing direction, recompute periodically.
+      if (e.interceptTimer <= 0) {
+        const lead = 1.4 + rng(state) * 0.8;
+        const side = rng(state) < 0.5 ? 1 : -1;
+        e.interceptX = p.x + p.facingX * lead * 2.2 + -p.facingZ * side * (2.5 + rng(state) * 2);
+        e.interceptZ = p.z + p.facingZ * lead * 2.2 + p.facingX * side * (2.5 + rng(state) * 2);
+        e.interceptTimer = 0.55 + rng(state) * 0.35;
       }
-      if (e.attackCd <= 0 && dist < 10 && dist > 2.5) {
-        e.attackCd = (visual?.attackCooldown ?? 1.8) / Math.max(0.75, 1.15 - e.speedMul * 0.1);
-        const proj = acquireProjectile(state);
-        if (proj) {
-          const spd = visual?.projectileSpeed ?? 12;
-          resetProj(proj, state, 'enemy', null, e.x, e.z, ndx * spd, ndz * spd, {
-            damage: (visual?.damage ?? 7) * e.damageMul,
-            radius: visual?.projectileRadius ?? 0.2,
-            life: 2.2,
-            owner: 'enemy',
-            color: '#ff5566',
-          });
-        }
-      }
-    } else {
+      const ix = e.interceptX - e.x;
+      const iz = e.interceptZ - e.z;
+      const il = Math.hypot(ix, iz) || 1;
+      ndx = ix / il;
+      ndz = iz / il;
+      e.facingX = ndx;
+      e.facingZ = ndz;
       e.x += ndx * speed * dt;
       e.z += ndz * speed * dt;
-      const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
-      if (dist < e.radius + pr + 0.05) {
-        if (e.attackCd <= 0) {
-          e.attackCd = 0.75;
-          damagePlayer(state, Math.max(4, (visual?.damage ?? 8) * 0.65 * e.damageMul));
-        }
+      if (dist < e.radius + pr + 0.05 && e.attackCd <= 0) {
+        e.attackCd = 0.7;
+        damagePlayer(state, contactDamageOf(e));
+      }
+    } else if (role === 'hunter') {
+      // Build momentum while pursuing; short recovery after a lunge miss.
+      e.huntMomentum = Math.min(1, e.huntMomentum + dt * 0.35);
+      if (e.lungeCd <= 0 && dist < 5.5 && dist > 1.2) {
+        e.lungeTimer = 0.28;
+        e.lungeFx = ndx;
+        e.lungeFz = ndz;
+        e.lungeCd = 2.4;
+        e.huntMomentum = 0.2;
+        pushEffect(state, 'telegraph', e.x + ndx * 1.2, e.z + ndz * 1.2, 0.22, '#ff6688', 1.2, {
+          radius: 0.9,
+        });
+      }
+      const spd = speed * (0.75 + e.huntMomentum * 0.55);
+      e.x += ndx * spd * dt;
+      e.z += ndz * spd * dt;
+      if (dist < e.radius + pr + 0.05 && e.attackCd <= 0) {
+        e.attackCd = 0.65;
+        damagePlayer(state, contactDamageOf(e));
+        e.huntMomentum = 0;
+      }
+    } else if (role === 'elite') {
+      if (e.lungeCd <= 0 && dist < 7 && dist > 1.5) {
+        e.lungeTimer = 0.32;
+        e.lungeFx = ndx;
+        e.lungeFz = ndz;
+        pushEffect(state, 'telegraph', e.x + ndx * 2, e.z + ndz * 2, 0.28, '#ff4466', 1.6, {
+          length: 5,
+          width: 1.1,
+          facingX: ndx,
+          facingZ: ndz,
+        });
+        e.lungeCd = 99; // set properly after lunge resolves
+      }
+      e.x += ndx * speed * dt;
+      e.z += ndz * speed * dt;
+      if (dist < e.radius + pr + 0.05 && e.attackCd <= 0) {
+        e.attackCd = 0.8;
+        damagePlayer(state, contactDamageOf(e));
+      }
+    } else {
+      // fodder / sprinter / bruiser: direct chase
+      e.x += ndx * speed * dt;
+      e.z += ndz * speed * dt;
+      if (dist < e.radius + pr + 0.05 && e.attackCd <= 0) {
+        e.attackCd = role === 'bruiser' ? 0.9 : 0.7;
+        damagePlayer(state, contactDamageOf(e));
       }
     }
 
@@ -1973,9 +2074,6 @@ function updatePickups(state: SurvivorState, dt: number): void {
         const spd = SURVIVOR.xpMagnetSpeed;
         pk.x += (dx / d) * spd * dt;
         pk.z += (dz / d) * spd * dt;
-        dx = p.x - pk.x;
-        dz = p.z - pk.z;
-        d2 = dx * dx + dz * dz;
       }
       if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, eDirect)) {
         pk.active = false;
@@ -2001,9 +2099,6 @@ function updatePickups(state: SurvivorState, dt: number): void {
         const spd = SURVIVOR.healthMagnetSpeed;
         pk.x += (dx / d) * spd * dt;
         pk.z += (dz / d) * spd * dt;
-        dx = p.x - pk.x;
-        dz = p.z - pk.z;
-        d2 = dx * dx + dz * dz;
       }
       // Re-check after magnet travel — regen may have filled health mid-flight.
       const needNow = p.maxHealth - p.health;
@@ -2027,13 +2122,6 @@ function updatePickups(state: SurvivorState, dt: number): void {
       continue;
     }
 
-    if (pk.kind === 'supply') {
-      if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, eDirect * 1.2)) {
-        pk.active = false;
-        openSupply(state);
-        pushEffect(state, 'levelup', p.x, p.z, 0.4, '#ffd46a', 1.6);
-      }
-    }
   }
 
 }
@@ -2277,34 +2365,6 @@ function openLevelUp(state: SurvivorState): void {
   state.phase = 'levelup';
   state.choices = generateChoices(state);
   pushEffect(state, 'levelup', state.player.x, state.player.z, 0.6, state.accent, 2);
-}
-
-/**
- * Supply crates never permanently upgrade the Build.
- * They grant a non-permanent package: XP (may later open a normal choice) and/or repair / mech charge.
- */
-function openSupply(state: SurvivorState): void {
-  const p = state.player;
-  const roll = rng(state);
-  if (roll < 0.4) {
-    // Integrity pack
-    const heal = 28 + Math.floor(rng(state) * 12);
-    const before = p.health;
-    p.health = Math.min(p.maxHealth, p.health + heal);
-    const gained = p.health - before;
-    if (gained > 0) emitDamage(state, `supply-heal:${state.nextId}`, p.x, p.z + 1.0, gained, 'heal');
-    pushEffect(state, 'heal', p.x, p.z, 0.4, '#ff66aa', 1.6);
-  } else if (roll < 0.7) {
-    // Energy bundle — XP only; any resulting level-up still requires a visible card choice.
-    const xp = 18 + Math.floor(rng(state) * 22);
-    gainXp(state, xp);
-    pushEffect(state, 'pickup', p.x, p.z, 0.35, '#66ffcc', 1.4);
-  } else {
-    // Core charge + modest XP
-    p.mechCharge = Math.min(1, p.mechCharge + 0.12 + rng(state) * 0.08);
-    gainXp(state, 10 + Math.floor(rng(state) * 10));
-    pushEffect(state, 'pulse', p.x, p.z, 0.4, state.accent, 1.5);
-  }
 }
 
 /** Snapshot of permanent Build for regression assertions. */
@@ -2672,8 +2732,10 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   if (p.exhaustTickCd > 0) p.exhaustTickCd = Math.max(0, p.exhaustTickCd - dt);
   tickTempBuffs(state, dt);
 
+  if (p.regenPause > 0) p.regenPause = Math.max(0, p.regenPause - dt);
+  if (p.bossContactCd > 0) p.bossContactCd = Math.max(0, p.bossContactCd - dt);
   const regen = regenPerSecondAtLevel(passiveLevel(state, 'regen'));
-  if (regen > 0 && p.health < p.maxHealth && p.form !== 'ship') {
+  if (regen > 0 && p.regenPause <= 0 && p.health < p.maxHealth && p.form !== 'ship') {
     p.health = Math.min(p.maxHealth, p.health + regen * dt);
   }
 
@@ -2715,6 +2777,8 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
 
   const world = screenToWorldMove(input.moveX, input.moveY);
   const len = Math.hypot(world.x, world.z);
+  // Deterministic animation flag — dead zone ~0.05, independent of wall clamping.
+  p.isMoving = len > 0.05 || p.dodgeActive > 0;
   let speed = SURVIVOR.playerSpeed * moveMul(state);
   if ((p as { _thruster?: boolean })._thruster) speed *= SURVIVOR.tempBuff.thrusterSpeedMul;
   if (p.form === 'mech') speed *= 0.92;
@@ -2814,7 +2878,27 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   let rate = diff.spawnRate;
   if (alive < diff.populationMin) rate *= 1.75;
   else if (alive > target) rate *= 0.55;
-  if (aliveBossCount(state) > 0) rate *= 0.7;
+  // Boss pressure: ~85% normal, ~65% mega (not 70% default).
+  if (hasActiveMega(state)) rate *= 0.65;
+  else if (aliveBossCount(state) > 0) {
+    // After 40 minutes of collapse, bosses no longer reduce horde pressure.
+    rate *= state.time >= 40 * 60 ? 1 : 0.85;
+  }
+  // Surge director: short flood windows
+  if (state.surge.activeUntil > state.time) rate *= 1.5;
+  else if (state.time >= state.surge.nextAt) {
+    state.surge.activeUntil = state.time + SURVIVOR.surgeDuration;
+    state.surge.nextAt = state.time + SURVIVOR.surgeInterval + rng(state) * 10;
+    const kinds = ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood'];
+    state.surge.kind = kinds[Math.floor(rng(state) * kinds.length)]!;
+    // Telegraph perimeter entry
+    for (let i = 0; i < 3; i += 1) {
+      const pos = edgeSpawn(state);
+      pushEffect(state, 'telegraph', pos.x * 0.92, pos.z * 0.92, 0.8, '#ff8866', 2.2, {
+        radius: 1.8,
+      });
+    }
+  }
 
   state.spawnAcc += dt * rate;
   let spawnedThisFrame = 0;
@@ -3094,26 +3178,26 @@ function fireProtocolRocket(state: SurvivorState): void {
   const tz = boss ? boss.z : dens.z;
   const proj = acquireProjectile(state);
   if (!proj) return;
-  // Holographic pod launch: start near/above player, travel to target, then explode.
-  const launchX = p.x + (rng(state) - 0.5) * 1.4;
-  const launchZ = p.z + (rng(state) - 0.5) * 1.4;
+  // Massive protocol-rocket: launch near player, travel visibly, huge impact.
+  const launchX = p.x + (rng(state) - 0.5) * 1.8;
+  const launchZ = p.z + (rng(state) - 0.5) * 1.8;
   const dx = tx - launchX;
   const dz = tz - launchZ;
   const dist = Math.hypot(dx, dz) || 1;
-  const travel = Math.min(0.85, Math.max(0.38, dist / 28));
+  const travel = Math.min(0.95, Math.max(0.42, dist / 26));
   const spd = dist / travel;
   const pot = state.rocketProtocol.potency;
-  const er = 1.8 * pot;
-  resetProj(proj, state, 'rocket', 'rocket', launchX, launchZ, (dx / dist) * spd, (dz / dist) * spd, {
-    damage: 55 * pot,
-    radius: 0.35,
-    visualRadius: 0.55,
-    life: travel + 0.1,
+  const er = 2.4 * pot;
+  resetProj(proj, state, 'protocol-rocket', 'rocket', launchX, launchZ, (dx / dist) * spd, (dz / dist) * spd, {
+    damage: 62 * pot,
+    radius: 0.55,
+    visualRadius: 1.9,
+    life: travel + 0.12,
     color: '#ffb050',
     armTimer: travel,
     explodeRadius: er,
   });
-  pushEffect(state, 'muzzle', launchX, launchZ, 0.18, '#fff0c0', 1.2);
+  pushEffect(state, 'muzzle', launchX, launchZ, 0.28, '#fff0c0', 2.2);
   pushEffect(state, 'telegraph', tx, tz, travel, '#ff8a4a', er, { radius: er });
 }
 
@@ -3134,11 +3218,41 @@ function makeBossApi(): BossSimApi {
 
 const bossApi = makeBossApi();
 
+function applyBossBodyContact(state: SurvivorState): void {
+  const p = state.player;
+  if (!p.alive || p.invuln > 0 || p.dodgeActive > 0 || p.bossContactCd > 0) return;
+  const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
+  for (const b of state.bosses) {
+    if (!b.active || b.state === 'dead') continue;
+    const dx = p.x - b.x;
+    const dz = p.z - b.z;
+    const dist = Math.hypot(dx, dz);
+    // Charge pattern uses higher physical tier; avoid double body+charge same frame.
+    const charging = b.pattern === 'ravage-charge' && b.state === 'active';
+    const hitR = b.colliderRadius + pr + (charging ? 0.35 : 0.05);
+    if (dist > hitR) continue;
+    const cat: BossDamageCategory = charging ? 'charge' : 'body';
+    const dmg = bossCategoryDamage(cat, b.index, b.isMega, b.phase) * b.damageMul;
+    damagePlayer(state, dmg, charging ? 'boss-charge' : 'boss-body');
+    p.bossContactCd = 0.45;
+    // Separation so player is not stuck inside the model.
+    const n = dist > 1e-4 ? dist : 1;
+    const push = 1.8 + b.colliderRadius * 0.15;
+    p.x += (dx / n) * push;
+    p.z += (dz / n) * push;
+    const c = clampArena(p.x, p.z, pr);
+    p.x = c.x;
+    p.z = c.z;
+    break;
+  }
+}
+
 function updateBosses(state: SurvivorState, dt: number): void {
   if (state.inboundBanner > 0) state.inboundBanner = Math.max(0, state.inboundBanner - dt);
   for (const b of state.bosses) {
     updateOneBossPatterns(state, b, dt, bossApi);
   }
+  applyBossBodyContact(state);
   // Prune long-dead bosses to keep list bounded
   if (state.bosses.length > 8) {
     state.bosses = state.bosses.filter((b) => b.active || b.state !== 'dead' || b.timer > 0);

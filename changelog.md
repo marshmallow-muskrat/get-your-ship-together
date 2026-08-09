@@ -12,14 +12,68 @@ The version names below are retrospective product milestones unless a balance ve
 
 - Make every boss telegraph match its real collision shape and add complete browser fixtures for each unique pattern.
 - Finish boss-owned cleanup for all hazard/zone types across phase transitions and fixture resets.
-- Replace the numeric boss backlog with an ordered queue of scheduled boss indices and reserve attack-pool capacity for critical hostile attacks.
-- Finish Ravage Charge trail cadence and delayed Cataclysm marker lifetime audits.
+- Ordered boss index backlog and reserved hostile attack capacity.
 - Clear held input on window blur/focus loss for all remappable actions.
-- Complete optional-asset failure recovery and screen-transition error handling.
-- Measure and fix remaining GPU-resource growth, per-frame rail allocation, and slow spatial lookups with hard metrics.
-- Add meaningful runtime code splitting; the main JavaScript bundle remains above Vite's recommended chunk size.
-- Add and enforce a lint configuration and script.
-- Remove confirmed obsolete survivor state, legacy systems, dead entry points, and repository artifacts.
+- Full run-balance telemetry export (weapon DPS, death source, etc.).
+- Hard GPU draw-call / memory A/B metrics and code splitting.
+- Deeper weapon L1–L5 effective-power rebalance across all scenarios.
+
+## [2.1.0] — 2026-08-09 — Melee horde redesign and presentation polish
+
+Balance line: `endless-2.1.0`.
+
+### Critical design
+
+- **Ordinary enemies no longer fire projectiles.** Former ranged roles (`flyer`, `ghost`, `bee`, `elite`) are melee archetypes (flanker, hunter, elite lunger) that retain their models.
+- Danger comes from density, speed, encirclement, sprinters, lunges, bruisers, elites, and surge waves.
+- Bosses remain the only source of projectiles, beams, puddles, and complex ranged patterns. Minibosses keep telegraphed melee AOE.
+
+### Pickups
+
+- **Removed Supply pickups entirely** (cube/ring/pillar objects and `openSupply`).
+- Floor rewards are only energy (xp) and health (repair). Protocol Cache remains unique.
+- Elites and bosses drop larger premium energy bundles; minibosses drop premium energy + health.
+
+### Horde balance
+
+- New AI roles: fodder, sprinter, flanker, hunter, bruiser, elite, miniboss.
+- Opening pressure: ~28 targets, ~2.2 spawns/sec, speedMul ~1.10, early elite chance ~4%.
+- Density curve toward 160 cap with higher elite share over time.
+- Global speed curve raised past the old 1.28 cap (late ~1.5–1.7 with collapse).
+- Boss horde dampening ~85% (mega ~65%); after 40 minutes normal bosses no longer dampen.
+- Surge director every ~50s with perimeter telegraphs.
+- Containment Collapse after 30 minutes: stepped health/damage/speed/lunge pressure.
+
+### Hero / passive
+
+- Thruster Boost +5%/level (max +25%).
+- Weapon haste ~5.5%/level; Containment Field ~5.5% radius/level.
+- Hull Plating +14 early / +7 late; Nanite Bleed ~0.22/s early with 3s pause after damage.
+- Breach Shielding hard-capped at 60%.
+
+### Boss physical damage
+
+- Explicit categories: body, charge, projectile, beam, puddle, radial.
+- Body contact > projectile; charge > body; Mega body/charge higher.
+- Shared boss-contact cooldown and separation push; uses real `colliderRadius`.
+
+### Presentation
+
+- Massive `protocol-rocket` projectiles with body, nose, flame, and thick trails.
+- Astronaut/mech idle when stationary (`isMoving` sim flag).
+- Upgrade cards show `NEW PASSIVE` vs `PASSIVE`.
+- Aegis ellipsoidal shell sized per astronaut/mech/ship.
+- Redesigned Cache direction panel with SVG arrow.
+- Damage-number semantics (neutral/gold/red/green/cyan absorb glyph).
+- Aegis HUD float above command deck without reflowing vitals.
+
+### Tooling
+
+- Added ESLint flat config and `npm run lint`.
+
+### Testing
+
+- Expanded suite covering melee roles, opening density, speed curve, boss damage hierarchy, no supply type, no ordinary enemy projectiles.
 
 ## [2.0.3] — 2026-08-09 — Progression integrity and Protocol presentation
 

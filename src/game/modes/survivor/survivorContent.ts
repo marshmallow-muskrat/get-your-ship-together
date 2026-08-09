@@ -14,10 +14,10 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.3';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.1.0';
 
 /** Additive Overclock damage growth per level past L5. */
-export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.08;
+export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.07;
 
 /** Centralized Containment Protocol tuning (endless high-score mode). */
 export const SURVIVOR = {
@@ -59,8 +59,17 @@ export const SURVIVOR = {
   enemyCap: 160,
   projectileCap: 220,
   pickupCap: 160,
-  /** Reserve free slots so XP cannot starve health/supply/boss rewards. */
+  /** Reserve free slots so XP cannot starve health/boss rewards. */
   pickupReserveImportant: 24,
+  /** Seconds after taking damage before Nanite Bleed resumes. */
+  regenDamagePause: 3.0,
+  /** Surge director interval (seconds). */
+  surgeInterval: 50,
+  surgeDuration: 10,
+  surgeRecovery: 14,
+  /** Containment Collapse begins at this survival time (seconds). */
+  collapseStart: 30 * 60,
+  collapseStep: 120,
   /** Ordinary repair orbs expire so full-health players cannot fill the pool forever. */
   repairPickupLife: 48,
   repairPickupWarnLife: 8,
@@ -432,7 +441,13 @@ export interface PassiveDef {
 }
 
 export const PASSIVES: PassiveDef[] = [
-  { id: 'move-speed', name: 'Thruster Boost', description: 'Move faster through the horde.', maxLevel: 5, perLevel: 0.08 },
+  {
+    id: 'move-speed',
+    name: 'Thruster Boost',
+    description: 'Move faster through the horde (+5% per level, max +25%).',
+    maxLevel: 5,
+    perLevel: 0.05,
+  },
   {
     id: 'pickup-radius',
     name: 'Magnet Field',
@@ -445,25 +460,49 @@ export const PASSIVES: PassiveDef[] = [
     name: 'Hull Plating',
     description: 'Increase max integrity.',
     maxLevel: Infinity,
-    perLevel: 20,
+    perLevel: 14,
     repeatable: true,
   },
   {
     id: 'regen',
     name: 'Nanite Bleed',
-    description: 'Slow automatic repair over time.',
+    description: 'Automatic repair over time. Pauses briefly after taking damage.',
     maxLevel: Infinity,
-    perLevel: 0.45,
+    perLevel: 0.22,
     repeatable: true,
   },
-  { id: 'weapon-haste', name: 'Weapon Overclock', description: 'All weapons fire faster.', maxLevel: 5, perLevel: 0.08 },
-  { id: 'area', name: 'Containment Field', description: 'Larger weapon areas and blasts.', maxLevel: 5, perLevel: 0.1 },
-  { id: 'mech-charge', name: 'Core Siphon', description: 'Mech meter fills faster from kills.', maxLevel: 5, perLevel: 0.15 },
-  { id: 'mech-duration', name: 'Reactor Hold', description: 'Longer mech transform window.', maxLevel: 5, perLevel: 0.12 },
+  {
+    id: 'weapon-haste',
+    name: 'Weapon Overclock',
+    description: 'All weapons fire faster (+5.5% per level, max ~28%).',
+    maxLevel: 5,
+    perLevel: 0.055,
+  },
+  {
+    id: 'area',
+    name: 'Containment Field',
+    description: 'Larger weapon areas and blasts (+5.5% radius per level).',
+    maxLevel: 5,
+    perLevel: 0.055,
+  },
+  {
+    id: 'mech-charge',
+    name: 'Core Siphon',
+    description: 'Mech meter fills faster from kills (+10% per level).',
+    maxLevel: 5,
+    perLevel: 0.1,
+  },
+  {
+    id: 'mech-duration',
+    name: 'Reactor Hold',
+    description: 'Longer mech transform window (+9% per level).',
+    maxLevel: 5,
+    perLevel: 0.09,
+  },
   {
     id: 'breach-shielding',
     name: 'Breach Shielding',
-    description: 'Reduces damage from boss attacks by 8% per level (max 40%).',
+    description: 'Reduces damage from boss attacks by 8% per level (hard-capped).',
     maxLevel: 5,
     perLevel: 0.08,
   },
@@ -472,9 +511,9 @@ export const PASSIVES: PassiveDef[] = [
 /** Integrity gained when taking Hull Plating to the given absolute level. */
 export function hullPlatingGainAtLevel(level: number): number {
   if (level <= 0) return 0;
-  if (level <= 5) return 20;
+  if (level <= 5) return 14;
   // L6+: smaller linear gains
-  return 10;
+  return 7;
 }
 
 /** Total max-health from N levels of Hull Plating. */
@@ -487,9 +526,13 @@ export function hullPlatingTotal(levels: number): number {
 /** Regen per second at a given Nanite Bleed level (diminishing after 5). */
 export function regenPerSecondAtLevel(level: number): number {
   if (level <= 0) return 0;
-  if (level <= 5) return level * 0.45;
-  // L1–5 full rate + sqrt growth beyond
-  return 5 * 0.45 + Math.sqrt(level - 5) * 0.35;
+  if (level <= 5) return level * 0.22;
+  return 5 * 0.22 + Math.sqrt(level - 5) * 0.18;
+}
+
+/** Total boss damage reduction from Breach Shielding (hard-capped ~0.6). */
+export function breachShieldingReduction(level: number): number {
+  return Math.min(0.6, Math.max(0, level) * 0.08);
 }
 
 /** Capped permanent-build power scale for thruster/wake damage. */
@@ -754,33 +797,126 @@ export function xpForLevel(level: number): number {
   return Math.floor(12 + level * 8 + level * level * 1.6);
 }
 
-export type HordeRole = 'basic' | 'fast' | 'ranged' | 'bruiser' | 'elite' | 'miniboss';
+/**
+ * Melee-only horde AI roles. Ordinary enemies never fire projectiles.
+ * Models keep their previous visuals; behavior is role-driven.
+ */
+export type HordeRole =
+  | 'fodder'
+  | 'sprinter'
+  | 'flanker'
+  | 'hunter'
+  | 'bruiser'
+  | 'elite'
+  | 'miniboss';
 
 export interface HordeEnemyDef {
   id: string;
   role: HordeRole;
   visual: EnemyDef;
   xp: number;
+  /** Base world speed at opening (before global speedMul). */
+  baseSpeed: number;
+  /** Contact damage at opening (before damageMul). */
+  contactDamage: number;
+  /** Relative HP vs visual maxHealth (1 = pack default). */
+  healthScale: number;
   isElite?: boolean;
   isMiniboss?: boolean;
 }
 
 export const HORDE: Record<string, HordeEnemyDef> = {
-  basic: { id: 'basic', role: 'basic', visual: MELEE_BLOB, xp: 3 },
-  mush: { id: 'mush', role: 'basic', visual: MELEE_MUSHNUB, xp: 3 },
-  fast: { id: 'fast', role: 'fast', visual: MELEE_ALIEN, xp: 4 },
-  spiky: { id: 'spiky', role: 'fast', visual: MELEE_SPIKY, xp: 5 },
-  flyer: { id: 'flyer', role: 'ranged', visual: RANGED_GOLELING, xp: 6 },
-  ghost: { id: 'ghost', role: 'ranged', visual: RANGED_GHOST, xp: 6 },
-  bee: { id: 'bee', role: 'ranged', visual: RANGED_ARMABEE, xp: 5 },
-  bruiser: { id: 'bruiser', role: 'bruiser', visual: MELEE_ORC, xp: 12 },
-  elite: { id: 'elite', role: 'elite', visual: RANGED_SQUIDLE, xp: 28, isElite: true },
-  /** Visually distinct miniboss (orc scaled up). */
+  basic: {
+    id: 'basic',
+    role: 'fodder',
+    visual: MELEE_BLOB,
+    xp: 3,
+    baseSpeed: 4.0,
+    contactDamage: 8,
+    healthScale: 0.85,
+  },
+  mush: {
+    id: 'mush',
+    role: 'fodder',
+    visual: MELEE_MUSHNUB,
+    xp: 3,
+    baseSpeed: 3.9,
+    contactDamage: 8,
+    healthScale: 0.9,
+  },
+  fast: {
+    id: 'fast',
+    role: 'sprinter',
+    visual: MELEE_ALIEN,
+    xp: 4,
+    baseSpeed: 5.6,
+    contactDamage: 9,
+    healthScale: 0.75,
+  },
+  spiky: {
+    id: 'spiky',
+    role: 'sprinter',
+    visual: MELEE_SPIKY,
+    xp: 5,
+    baseSpeed: 5.7,
+    contactDamage: 10,
+    healthScale: 0.8,
+  },
+  // Former ranged models → melee pressure archetypes
+  flyer: {
+    id: 'flyer',
+    role: 'flanker',
+    visual: RANGED_GOLELING,
+    xp: 6,
+    baseSpeed: 4.85,
+    contactDamage: 10,
+    healthScale: 1.0,
+  },
+  ghost: {
+    id: 'ghost',
+    role: 'hunter',
+    visual: RANGED_GHOST,
+    xp: 6,
+    baseSpeed: 5.0,
+    contactDamage: 11,
+    healthScale: 1.05,
+  },
+  bee: {
+    id: 'bee',
+    role: 'flanker',
+    visual: RANGED_ARMABEE,
+    xp: 5,
+    baseSpeed: 5.2,
+    contactDamage: 9,
+    healthScale: 0.7,
+  },
+  bruiser: {
+    id: 'bruiser',
+    role: 'bruiser',
+    visual: MELEE_ORC,
+    xp: 12,
+    baseSpeed: 3.2,
+    contactDamage: 16,
+    healthScale: 2.4,
+  },
+  elite: {
+    id: 'elite',
+    role: 'elite',
+    visual: RANGED_SQUIDLE,
+    xp: 28,
+    baseSpeed: 4.7,
+    contactDamage: 18,
+    healthScale: 3.2,
+    isElite: true,
+  },
   miniboss: {
     id: 'miniboss',
     role: 'miniboss',
     visual: MELEE_ORC,
     xp: 120,
+    baseSpeed: 3.6,
+    contactDamage: 20,
+    healthScale: 1,
     isElite: true,
     isMiniboss: true,
   },
@@ -789,16 +925,35 @@ export const HORDE: Record<string, HordeEnemyDef> = {
 export const MINIBOSS = {
   id: 'miniboss',
   name: 'Containment Warden',
-  healthMul: 18,
-  damageMul: 2.4,
+  healthMul: 14,
+  damageMul: 1.8,
   radiusMul: 2.0,
-  speedMul: 0.85,
+  speedMul: 0.9,
   xp: 140,
-  specialWindup: 0.9,
+  specialWindup: 0.95,
   specialRadius: 4.2,
-  specialDamage: 22,
+  specialDamage: 26,
   specialCd: 5.5,
 } as const;
+
+/** Boss damage category for physical hierarchy and telemetry. */
+export type BossDamageCategory =
+  | 'body'
+  | 'charge'
+  | 'projectile'
+  | 'beam'
+  | 'puddle'
+  | 'radial';
+
+/** Base first-boss damage by category (before boss index/phase scaling). */
+export const BOSS_DAMAGE_BASE: Record<BossDamageCategory, number> = {
+  projectile: 15,
+  body: 25,
+  charge: 32,
+  beam: 16,
+  puddle: 12,
+  radial: 18,
+};
 
 export type BossPhase = 1 | 2 | 3;
 
@@ -843,18 +998,45 @@ export interface EndlessDifficulty {
   populationMax: number;
 }
 
-/** Unbounded endless enemy difficulty (pure). m = minutes elapsed. */
+/**
+ * Unbounded endless enemy difficulty (pure).
+ * Opening is denser/faster; late game uses Containment Collapse layer after 30m.
+ */
 export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
-  const m = Math.max(0, timeSec / 60);
+  const t = Math.max(0, timeSec);
+  const m = t / 60;
   const late = Math.max(0, m - 5);
-  // Stronger late enemy HP so basics stop being permanent one-shots
-  const healthMul = 1 + 0.18 * m + 0.035 * late * late;
-  const damageMul = 1 + 0.07 * m + 0.04 * Math.max(0, m - 10);
-  const speedMul = Math.min(1.28, 1 + 0.014 * m);
-  const attackRateMul = Math.min(1.7, 1 + 0.025 * m);
-  const targetActive = Math.min(SURVIVOR.enemyCap, Math.floor(18 + 8 * m));
-  const eliteChance = Math.min(0.45, 0.02 + 0.015 * m);
-  const spawnRate = Math.min(6.5, 1.4 + 0.35 * m);
+  // Collapse layer every 2 minutes after 30:00
+  const collapseSteps =
+    t >= SURVIVOR.collapseStart
+      ? Math.floor((t - SURVIVOR.collapseStart) / SURVIVOR.collapseStep) + 1
+      : 0;
+  const healthMul =
+    1 + 0.12 * m + 0.02 * late * late + collapseSteps * 0.08;
+  const damageMul =
+    1 + 0.06 * m + 0.03 * Math.max(0, m - 10) + collapseSteps * 0.07;
+  // Opening ~1.10, ~1.22 @5m, ~1.35 @10m, ~1.50 @16m, ~1.65 late/collapse
+  let speedMul = 1.1 + 0.024 * m;
+  if (m > 10) speedMul = 1.35 + 0.018 * (m - 10);
+  if (m > 16) speedMul = 1.5 + 0.012 * (m - 16);
+  speedMul = Math.min(1.85, speedMul + collapseSteps * 0.025);
+  const attackRateMul = Math.min(2.1, 1 + 0.03 * m + collapseSteps * 0.045);
+  // Density curve toward 160 cap
+  let targetActive: number;
+  if (m < 2) targetActive = Math.floor(28 + 10 * m);
+  else if (m < 5) targetActive = Math.floor(48 + 10 * (m - 2));
+  else if (m < 10) targetActive = Math.floor(78 + 10 * (m - 5));
+  else if (m < 15) targetActive = Math.floor(128 + 6.4 * (m - 10));
+  else targetActive = SURVIVOR.enemyCap;
+  targetActive = Math.min(SURVIVOR.enemyCap, targetActive);
+  const eliteChance = Math.min(0.42, 0.04 + 0.018 * m + collapseSteps * 0.02);
+  let spawnRate: number;
+  if (m < 2) spawnRate = 2.2 + 0.4 * m;
+  else if (m < 5) spawnRate = 3.0 + 0.43 * (m - 2);
+  else if (m < 10) spawnRate = 4.3 + 0.42 * (m - 5);
+  else if (m < 15) spawnRate = 6.4 + 0.32 * (m - 10);
+  else spawnRate = 8.0;
+  spawnRate = Math.min(9.5, spawnRate + collapseSteps * 0.15);
   return {
     healthMul,
     damageMul,
@@ -863,7 +1045,7 @@ export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
     targetActive,
     eliteChance,
     spawnRate,
-    populationMin: Math.max(8, Math.floor(targetActive * 0.7)),
+    populationMin: Math.max(12, Math.floor(targetActive * 0.72)),
     populationMax: targetActive,
   };
 }
@@ -921,25 +1103,43 @@ export function bossTimeForIndex(index: number): number {
   return Math.max(1, Math.floor(index)) * SURVIVOR.bossInterval;
 }
 
+/**
+ * Opening sequence + late composition.
+ * 0–15s fodder; 15–30 sprinters; 30–45 flankers; 60+ bruisers; late advanced melee.
+ */
 export function compositionAt(t: number): Array<{ id: string; weight: number }> {
-  if (t < 60) return [{ id: 'basic', weight: 8 }, { id: 'mush', weight: 2 }];
-  if (t < 180)
+  if (t < 15) return [{ id: 'basic', weight: 8 }, { id: 'mush', weight: 3 }];
+  if (t < 30)
     return [
-      { id: 'basic', weight: 5 },
+      { id: 'basic', weight: 6 },
+      { id: 'mush', weight: 2 },
       { id: 'fast', weight: 3 },
-      { id: 'flyer', weight: 2 },
-      { id: 'mush', weight: 1 },
+      { id: 'spiky', weight: 1 },
     ];
-  if (t < 300)
+  if (t < 45)
     return [
       { id: 'basic', weight: 4 },
-      { id: 'spiky', weight: 3 },
-      { id: 'ghost', weight: 2 },
+      { id: 'fast', weight: 3 },
+      { id: 'flyer', weight: 3 },
       { id: 'bee', weight: 2 },
-      { id: 'bruiser', weight: 1 },
-      { id: 'elite', weight: 0.5 },
     ];
-  if (t < 480)
+  if (t < 60)
+    return [
+      { id: 'basic', weight: 3 },
+      { id: 'fast', weight: 3 },
+      { id: 'flyer', weight: 2 },
+      { id: 'ghost', weight: 2 },
+      { id: 'spiky', weight: 2 },
+    ];
+  if (t < 90)
+    return [
+      { id: 'basic', weight: 3 },
+      { id: 'fast', weight: 3 },
+      { id: 'flyer', weight: 2 },
+      { id: 'bruiser', weight: 2 },
+      { id: 'ghost', weight: 1 },
+    ];
+  if (t < 180)
     return [
       { id: 'basic', weight: 3 },
       { id: 'fast', weight: 3 },
@@ -947,19 +1147,49 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
       { id: 'flyer', weight: 2 },
       { id: 'ghost', weight: 2 },
       { id: 'bruiser', weight: 2 },
-      { id: 'elite', weight: 1.2 },
+      { id: 'elite', weight: 0.6 },
     ];
-  // Late endless — fewer trivials, more bruisers/elites/ranged
+  if (t < 480)
+    return [
+      { id: 'basic', weight: 2 },
+      { id: 'fast', weight: 3 },
+      { id: 'spiky', weight: 2 },
+      { id: 'flyer', weight: 3 },
+      { id: 'ghost', weight: 2 },
+      { id: 'bee', weight: 2 },
+      { id: 'bruiser', weight: 3 },
+      { id: 'elite', weight: 1.5 },
+    ];
+  // Late / Collapse — advanced melee dominance
   return [
     { id: 'basic', weight: 1 },
-    { id: 'fast', weight: 2 },
-    { id: 'spiky', weight: 2 },
+    { id: 'fast', weight: 3 },
+    { id: 'spiky', weight: 3 },
     { id: 'flyer', weight: 3 },
     { id: 'ghost', weight: 3 },
-    { id: 'bruiser', weight: 4 },
-    { id: 'elite', weight: 3.2 },
-    { id: 'bee', weight: 1.5 },
+    { id: 'bee', weight: 2 },
+    { id: 'bruiser', weight: 3 },
+    { id: 'elite', weight: 3.5 },
   ];
+}
+
+/** Scaled boss category damage for boss index (1-based) and optional mega. */
+export function bossCategoryDamage(
+  category: BossDamageCategory,
+  bossIndex: number,
+  isMega: boolean,
+  phase = 1,
+): number {
+  const n = Math.max(1, Math.floor(bossIndex));
+  const base = BOSS_DAMAGE_BASE[category];
+  const indexMul = 1 + 0.12 * (n - 1);
+  const phaseMul = phase >= 3 ? 1.25 : phase >= 2 ? 1.12 : 1;
+  const megaMul = isMega
+    ? category === 'body' || category === 'charge'
+      ? 1.35
+      : 1.2
+    : 1;
+  return base * indexMul * phaseMul * megaMul * (isMega && category === 'charge' ? 1.15 : 1);
 }
 
 export type TempBuffId =

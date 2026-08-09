@@ -11,7 +11,7 @@ import {
   xpForLevel,
 } from './survivorContent';
 
-export type SurvivorPhase = 'playing' | 'levelup' | 'protocol' | 'supply' | 'victory' | 'defeat' | 'paused';
+export type SurvivorPhase = 'playing' | 'levelup' | 'protocol' | 'victory' | 'defeat' | 'paused';
 
 export interface SurvivorEnemy {
   id: number;
@@ -40,17 +40,31 @@ export interface SurvivorEnemy {
   healthMul: number;
   damageMul: number;
   speedMul: number;
+  /** Role base contact damage at spawn. */
+  contactDamage: number;
   /** Cooldown before hazard (wake/puddle) can re-hit this enemy. */
   hazardHitCd: number;
   /** Miniboss special telegraph timer. */
   specialCd: number;
   specialWindup: number;
+  /** Elite/hunter lunge state. */
+  lungeCd: number;
+  lungeTimer: number;
+  lungeFx: number;
+  lungeFz: number;
+  /** Flanker intercept recompute timer. */
+  interceptTimer: number;
+  interceptX: number;
+  interceptZ: number;
+  /** Hunter momentum 0–1. */
+  huntMomentum: number;
 }
 
 export type ProjectileKind =
   | 'bolt'
   | 'drone'
   | 'rocket'
+  | 'protocol-rocket'
   | 'enemy'
   | 'bioplasma'
   | 'boss-orb'
@@ -110,7 +124,7 @@ export interface SurvivorHazard {
 
 export interface SurvivorPickup {
   id: number;
-  kind: 'xp' | 'repair' | 'supply';
+  kind: 'xp' | 'repair';
   x: number;
   z: number;
   value: number;
@@ -118,6 +132,8 @@ export interface SurvivorPickup {
   magnetized: boolean;
   /** Remaining life for expiring pickups (repair). Infinity for non-expiring. */
   life: number;
+  /** High-value energy bundle (same type, larger visual). */
+  premium?: boolean;
 }
 
 export interface SurvivorWeaponSlot {
@@ -310,6 +326,18 @@ export interface SurvivorState {
     mechReadyAnnounced: boolean;
     slowTimer: number;
     slowMul: number;
+    /** Deterministic movement flag for idle/run animation. */
+    isMoving: boolean;
+    /** Remaining pause before Nanite Bleed resumes after damage. */
+    regenPause: number;
+    /** Shared boss body/charge contact throttle. */
+    bossContactCd: number;
+  };
+  /** Pressure-wave director. */
+  surge: {
+    nextAt: number;
+    activeUntil: number;
+    kind: string;
   };
   weapons: SurvivorWeaponSlot[];
   /** Ordinary + prototype weapons (prototypes flagged on slot). */
@@ -508,7 +536,7 @@ function emptyEnemy(): SurvivorEnemy {
     health: 1,
     maxHealth: 1,
     radius: 0.4,
-    role: 'basic',
+    role: 'fodder',
     hitFlash: 0,
     attackCd: 0,
     alive: false,
@@ -521,9 +549,18 @@ function emptyEnemy(): SurvivorEnemy {
     healthMul: 1,
     damageMul: 1,
     speedMul: 1,
+    contactDamage: 8,
     hazardHitCd: 0,
     specialCd: 0,
     specialWindup: 0,
+    lungeCd: 0,
+    lungeTimer: 0,
+    lungeFx: 0,
+    lungeFz: 0,
+    interceptTimer: 0,
+    interceptX: 0,
+    interceptZ: 0,
+    huntMomentum: 0,
   };
 }
 
@@ -571,6 +608,9 @@ export function createSurvivorState(
       shieldTime: 0,
       damageMul: 1,
       mechReadyAnnounced: false,
+      isMoving: false,
+      regenPause: 0,
+      bossContactCd: 0,
       slowTimer: 0,
       slowMul: 1,
     },
@@ -579,6 +619,11 @@ export function createSurvivorState(
     tempBuffs: [],
     protocolActive: [],
     protocolChoices: [],
+    surge: {
+      nextAt: SURVIVOR.surgeInterval,
+      activeUntil: 0,
+      kind: '',
+    },
     cache: {
       active: false,
       x: 0,
