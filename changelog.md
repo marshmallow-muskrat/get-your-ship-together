@@ -11,17 +11,59 @@ The version names below are retrospective product milestones unless a balance ve
 ### Remaining follow-up
 
 - Make every boss telegraph match its real collision shape and add complete browser fixtures for each unique pattern.
-- Add explicit boss ownership and cleanup for projectiles, hazards, zones, and effects across deaths, interruptions, and phase changes.
+- Finish boss-owned cleanup for all hazard/zone types across phase transitions and fixture resets.
 - Replace the numeric boss backlog with an ordered queue of scheduled boss indices and reserve attack-pool capacity for critical hostile attacks.
-- Finish auditing per-boss collider use, Ravage Charge trail cadence, and delayed Cataclysm marker lifetime.
-- Queue level-up and Protocol choices safely across high-refresh render frames and clear held input on focus loss.
-- Partition leaderboards by balance version, store Mega-Boss defeats, and remove unsafe record interpolation through `innerHTML`.
+- Finish Ravage Charge trail cadence and delayed Cataclysm marker lifetime audits.
+- Clear held input on window blur/focus loss for all remappable actions.
 - Complete optional-asset failure recovery and screen-transition error handling.
-- Measure and fix remaining GPU-resource growth, per-frame rail allocation, shared projectile-material mutation, static-arena draw calls, and slow spatial lookups.
+- Measure and fix remaining GPU-resource growth, per-frame rail allocation, and slow spatial lookups with hard metrics.
 - Add meaningful runtime code splitting; the main JavaScript bundle remains above Vite's recommended chunk size.
 - Add and enforce a lint configuration and script.
 - Remove confirmed obsolete survivor state, legacy systems, dead entry points, and repository artifacts.
-- Complete production browser QA for Gunship Flyby and record numeric draw-call and `renderer.info.memory` comparisons.
+
+## [2.0.3] — 2026-08-09 — Progression integrity and Protocol presentation
+
+Balance line: `endless-2.0.3`.
+
+### Critical fix
+
+- **Supply crates no longer permanently upgrade weapons.** `openSupply()` previously selected a random owned weapon and executed `w.level += 1` on elite/miniboss Supply drops, which inflated Builds without player choice (observed L11–L18 weapons without matching selections).
+- Permanent weapon and passive level mutation is now centralized behind validated level-up choice helpers. Only an explicit card selection in `phase === 'levelup'` may raise weapon/passive/Overclock levels.
+- Choice sets are consumed immediately so high-refresh double-input cannot apply the same card twice.
+- Supply crates now grant non-permanent rewards only: integrity pack, Energy/XP bundle (still requires a visible level-up choice if a level is earned), or modest mech charge + XP.
+
+### Protocol presentation
+
+- **Aegis Barrier:** persistent cyan barrier actor follows astronaut, mech, and ship while `shieldPoints > 0` and `shieldTime > 0`; scales by form; intensity tracks remaining shield; shatter feedback on depletion.
+- **Rocket Barrage:** rockets launch from near the player with velocity, travel visibly, leave short trails, and explode only on arrival. Target reticles match blast radius. No damage before impact.
+- **Gunship Flyby:** ship originates at/near the player (cache collection point), engines hold briefly on-camera, then flies toward boss/horde and exits the far rim — no off-screen edge start.
+- Fixtures: `survivor-shield`, `survivor-rockets`, `survivor-gunship`.
+
+### Combat / fairness
+
+- Player-versus-boss hit tests (Repulsor, Rail, Gravity, Bio splash, projectiles, ship exhaust) use each boss’s actual `colliderRadius` instead of the global `SURVIVOR_BOSS.colliderRadius`.
+- Hostile damage source prefers explicit `sourceBossId` over legacy dynamic `fromBoss` property checks.
+
+### Presentation
+
+- Health orbs redesigned: larger crimson/white medical cross, no cyan ring, slower pulse, full-health dimming, faster expire warning.
+- Energy orbs remain smaller cyan crystals with faster spin for color-blind-friendly silhouette distinction.
+
+### Leaderboards
+
+- Default leaderboard view filters to the current balance version (`endless-2.0.3`).
+- Older runs remain stored and are not deleted; they are partitioned by `balanceVersion`.
+- Leaderboard rows are built with DOM text nodes (no unsafe `innerHTML` interpolation of record fields).
+
+### Testing and deployment
+
+- Added progression-integrity suite (100 Supply collections, Protocol non-mutation, single-card increments, double-apply protection, Overclock-only-via-choice).
+- Added Protocol presentation contracts (Aegis absorb, rocket travel-before-damage, gunship player-origin, per-boss colliders).
+- Shipped with expanded test suite, clean typecheck/build, and zero npm audit findings.
+
+### Source
+
+- See the commit on `main` that introduces balance line `endless-2.0.3`.
 
 ## [2.0.2] — 2026-08-09 — Presentation and pickup reliability
 

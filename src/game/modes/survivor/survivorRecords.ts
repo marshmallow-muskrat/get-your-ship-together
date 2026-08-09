@@ -287,6 +287,17 @@ export function recordRun(summary: RunSummary): RecordResult {
   };
 }
 
-export function getHeroLeaderboard(heroId: HeroId): RunSummary[] {
+/**
+ * Default public leaderboard view for a hero: only runs on the current balance line.
+ * Older versions remain stored; pass `includeAll` to inspect archived partitions.
+ */
+export function getHeroLeaderboard(heroId: HeroId, includeAll = false): RunSummary[] {
+  const all = loadLeaderboards().heroes[heroId] ?? [];
+  if (includeAll) return all;
+  return all.filter((r) => r.balanceVersion === SURVIVOR_BALANCE_VERSION);
+}
+
+/** All stored runs for a hero including prior balance versions (archived). */
+export function getHeroLeaderboardArchive(heroId: HeroId): RunSummary[] {
   return loadLeaderboards().heroes[heroId] ?? [];
 }

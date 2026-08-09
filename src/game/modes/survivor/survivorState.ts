@@ -735,6 +735,68 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.player.shieldMax = 80;
     state.player.shieldTime = 60;
     state.player.invuln = 0;
+  } else if (fixture === 'survivor-rockets') {
+    state.time = 90;
+    state.player.invuln = 30;
+    state.weapons = []; // silence auto-weapons; Protocol rockets only
+    state.xpNext = 99999;
+    state.rocketProtocol.active = true;
+    state.rocketProtocol.remaining = 15;
+    state.rocketProtocol.fireCd = 0.05;
+    state.rocketProtocol.potency = 1.25;
+    state.protocolActive = [{ id: 'rocket-barrage', remaining: 15, potency: 1.25 }];
+    for (let i = 0; i < 8; i += 1) {
+      const e = emptyEnemy();
+      e.id = 9100 + i;
+      e.alive = true;
+      e.x = Math.sin(i) * 4;
+      e.z = 6 + Math.cos(i) * 3;
+      e.health = 60;
+      e.maxHealth = 60;
+      e.defId = 'basic';
+      e.role = 'basic';
+      e.xp = 0;
+      state.enemies.push(e);
+    }
+  } else if (fixture === 'survivor-gunship') {
+    state.time = 90;
+    state.player.invuln = 30;
+    state.weapons = [];
+    state.xpNext = 99999;
+    state.player.x = 0;
+    state.player.z = 0;
+    state.player.facingX = 0;
+    state.player.facingZ = 1;
+    for (let i = 0; i < 10; i += 1) {
+      const e = emptyEnemy();
+      e.id = 9000 + i;
+      e.alive = true;
+      e.x = (i - 4.5) * 1.5;
+      e.z = 8 + (i % 3);
+      e.health = 40;
+      e.maxHealth = 40;
+      e.defId = 'basic';
+      e.role = 'basic';
+      e.xp = 0;
+      state.enemies.push(e);
+    }
+    state.gunship = {
+      active: true,
+      t: 0,
+      duration: 0.55 + 4.6,
+      warnDuration: 0.55,
+      x0: -1.2,
+      z0: -1.2,
+      x1: 0,
+      z1: SURVIVOR.arenaHalf * 0.95,
+      fireCd: 0,
+      potency: 1,
+      x: -1.2,
+      z: -1.2,
+      facingX: 0,
+      facingZ: 1,
+      firing: false,
+    };
   } else if (fixture === 'survivor-boss') {
     // Just before first endless boss at 2:00 with a representative mid-run build
     state.time = SURVIVOR.bossInterval - 0.05;

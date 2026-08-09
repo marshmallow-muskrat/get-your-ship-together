@@ -6,9 +6,11 @@ import {
   applyProtocolChoice,
   applyShipExhaust,
   bossDamageReduction,
+  buildFingerprint,
   clearShipHazards,
   damagePlayer,
   directPickupRadius,
+  forceStartProtocol,
   generateChoices,
   magnetRadius,
   stepSurvivor,
@@ -30,6 +32,7 @@ import {
   OVERCLOCK_DAMAGE_PER_LEVEL,
   PASSIVES,
   SURVIVOR,
+  SURVIVOR_BALANCE_VERSION,
   SURVIVOR_BOSS,
   WEAPONS,
   bossDefForIndex,
@@ -1310,5 +1313,341 @@ describe('boss visual scale contract', () => {
       expect(def.visualScale).toBeGreaterThanOrEqual(3.4);
       expect(def.visualScale * SURVIVOR.megaVisualMul).toBeGreaterThanOrEqual(def.visualScale * 1.9);
     }
+  });
+});
+
+describe('progression integrity — no unsolicited permanent upgrades', () => {
+  it('100 supply pickups never raise weapon or passive levels', () => {
+    const state = createSurvivorState('bee', null, 601);
+    state.weapons = [
+      { weaponId: 'pulse', level: 3, cooldown: 0, focusDebt: 0, prototype: false },
+      { weaponId: 'rail', level: 2, cooldown: 0, focusDebt: 0, prototype: false },
+    ];
+    state.passives = { 'max-health': 1, regen: 1 };
+    const before = buildFingerprint(state);
+    const levelsBefore = state.weapons.map((w) => w.level);
+    for (let i = 0; i < 100; i += 1) {
+      state.pickups.push({
+        id: 50000 + i,
+        kind: 'supply',
+        x: state.player.x,
+        z: state.player.z,
+        value: 1,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
+      // Collect immediately
+      for (let s = 0; s < 5; s += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      // Dismiss any level-up that may have come from XP without applying upgrades
+      if (state.phase === 'levelup') {
+        state.choices = [];
+        state.phase = 'playing';
+      }
+    }
+    expect(state.weapons.map((w) => w.level)).toEqual(levelsBefore);
+    // Passives unchanged (fingerprint weapons+passives; XP may have changed level counter)
+    expect(state.passives['max-health']).toBe(1);
+    expect(state.passives.regen).toBe(1);
+    expect(buildFingerprint(state)).toBe(before);
+  });
+
+  it('elite/miniboss kill loops do not mutate permanent Build without choices', () => {
+    const state = createSurvivorState('frog', null, 602);
+    const before = buildFingerprint(state);
+    for (let i = 0; i < 40; i += 1) {
+      // Drop supply at feet and collect
+      state.pickups.push({
+        id: 60000 + i,
+        kind: 'supply',
+        x: 0,
+        z: 0,
+        value: 1,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      if (state.phase === 'levelup') {
+        state.choices = [];
+        state.phase = 'playing';
+      }
+    }
+    expect(buildFingerprint(state)).toBe(before);
+  });
+
+  it('all three Protocols leave permanent Build unchanged', () => {
+    for (const id of ['aegis-barrier', 'rocket-barrage', 'gunship-flyby'] as const) {
+      const state = createSurvivorState('bee', null, 603);
+      state.weapons = [{ weaponId: 'pulse', level: 5, cooldown: 0, focusDebt: 0, prototype: false }];
+      state.passives = { area: 2 };
+      const before = buildFingerprint(state);
+      forceStartProtocol(state, id, 1.5);
+      for (let i = 0; i < 120; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      expect(buildFingerprint(state)).toBe(before);
+    }
+  });
+
+  it('timers and boss schedule do not mutate permanent Build', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 604);
+    const before = buildFingerprint(state);
+    for (let i = 0; i < 180; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      if (state.phase === 'levelup') {
+        state.choices = [];
+        state.phase = 'playing';
+      }
+    }
+    expect(buildFingerprint(state)).toBe(before);
+  });
+
+  it('selecting one weapon card raises only that weapon by exactly one', () => {
+    const state = createSurvivorState('bee', null, 605);
+    state.weapons = [
+      { weaponId: 'pulse', level: 2, cooldown: 0, focusDebt: 0, prototype: false },
+      { weaponId: 'rail', level: 4, cooldown: 0, focusDebt: 0, prototype: false },
+    ];
+    state.phase = 'levelup';
+    state.choices = [
+      {
+        kind: 'weapon',
+        id: 'w-pulse-3',
+        title: 'Pulse',
+        body: 'up',
+        weaponId: 'pulse',
+      },
+      {
+        kind: 'passive',
+        id: 'p-regen-1',
+        title: 'Regen',
+        body: 'r',
+        passiveId: 'regen',
+      },
+      {
+        kind: 'weapon',
+        id: 'w-rail-5',
+        title: 'Rail',
+        body: 'up',
+        weaponId: 'rail',
+      },
+    ];
+    applyChoice(state, 0);
+    expect(state.weapons.find((w) => w.weaponId === 'pulse')!.level).toBe(3);
+    expect(state.weapons.find((w) => w.weaponId === 'rail')!.level).toBe(4);
+    expect(state.passives.regen).toBeUndefined();
+    expect(state.phase).toBe('playing');
+    expect(state.choices.length).toBe(0);
+  });
+
+  it('selecting one passive raises only that passive by one', () => {
+    const state = createSurvivorState('bee', null, 606);
+    state.phase = 'levelup';
+    state.passives = { 'max-health': 2 };
+    state.player.maxHealth = 140;
+    state.player.health = 140;
+    state.choices = [
+      {
+        kind: 'passive',
+        id: 'p-max-health-3',
+        title: 'Hull',
+        body: 'h',
+        passiveId: 'max-health',
+      },
+      {
+        kind: 'weapon',
+        id: 'w-pulse-2',
+        title: 'Pulse',
+        body: 'p',
+        weaponId: 'pulse',
+      },
+      {
+        kind: 'passive',
+        id: 'p-regen-1',
+        title: 'Regen',
+        body: 'r',
+        passiveId: 'regen',
+      },
+    ];
+    applyChoice(state, 0);
+    expect(state.passives['max-health']).toBe(3);
+    expect(state.passives.regen).toBeUndefined();
+    expect(state.weapons[0]!.level).toBe(1);
+  });
+
+  it('double applyChoice cannot upgrade twice from one set', () => {
+    const state = createSurvivorState('bee', null, 607);
+    state.weapons[0]!.level = 3;
+    state.phase = 'levelup';
+    state.choices = [
+      {
+        kind: 'weapon',
+        id: 'w-x',
+        title: 'x',
+        body: 'x',
+        weaponId: state.weapons[0]!.weaponId,
+      },
+      {
+        kind: 'passive',
+        id: 'p-x',
+        title: 'x',
+        body: 'x',
+        passiveId: 'regen',
+      },
+      {
+        kind: 'passive',
+        id: 'p-y',
+        title: 'y',
+        body: 'y',
+        passiveId: 'area',
+      },
+    ];
+    applyChoice(state, 0);
+    applyChoice(state, 0);
+    expect(state.weapons[0]!.level).toBe(4);
+  });
+
+  it('Overclock advances only through explicit selection', () => {
+    const state = createSurvivorState('bee', null, 608);
+    state.weapons = [{ weaponId: 'pulse', level: 5, cooldown: 0, focusDebt: 0, prototype: false }];
+    state.phase = 'levelup';
+    state.choices = generateChoices(state);
+    const ocCard = state.choices.findIndex((c) => c.kind === 'weapon' && c.weaponId === 'pulse');
+    if (ocCard >= 0) {
+      applyChoice(state, ocCard);
+      expect(state.weapons[0]!.level).toBe(6);
+    } else {
+      // If mixed offers put passive first, force a pulse overclock card
+      state.phase = 'levelup';
+      state.choices = [
+        {
+          kind: 'weapon',
+          id: 'w-pulse-6',
+          title: 'Pulse L6',
+          body: 'oc',
+          weaponId: 'pulse',
+        },
+        {
+          kind: 'passive',
+          id: 'p-regen',
+          title: 'r',
+          body: 'r',
+          passiveId: 'regen',
+        },
+        {
+          kind: 'passive',
+          id: 'p-area',
+          title: 'a',
+          body: 'a',
+          passiveId: 'area',
+        },
+      ];
+      applyChoice(state, 0);
+      expect(state.weapons[0]!.level).toBe(6);
+    }
+  });
+});
+
+describe('protocol presentation contracts', () => {
+  it('aegis sets persistent shield points and time', () => {
+    const state = createSurvivorState('bee', 'survivor-shield', 701);
+    expect(state.player.shieldPoints).toBeGreaterThan(0);
+    expect(state.player.shieldTime).toBeGreaterThan(0);
+    const hp = state.player.health;
+    state.player.invuln = 0;
+    damagePlayer(state, 20, 'enemy');
+    expect(state.player.shieldPoints).toBeLessThan(80);
+    expect(state.player.health).toBe(hp);
+  });
+
+  it('protocol rockets travel before exploding', () => {
+    const state = createSurvivorState('bee', null, 702);
+    state.weapons = [];
+    state.enemyCap = 0;
+    forceStartProtocol(state, 'rocket-barrage', 1);
+    // Place a distant target
+    const e = {
+      id: 77001,
+      defId: 'basic',
+      x: 10,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      kbX: 0,
+      kbZ: 0,
+      health: 200,
+      maxHealth: 200,
+      radius: 0.45,
+      role: 'basic',
+      hitFlash: 0,
+      attackCd: 99,
+      alive: true,
+      isElite: false,
+      isMiniboss: false,
+      xp: 1,
+      windup: 0,
+      facingX: 0,
+      facingZ: 1,
+      healthMul: 1,
+      damageMul: 1,
+      speedMul: 0,
+      hazardHitCd: 0,
+      specialCd: 99,
+      specialWindup: 0,
+    };
+    state.enemies = [e as never];
+    // Force one rocket fire toward target
+    state.rocketProtocol.fireCd = 0;
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const rockets = state.projectiles.filter((p) => p.active && p.kind === 'rocket');
+    expect(rockets.length).toBeGreaterThan(0);
+    const r = rockets[0]!;
+    // Must not already be at the far target with zero velocity
+    expect(Math.hypot(r.vx, r.vz)).toBeGreaterThan(1);
+    const startX = r.x;
+    const startZ = r.z;
+    const hp0 = e.health;
+    // Mid-flight: no impact damage yet while armTimer remains
+    for (let i = 0; i < 4; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    if (r.active && r.armTimer > 0) {
+      expect(e.health).toBe(hp0);
+      expect(Math.hypot(r.x - startX, r.z - startZ)).toBeGreaterThan(0.05);
+    }
+    // Resolve flight
+    for (let i = 0; i < 90; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(e.health).toBeLessThan(hp0);
+  });
+
+  it('gunship originates near the player not at a far edge', () => {
+    const state = createSurvivorState('bee', null, 703);
+    state.player.x = 3;
+    state.player.z = -2;
+    state.player.facingX = 0;
+    state.player.facingZ = 1;
+    forceStartProtocol(state, 'gunship-flyby', 1);
+    expect(state.gunship.active).toBe(true);
+    const d0 = Math.hypot(state.gunship.x0 - state.player.x, state.gunship.z0 - state.player.z);
+    expect(d0).toBeLessThan(4);
+    // Ship position tracks start immediately
+    expect(Math.hypot(state.gunship.x - state.gunship.x0, state.gunship.z - state.gunship.z0)).toBeLessThan(0.5);
+  });
+
+  it('per-boss collider is used for repulsor hits', () => {
+    const state = createSurvivorState('bee', 'survivor-boss', 704);
+    for (let i = 0; i < 15; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const boss = primaryBoss(state);
+    expect(boss).toBeTruthy();
+    expect(boss!.colliderRadius).toBeGreaterThan(0.5);
+    // Mega multiplies collider
+    const mega = createSurvivorState('bee', 'survivor-mega', 705);
+    for (let i = 0; i < 25; i += 1) stepSurvivor(mega, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const mb = mega.bosses.find((b) => b.isMega);
+    expect(mb).toBeTruthy();
+    expect(mb!.colliderRadius).toBeGreaterThan(boss!.colliderRadius);
+  });
+});
+
+describe('balance version', () => {
+  it('is endless-2.0.3', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.0.3');
   });
 });

@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.2';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.3';
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.08;
@@ -1061,6 +1061,8 @@ export type SurvivorFixture =
   | 'survivor-mega'
   | 'survivor-cache'
   | 'survivor-shield'
+  | 'survivor-rockets'
+  | 'survivor-gunship'
   | null;
 
 export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
@@ -1079,4 +1081,6 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-mega',
   'survivor-cache',
   'survivor-shield',
+  'survivor-rockets',
+  'survivor-gunship',
 ];

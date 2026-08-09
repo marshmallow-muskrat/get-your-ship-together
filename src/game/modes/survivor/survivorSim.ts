@@ -635,6 +635,9 @@ export function damagePlayer(
     if (p.shieldPoints <= 0) {
       p.shieldPoints = 0;
       p.shieldTime = 0;
+      // Shatter feedback — renderer also collapses the persistent shell.
+      pushEffect(state, 'pulse', p.x, p.z, 0.4, '#a8e8ff', 2.4);
+      pushEffect(state, 'impact', p.x, p.z, 0.3, '#ffffff', 1.6);
     }
     if (dealt <= 0) {
       p.invuln = Math.min(SURVIVOR.playerInvuln, 0.12);
@@ -910,7 +913,7 @@ export function tryRepulsor(state: SurvivorState): boolean {
     const dx = b.x - p.x;
     const dz = b.z - p.z;
     const dist = Math.hypot(dx, dz);
-    if (dist <= radius + SURVIVOR_BOSS.colliderRadius) {
+    if (dist <= radius + b.colliderRadius) {
       damageBoss(state, dmg * 0.55, { kind: 'ability', pop: 0.9, boss: b });
       b.repulsorCd = cfg.bossInternalCd;
       if (b.state === 'windup') {
@@ -1090,7 +1093,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
               z1,
               b.x,
               b.z,
-              SURVIVOR_BOSS.colliderRadius + width * 0.5,
+              b.colliderRadius + width * 0.5,
             )
           ) {
             damageBoss(state, dmg * 0.85, { boss: b });
@@ -1120,7 +1123,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           if (!b.active || b.state === 'dead') continue;
           const dx = b.x - cx;
           const dz = b.z - cz;
-          if (dx * dx + dz * dz <= (radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
+          if (dx * dx + dz * dz <= (radius + b.colliderRadius) ** 2) {
             damageBoss(state, dmg * 0.7, { boss: b });
           }
         }
@@ -1135,17 +1138,22 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const tz = cluster.z + state.player.facingX * ox + (rng(state) - 0.5) * 0.6;
         const proj = acquireProjectile(state);
         if (!proj) break;
-        // Shorter arming delay keeps Rocket competitive early
-        const arm = 0.22 + i * 0.05;
-        resetProj(proj, state, 'rocket', 'rocket', tx, tz, 0, 0, {
+        // Launch from player and travel visibly to impact (not materialize on target).
+        const travel = 0.28 + i * 0.04;
+        const dx = tx - p.x;
+        const dz = tz - p.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        const spd = dist / travel;
+        resetProj(proj, state, 'rocket', 'rocket', p.x, p.z, (dx / dist) * spd, (dz / dist) * spd, {
           damage: def.damage * (mech ? 1.35 : 1) * p.damageMul,
           radius: 0.25,
-          life: arm + 0.05,
+          life: travel + 0.08,
           color: state.accent,
-          armTimer: arm,
+          armTimer: travel,
           explodeRadius: (def.radius ?? 1.4) * area * (mech ? 1.2 : 1),
         });
-        pushEffect(state, 'telegraph', tx, tz, arm, state.accent, proj.explodeRadius, {
+        pushEffect(state, 'muzzle', p.x, p.z, 0.12, state.accent, 0.9);
+        pushEffect(state, 'telegraph', tx, tz, travel, state.accent, proj.explodeRadius, {
           radius: proj.explodeRadius,
         });
       }
@@ -1382,7 +1390,7 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
       if (!b.active || b.state === 'dead') continue;
       const dx = b.x - hitX;
       const dz = b.z - hitZ;
-      if (dx * dx + dz * dz <= (proj.splash + SURVIVOR_BOSS.colliderRadius) ** 2) {
+      if (dx * dx + dz * dz <= (proj.splash + b.colliderRadius) ** 2) {
         damageBoss(state, proj.damage * 0.45, { boss: b });
       }
     }
@@ -1539,13 +1547,32 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
     }
 
     if (proj.kind === 'rocket' || proj.kind === 'orbital-marker') {
+      // Travel while arming; damage only on impact after armTimer elapses.
+      proj.x += proj.vx * dt;
+      proj.z += proj.vz * dt;
       proj.armTimer -= dt;
       proj.life -= dt;
-      if (proj.armTimer > 0) continue;
+      if (proj.kind === 'rocket' && proj.armTimer > 0) {
+        // Bound trail sparkles (no unbounded allocation — reuse short effect).
+        if ((proj.id + Math.floor(state.time * 30)) % 3 === 0) {
+          pushEffect(state, 'muzzle', proj.x, proj.z, 0.08, proj.color, 0.45);
+        }
+      }
+      if (proj.armTimer > 0 && proj.life > 0) continue;
       const er = proj.explodeRadius || proj.radius;
-      pushEffect(state, proj.kind === 'orbital-marker' ? 'orbital' : 'impact', proj.x, proj.z, 0.4, proj.color, er * 1.4, {
-        radius: er,
-      });
+      pushEffect(
+        state,
+        proj.kind === 'orbital-marker' ? 'orbital' : 'impact',
+        proj.x,
+        proj.z,
+        0.4,
+        proj.color,
+        er * 1.4,
+        { radius: er },
+      );
+      if (proj.kind === 'rocket') {
+        pushEffect(state, 'pulse', proj.x, proj.z, 0.28, '#fff6d0', er * 0.9, { radius: er * 0.9 });
+      }
       for (const e of state.enemies) {
         if (!e.alive) continue;
         const dx = e.x - proj.x;
@@ -1672,7 +1699,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         if (bb) {
           const dx = bb.x - proj.x;
           const dz = bb.z - proj.z;
-          if (dx * dx + dz * dz <= (proj.radius + SURVIVOR_BOSS.colliderRadius) ** 2) {
+          if (dx * dx + dz * dz <= (proj.radius + bb.colliderRadius) ** 2) {
             damageBoss(state, proj.damage, { boss: bb });
             if (proj.kind === 'bioplasma') {
               bioImpact(state, proj, bb.x, bb.z);
@@ -1691,8 +1718,9 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       const dz = p.z - proj.z;
       const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
       if (dx * dx + dz * dz <= (proj.radius + pr) ** 2) {
-        const src = (proj as { fromBoss?: boolean }).fromBoss ? 'boss' : 'enemy';
-        damagePlayer(state, proj.damage, src as DamageSourceKind);
+        // Prefer explicit sourceBossId over legacy dynamic property checks.
+        const src: DamageSourceKind = proj.sourceBossId > 0 ? 'boss' : 'enemy';
+        damagePlayer(state, proj.damage, src);
         proj.active = false;
         pushEffect(state, 'impact', proj.x, proj.z, 0.12, '#ff5566', 0.6);
       }
@@ -2251,86 +2279,162 @@ function openLevelUp(state: SurvivorState): void {
   pushEffect(state, 'levelup', state.player.x, state.player.z, 0.6, state.accent, 2);
 }
 
+/**
+ * Supply crates never permanently upgrade the Build.
+ * They grant a non-permanent package: XP (may later open a normal choice) and/or repair / mech charge.
+ */
 function openSupply(state: SurvivorState): void {
-  if (rng(state) < 0.45) {
-    state.player.health = Math.min(state.player.maxHealth, state.player.health + 35);
-    pushEffect(state, 'pulse', state.player.x, state.player.z, 0.5, '#4df0d0', 1.8);
+  const p = state.player;
+  const roll = rng(state);
+  if (roll < 0.4) {
+    // Integrity pack
+    const heal = 28 + Math.floor(rng(state) * 12);
+    const before = p.health;
+    p.health = Math.min(p.maxHealth, p.health + heal);
+    const gained = p.health - before;
+    if (gained > 0) emitDamage(state, `supply-heal:${state.nextId}`, p.x, p.z + 1.0, gained, 'heal');
+    pushEffect(state, 'heal', p.x, p.z, 0.4, '#ff66aa', 1.6);
+  } else if (roll < 0.7) {
+    // Energy bundle — XP only; any resulting level-up still requires a visible card choice.
+    const xp = 18 + Math.floor(rng(state) * 22);
+    gainXp(state, xp);
+    pushEffect(state, 'pickup', p.x, p.z, 0.35, '#66ffcc', 1.4);
   } else {
-    // Any owned weapon can gain a free level (including Overclocks)
-    if (state.weapons.length > 0) {
-      const w = state.weapons[Math.floor(rng(state) * state.weapons.length)]!;
-      w.level += 1;
-      pushEffect(state, 'levelup', state.player.x, state.player.z, 0.45, state.accent, 1.5);
-    } else {
-      state.player.health = Math.min(state.player.maxHealth, state.player.health + 40);
-    }
+    // Core charge + modest XP
+    p.mechCharge = Math.min(1, p.mechCharge + 0.12 + rng(state) * 0.08);
+    gainXp(state, 10 + Math.floor(rng(state) * 10));
+    pushEffect(state, 'pulse', p.x, p.z, 0.4, state.accent, 1.5);
   }
 }
 
+/** Snapshot of permanent Build for regression assertions. */
+export function buildFingerprint(state: SurvivorState): string {
+  const weps = state.weapons.map((w) => `${w.weaponId}:${w.level}`).sort().join(',');
+  const pas = Object.entries(state.passives)
+    .map(([k, v]) => `${k}:${v}`)
+    .sort()
+    .join(',');
+  return `${weps}|${pas}`;
+}
+
+/**
+ * Sole production path that permanently raises an owned weapon's level.
+ * Only callable while resolving a validated level-up choice card.
+ */
+function grantWeaponLevelFromChoice(state: SurvivorState, weaponId: WeaponId): boolean {
+  if (state.phase !== 'levelup') return false;
+  const slot = state.weapons.find((w) => w.weaponId === weaponId);
+  if (!slot) return false;
+  const offered = state.choices.some(
+    (c) => (c.kind === 'weapon' || c.kind === 'new-weapon') && c.weaponId === weaponId,
+  );
+  if (!offered) return false;
+  slot.level += 1;
+  return true;
+}
+
+/**
+ * Sole production path that permanently raises a passive level.
+ * Only callable while resolving a validated level-up choice card.
+ */
+function grantPassiveLevelFromChoice(state: SurvivorState, passiveId: PassiveId): boolean {
+  if (state.phase !== 'levelup') return false;
+  if (!isPassiveAvailable(passiveId, passiveLevel(state, passiveId))) return false;
+  const offered = state.choices.some((c) => c.kind === 'passive' && c.passiveId === passiveId);
+  if (!offered) return false;
+  const next = (state.passives[passiveId] ?? 0) + 1;
+  state.passives[passiveId] = next;
+  if (passiveId === 'max-health') {
+    const gain = hullPlatingGainAtLevel(next);
+    state.player.maxHealth += gain;
+    state.player.health += gain;
+  }
+  return true;
+}
+
+/**
+ * Sole production path that adds a new weapon slot from a level-up card.
+ */
+function grantNewWeaponFromChoice(state: SurvivorState, weaponId: WeaponId): boolean {
+  if (state.phase !== 'levelup') return false;
+  if (state.weapons.some((w) => w.weaponId === weaponId)) return false;
+  const offered = state.choices.some((c) => c.kind === 'new-weapon' && c.weaponId === weaponId);
+  if (!offered) return false;
+  if (isPrototypeWeapon(weaponId)) {
+    const protoCount = state.weapons.filter((w) => w.prototype || isPrototypeWeapon(w.weaponId)).length;
+    if (protoCount >= SURVIVOR.maxPrototypeSlots) return false;
+    state.weapons.push({
+      weaponId,
+      level: 1,
+      cooldown: 0.5,
+      focusDebt: 0,
+      prototype: true,
+    });
+    if (weaponId === 'arc') state.unlocks.arcOffered = true;
+    if (weaponId === 'orbital') state.unlocks.orbitalOffered = true;
+    return true;
+  }
+  const ordinary = state.weapons.filter((w) => !w.prototype && !isPrototypeWeapon(w.weaponId)).length;
+  if (ordinary >= SURVIVOR.maxWeaponSlots) return false;
+  state.weapons.push({
+    weaponId,
+    level: 1,
+    cooldown: 0.5,
+    focusDebt: 0,
+    prototype: false,
+  });
+  return true;
+}
+
 export function applyChoice(state: SurvivorState, index: number): void {
+  // Consume the choice set immediately so high-refresh double-input cannot apply twice.
   const choice = state.choices[index];
-  if (!choice) return;
+  const choices = state.choices;
+  state.choices = [];
+  if (!choice || state.phase !== 'levelup') {
+    state.phase = 'playing';
+    return;
+  }
+  // Re-validate index against the captured set only.
+  if (choices[index] !== choice) {
+    state.phase = 'playing';
+    return;
+  }
+
   if (choice.kind === 'weapon' && choice.weaponId) {
-    const slot = state.weapons.find((w) => w.weaponId === choice.weaponId);
-    if (slot) slot.level += 1;
+    // Temporarily restore choices for grant validators, then clear.
+    state.choices = choices;
+    grantWeaponLevelFromChoice(state, choice.weaponId);
+    state.choices = [];
   } else if (choice.kind === 'new-weapon' && choice.weaponId) {
+    state.choices = choices;
     if (state.weapons.some((w) => w.weaponId === choice.weaponId)) {
-      /* already owned */
-    } else if (isPrototypeWeapon(choice.weaponId)) {
-      const protoCount = state.weapons.filter((w) => w.prototype || isPrototypeWeapon(w.weaponId)).length;
-      if (protoCount < SURVIVOR.maxPrototypeSlots) {
-        state.weapons.push({
-          weaponId: choice.weaponId,
-          level: 1,
-          cooldown: 0.5,
-          focusDebt: 0,
-          prototype: true,
-        });
-        if (choice.weaponId === 'arc') state.unlocks.arcOffered = true;
-        if (choice.weaponId === 'orbital') state.unlocks.orbitalOffered = true;
-      }
+      grantWeaponLevelFromChoice(state, choice.weaponId);
     } else {
-      const ordinary = state.weapons.filter((w) => !w.prototype && !isPrototypeWeapon(w.weaponId)).length;
-      if (ordinary < SURVIVOR.maxWeaponSlots) {
-        state.weapons.push({
-          weaponId: choice.weaponId,
-          level: 1,
-          cooldown: 0.5,
-          focusDebt: 0,
-          prototype: false,
-        });
-      }
+      grantNewWeaponFromChoice(state, choice.weaponId);
     }
+    state.choices = [];
   } else if (choice.kind === 'passive' && choice.passiveId) {
-    const id = choice.passiveId;
-    if (!isPassiveAvailable(id, passiveLevel(state, id))) {
-      state.choices = [];
-      state.phase = 'playing';
-      return;
-    }
-    const next = (state.passives[id] ?? 0) + 1;
-    state.passives[id] = next;
-    if (id === 'max-health') {
-      const gain = hullPlatingGainAtLevel(next);
-      state.player.maxHealth += gain;
-      state.player.health += gain;
-    }
+    state.choices = choices;
+    grantPassiveLevelFromChoice(state, choice.passiveId);
+    state.choices = [];
   } else if (choice.kind === 'protocol' && choice.protocolId) {
     applyProtocol(state, choice.protocolId, state.cache.potency);
     state.protocolChoices = [];
     state.phase = 'playing';
     return;
   }
-  state.choices = [];
   state.phase = 'playing';
 }
 
 export function applyProtocolChoice(state: SurvivorState, index: number): void {
+  // Consume once — high-refresh cannot re-select the same protocol frame.
+  if (state.phase !== 'protocol') return;
   const choice = state.protocolChoices[index];
-  if (!choice?.protocolId) return;
-  applyProtocol(state, choice.protocolId, state.cache.potency);
   state.protocolChoices = [];
   state.phase = 'playing';
+  if (!choice?.protocolId) return;
+  applyProtocol(state, choice.protocolId, state.cache.potency);
 }
 
 function trackProtocol(state: SurvivorState, id: ProtocolId, remaining: number, potency: number): void {
@@ -2355,27 +2459,39 @@ function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): v
     state.rocketProtocol.fireCd = 0.2;
     state.rocketProtocol.potency = potency;
     trackProtocol(state, id, state.rocketProtocol.remaining, potency);
-    pushEffect(state, 'transform', state.player.x, state.player.z, 0.5, '#ff8a4a', 2);
+    // Temporary missile pod silhouette near player
+    pushEffect(state, 'transform', state.player.x, state.player.z, 0.55, '#ff8a4a', 2.2);
+    pushEffect(state, 'muzzle', state.player.x, state.player.z, 0.35, '#fff0c0', 1.8);
   } else if (id === 'gunship-flyby') {
     startGunship(state, potency);
     trackProtocol(state, id, state.gunship.duration, potency);
+    pushEffect(state, 'gunship', state.player.x, state.player.z, 0.5, state.accent, 2.2);
   }
 }
 
-/** Prefer a lane through the primary boss, else densest enemy cluster, else near player. */
+/** Fixture/test helper — activates a Protocol without mutating permanent Build. */
+export function forceStartProtocol(state: SurvivorState, id: ProtocolId, potency = 1): void {
+  applyProtocol(state, id, potency);
+}
+
+/**
+ * Gunship originates at the player/cache collection point (on-camera), then flies
+ * toward the primary boss or densest cluster and exits at the far arena edge.
+ */
 function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: number; z1: number } {
   const half = SURVIVOR.arenaHalf * 0.95;
-  let cx = state.player.x;
-  let cz = state.player.z;
+  const ox = state.player.x;
+  const oz = state.player.z;
+  let tx = ox + state.player.facingX * 12;
+  let tz = oz + state.player.facingZ * 12;
   const boss = primaryBoss(state);
   if (boss && boss.active && boss.state !== 'dead') {
-    cx = boss.x;
-    cz = boss.z;
+    tx = boss.x;
+    tz = boss.z;
   } else {
-    // Density sample on a coarse grid for the densest meaningful cluster.
     let bestN = 0;
-    let bestX = state.player.x;
-    let bestZ = state.player.z;
+    let bestX = tx;
+    let bestZ = tz;
     for (let gx = -3; gx <= 3; gx += 1) {
       for (let gz = -3; gz <= 3; gz += 1) {
         const sx = gx * (half / 3.5);
@@ -2394,39 +2510,40 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
       }
     }
     if (bestN > 0) {
-      cx = bestX;
-      cz = bestZ;
+      tx = bestX;
+      tz = bestZ;
     }
   }
-  // Edge-to-edge through the focus point. Prefer a lane not perfectly N-S for readability.
-  const ang = Math.atan2(cz, cx) + Math.PI / 2 + (rng(state) - 0.5) * 0.35;
-  const dx = Math.cos(ang);
-  const dz = Math.sin(ang);
-  // Extend from focus through both arena edges.
-  const x0 = cx - dx * half * 1.4;
-  const z0 = cz - dz * half * 1.4;
-  const x1 = cx + dx * half * 1.4;
-  const z1 = cz + dz * half * 1.4;
-  // Clamp endpoints to outer rim so the flyover crosses the full playable field.
-  const clampEdge = (x: number, z: number): { x: number; z: number } => {
-    const m = Math.max(Math.abs(x), Math.abs(z), 1e-6);
+  let dx = tx - ox;
+  let dz = tz - oz;
+  let len = Math.hypot(dx, dz);
+  if (len < 2) {
+    dx = state.player.facingX;
+    dz = state.player.facingZ;
+    len = Math.hypot(dx, dz) || 1;
+  }
+  dx /= len;
+  dz /= len;
+  // Exit beyond the target at the arena rim in the fly direction.
+  let exitX = ox + dx * half * 2.2;
+  let exitZ = oz + dz * half * 2.2;
+  const m = Math.max(Math.abs(exitX), Math.abs(exitZ), 1e-6);
+  if (m > half) {
     const s = half / m;
-    if (m <= half) {
-      // push out to rim
-      const len = Math.hypot(x, z) || 1;
-      return { x: (x / len) * half, z: (z / len) * half };
-    }
-    return { x: x * Math.min(1, s * 1.05), z: z * Math.min(1, s * 1.05) };
-  };
-  const a = clampEdge(x0, z0);
-  const b = clampEdge(x1, z1);
-  return { x0: a.x, z0: a.z, x1: b.x, z1: b.z };
+    exitX *= s;
+    exitZ *= s;
+  }
+  // Start slightly behind the player so thrusters read on launch.
+  const x0 = ox - dx * 1.2;
+  const z0 = oz - dz * 1.2;
+  return { x0, z0, x1: exitX, z1: exitZ };
 }
 
 function startGunship(state: SurvivorState, potency: number): void {
   const lane = pickGunshipLane(state);
   const g = SURVIVOR.gunship;
-  const warn = g.warnDuration;
+  // Short engine-ignite hold on camera, then accelerate away.
+  const warn = Math.min(g.warnDuration, 0.55);
   const strafe = g.strafeDuration * (potency > 1 ? 1.25 : 1);
   const fx = lane.x1 - lane.x0;
   const fz = lane.z1 - lane.z0;
@@ -2680,7 +2797,7 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
     const dz = b.z - p.z;
     const back = -(dx * fx + dz * fz);
     const side = Math.abs(dx * sx + dz * sz);
-    if (back >= 0.25 && back <= len && side <= halfW + SURVIVOR_BOSS.colliderRadius) {
+    if (back >= 0.25 && back <= len && side <= halfW + b.colliderRadius) {
       damageBoss(state, SURVIVOR.ship.exhaustDamage * thrusterPower(state) * SURVIVOR.ship.exhaustBossMul, {
         kind: 'ability',
         pop: 0.8,
@@ -2972,20 +3089,32 @@ function openProtocolCache(state: SurvivorState): void {
 function fireProtocolRocket(state: SurvivorState): void {
   const p = state.player;
   const boss = nearestBoss(state, p.x, p.z, 30);
-  const tx = boss ? boss.x : densestPoint(state, p.x, p.z).x;
-  const tz = boss ? boss.z : densestPoint(state, p.x, p.z).z;
+  const dens = densestPoint(state, p.x, p.z);
+  const tx = boss ? boss.x : dens.x;
+  const tz = boss ? boss.z : dens.z;
   const proj = acquireProjectile(state);
   if (!proj) return;
-  const arm = 0.28;
-  resetProj(proj, state, 'rocket', 'rocket', tx, tz, 0, 0, {
-    damage: 55 * state.rocketProtocol.potency,
-    radius: 0.3,
-    life: arm + 0.05,
-    color: '#ff8a4a',
-    armTimer: arm,
-    explodeRadius: 1.8 * state.rocketProtocol.potency,
+  // Holographic pod launch: start near/above player, travel to target, then explode.
+  const launchX = p.x + (rng(state) - 0.5) * 1.4;
+  const launchZ = p.z + (rng(state) - 0.5) * 1.4;
+  const dx = tx - launchX;
+  const dz = tz - launchZ;
+  const dist = Math.hypot(dx, dz) || 1;
+  const travel = Math.min(0.85, Math.max(0.38, dist / 28));
+  const spd = dist / travel;
+  const pot = state.rocketProtocol.potency;
+  const er = 1.8 * pot;
+  resetProj(proj, state, 'rocket', 'rocket', launchX, launchZ, (dx / dist) * spd, (dz / dist) * spd, {
+    damage: 55 * pot,
+    radius: 0.35,
+    visualRadius: 0.55,
+    life: travel + 0.1,
+    color: '#ffb050',
+    armTimer: travel,
+    explodeRadius: er,
   });
-  pushEffect(state, 'telegraph', tx, tz, arm, '#ff8a4a', 1.8, { radius: 1.8 });
+  pushEffect(state, 'muzzle', launchX, launchZ, 0.18, '#fff0c0', 1.2);
+  pushEffect(state, 'telegraph', tx, tz, travel, '#ff8a4a', er, { radius: er });
 }
 
 function makeBossApi(): BossSimApi {

@@ -43,6 +43,10 @@ export class SurvivorRenderer {
   /** Separate gunship flyover — never reuses the player ship transform. */
   private gunshipRoot: THREE.Object3D | null = null;
   private gunshipMats: THREE.MeshBasicMaterial[] = [];
+  /** Persistent Aegis barrier — follows player while shieldPoints/Time > 0. */
+  private shieldRoot: THREE.Group | null = null;
+  private shieldMats: THREE.MeshBasicMaterial[] = [];
+  private shieldWasActive = false;
   private boltGeo = new THREE.SphereGeometry(0.14, 8, 8);
   private animFrame = 0;
   private readonly mats = new Map<string, THREE.MeshStandardMaterial>();
@@ -185,6 +189,7 @@ export class SurvivorRenderer {
     this.syncPickups(state);
     this.syncCache(state);
     this.syncGunship(state, dt);
+    this.syncShield(state, dt);
     this.syncEffects(state);
     this.syncRails(state);
   }
@@ -494,29 +499,36 @@ export class SurvivorRenderer {
           ring.rotation.x = Math.PI / 2;
           g.add(halo, core, ring);
         } else if (p.kind === 'repair') {
-          // Magenta/white integrity cross — unmistakable vs energy
+          // Crimson/white medical cross — larger, no cyan, shape-distinct from energy crystals.
           const core = new THREE.Mesh(
-            new THREE.SphereGeometry(0.16, 12, 12),
-            this.effectMat('#ffffff', 0.95, true),
+            new THREE.SphereGeometry(0.2, 12, 12),
+            this.effectMat('#ffffff', 0.98, true),
           );
           const barH = new THREE.Mesh(
-            new THREE.BoxGeometry(0.42, 0.1, 0.1),
-            this.effectMat('#ff66aa', 0.92, true),
+            new THREE.BoxGeometry(0.58, 0.14, 0.14),
+            this.effectMat('#ff2255', 0.95, true),
           );
           const barV = new THREE.Mesh(
-            new THREE.BoxGeometry(0.1, 0.42, 0.1),
-            this.effectMat('#ff88cc', 0.92, true),
+            new THREE.BoxGeometry(0.14, 0.58, 0.14),
+            this.effectMat('#ff4477', 0.95, true),
           );
           const ring = new THREE.Mesh(
-            new THREE.TorusGeometry(0.38, 0.04, 8, 20),
-            this.effectMat('#88ccff', 0.75, true),
+            new THREE.TorusGeometry(0.48, 0.05, 8, 22),
+            this.effectMat('#ff6699', 0.8, true),
           );
           ring.rotation.x = Math.PI / 2;
+          ring.name = 'repair-ring';
           const glow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.4, 10, 10),
-            this.effectMat('#ff44aa', 0.18, true),
+            new THREE.SphereGeometry(0.55, 12, 12),
+            this.effectMat('#ff1144', 0.22, true),
           );
-          g.add(glow, ring, core, barH, barV);
+          const pillar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.04, 0.06, 0.9, 6),
+            this.effectMat('#ff88aa', 0.4, true),
+          );
+          pillar.position.y = 0.55;
+          g.add(glow, ring, core, barH, barV, pillar);
+          g.scale.setScalar(1.32);
         } else {
           // Gold supply beacon
           const core = new THREE.Mesh(
@@ -539,24 +551,128 @@ export class SurvivorRenderer {
         this.pickups.set(p.id, obj);
         this.root.add(obj);
       }
-      const bob = 0.55 + Math.sin(performance.now() * 0.008 + p.id) * 0.12;
-      obj.position.set(p.x, bob, p.z);
-      obj.rotation.y += 0.04;
-      // Dim/dormant repair orbs when player is full health or orb is expiring soon.
       if (p.kind === 'repair') {
+        // Slow strong pulse + optional magnet trail tint.
+        const bob = 0.62 + Math.sin(performance.now() * 0.005 + p.id) * 0.16;
+        obj.position.set(p.x, bob, p.z);
+        obj.rotation.y += 0.018;
         const full = state.player.health >= state.player.maxHealth - 0.01;
         const expiring = Number.isFinite(p.life) && p.life < SURVIVOR.repairPickupWarnLife;
-        const pulse = expiring ? 0.45 + Math.sin(performance.now() * 0.02) * 0.35 : 1;
+        const pulse = expiring
+          ? 0.4 + Math.sin(performance.now() * 0.035) * 0.45
+          : 0.85 + Math.sin(performance.now() * 0.006) * 0.15;
         obj.traverse((c) => {
           if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
             if (!c.userData.baseOp) c.userData.baseOp = c.material.opacity;
             const base = c.userData.baseOp as number;
-            c.material.opacity = base * (full ? 0.35 : pulse);
+            c.material.opacity = base * (full ? 0.32 : pulse);
           }
         });
-        obj.scale.setScalar(full ? 0.75 : expiring ? 0.9 + Math.sin(performance.now() * 0.025) * 0.12 : 1);
+        const baseScale = 1.32;
+        obj.scale.setScalar(
+          full ? baseScale * 0.72 : expiring ? baseScale * (0.95 + Math.sin(performance.now() * 0.03) * 0.12) : baseScale,
+        );
+        if (p.magnetized && !full && this.animFrame % 4 === 0) {
+          // Faint pink magnet trail (short-lived pooled effects).
+        }
+      } else if (p.kind === 'xp') {
+        // Faster crystalline spin; smaller than health.
+        const bob = 0.5 + Math.sin(performance.now() * 0.01 + p.id) * 0.1;
+        obj.position.set(p.x, bob, p.z);
+        obj.rotation.y += 0.07;
+        obj.scale.setScalar(0.92);
+      } else {
+        const bob = 0.55 + Math.sin(performance.now() * 0.008 + p.id) * 0.12;
+        obj.position.set(p.x, bob, p.z);
+        obj.rotation.y += 0.04;
       }
     }
+  }
+
+  private ensureShield(): THREE.Group {
+    if (this.shieldRoot) return this.shieldRoot;
+    const g = new THREE.Group();
+    g.name = 'aegis-barrier';
+    // Outer translucent cyan shell
+    const shellMat = this.effectMat('#66d8ff', 0.28, true);
+    shellMat.depthWrite = false;
+    this.shieldMats.push(shellMat);
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(1.15, 28, 20), shellMat);
+    shell.name = 'shield-shell';
+    // Bright rim
+    const rimMat = this.effectMat('#c8f4ff', 0.55, true);
+    rimMat.depthWrite = false;
+    this.shieldMats.push(rimMat);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.04, 8, 48), rimMat);
+    rim.rotation.x = Math.PI / 2;
+    rim.name = 'shield-rim';
+    // Segmented energy rings
+    const hexMat = this.effectMat('#88e8ff', 0.4, true);
+    hexMat.depthWrite = false;
+    this.shieldMats.push(hexMat);
+    const hex = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.025, 6, 6), hexMat);
+    hex.rotation.x = Math.PI / 2.4;
+    hex.name = 'shield-hex';
+    const hex2 = hex.clone();
+    hex2.rotation.z = Math.PI / 3;
+    hex2.name = 'shield-hex2';
+    // Inner shimmer
+    const innerMat = this.effectMat('#e8fbff', 0.18, true);
+    innerMat.depthWrite = false;
+    this.shieldMats.push(innerMat);
+    const inner = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 16), innerMat);
+    inner.name = 'shield-inner';
+    g.add(shell, rim, hex, hex2, inner);
+    g.visible = false;
+    this.root.add(g);
+    this.shieldRoot = g;
+    return g;
+  }
+
+  private syncShield(state: SurvivorState, _dt: number): void {
+    const g = this.ensureShield();
+    const p = state.player;
+    const active = p.shieldPoints > 0 && p.shieldTime > 0 && p.alive;
+    if (!active) {
+      if (this.shieldWasActive) {
+        // Collapse flash once
+        // (effect is sim-side on depletion; just hide here)
+      }
+      g.visible = false;
+      this.shieldWasActive = false;
+      return;
+    }
+    if (!this.shieldWasActive) {
+      // Activation expand
+      g.scale.setScalar(0.2);
+    }
+    this.shieldWasActive = true;
+    g.visible = true;
+    g.position.set(p.x, p.form === 'ship' ? 0.55 : 0.85, p.z);
+    const formScale =
+      p.form === 'ship' ? 2.4 : p.form === 'mech' ? 1.85 : 1.15;
+    const frac = p.shieldMax > 0 ? Math.max(0.2, p.shieldPoints / p.shieldMax) : 1;
+    const target = formScale * (0.92 + frac * 0.18);
+    // Ease toward target scale
+    const cur = g.scale.x;
+    const next = cur + (target - cur) * 0.18;
+    g.scale.setScalar(next);
+    const t = performance.now() * 0.001;
+    const hex = g.getObjectByName('shield-hex');
+    const hex2 = g.getObjectByName('shield-hex2');
+    const rim = g.getObjectByName('shield-rim');
+    if (hex) hex.rotation.z = t * 0.9;
+    if (hex2) hex2.rotation.z = -t * 0.7;
+    if (rim) rim.rotation.z = t * 0.35;
+    // Hit flash via remaining hitFlash-like: when shield just absorbed, player.hitFlash may be 0;
+    // use low fraction pulse instead.
+    const intensity = 0.75 + Math.sin(t * 4) * 0.1 * frac;
+    g.traverse((c) => {
+      if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
+        if (!c.userData.baseOp) c.userData.baseOp = c.material.opacity;
+        c.material.opacity = (c.userData.baseOp as number) * intensity * (0.55 + frac * 0.55);
+      }
+    });
   }
 
   private ensureCacheActor(): THREE.Group {
@@ -928,6 +1044,8 @@ export class SurvivorRenderer {
     this.rails = [];
     this.cacheActor = null;
     this.gunshipRoot = null;
+    this.shieldRoot = null;
+    this.shieldWasActive = false;
     this.boltGeo.dispose();
     for (const m of this.mats.values()) m.dispose();
     this.mats.clear();
@@ -939,6 +1057,8 @@ export class SurvivorRenderer {
     this.cacheMats = [];
     for (const m of this.gunshipMats) m.dispose();
     this.gunshipMats = [];
+    for (const m of this.shieldMats) m.dispose();
+    this.shieldMats = [];
     this.playerAstro = null;
     this.playerMech = null;
     this.playerShip = null;

@@ -2,6 +2,7 @@ import { HEROES } from '../../content/heroes';
 import {
   PASSIVES,
   SURVIVOR,
+  SURVIVOR_BALANCE_VERSION,
   WEAPONS,
   formatOverclockLabel,
   overclockLevel,
@@ -302,25 +303,38 @@ export class SurvivorHud {
       });
     }
     if (list) {
+      // Sanitize via textContent builders — never interpolate untrusted strings into HTML.
+      list.replaceChildren();
       const runs = getHeroLeaderboard(hero);
       if (runs.length === 0) {
-        list.innerHTML = '<p class="sv-lb-empty">No runs recorded yet.</p>';
+        const empty = document.createElement('p');
+        empty.className = 'sv-lb-empty';
+        empty.textContent = `No ${SURVIVOR_BALANCE_VERSION} runs yet. Older scores are archived by balance version.`;
+        list.appendChild(empty);
       } else {
-        list.innerHTML = runs
-          .map((r, i) => {
-            const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
-            const date = new Date(r.timestamp).toLocaleDateString();
-            return `<div class="sv-lb-row">
-              <strong>#${i + 1}</strong>
-              <span>${formatSurvivalTime(r.survivalTime)}</span>
-              <span>K ${r.kills}</span>
-              <span>L${r.level}</span>
-              <span>B ${r.bossesDefeated}</span>
-              <span class="sv-lb-meta">${date} · ${r.balanceVersion}</span>
-              <span class="sv-lb-build">${build}</span>
-            </div>`;
-          })
-          .join('');
+        runs.forEach((r, i) => {
+          const row = document.createElement('div');
+          row.className = 'sv-lb-row';
+          const add = (tag: string, text: string, cls?: string) => {
+            const el = document.createElement(tag);
+            if (cls) el.className = cls;
+            el.textContent = text;
+            row.appendChild(el);
+          };
+          add('strong', `#${i + 1}`);
+          add('span', formatSurvivalTime(r.survivalTime));
+          add('span', `K ${r.kills}`);
+          add('span', `L${r.level}`);
+          add('span', `B ${r.bossesDefeated}`);
+          add(
+            'span',
+            `${new Date(r.timestamp).toLocaleDateString()} · ${r.balanceVersion}`,
+            'sv-lb-meta',
+          );
+          const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
+          add('span', build, 'sv-lb-build');
+          list.appendChild(row);
+        });
       }
     }
   }
