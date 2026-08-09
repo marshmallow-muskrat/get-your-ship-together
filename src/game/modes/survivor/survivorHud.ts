@@ -764,6 +764,7 @@ export class SurvivorHud {
     if (!modal) return;
     const open = state.phase === 'protocol';
     modal.classList.toggle('hidden', !open);
+    modal.classList.toggle('mega-protocol', open && state.cache.mega);
     if (!open) {
       this.lastProtocolKey = '';
       return;
@@ -776,8 +777,8 @@ export class SurvivorHud {
     box.innerHTML = state.protocolChoices
       .map(
         (c, i) =>
-          `<button type="button" class="sv-choice protocol" data-i="${i}">
-            <span class="eyebrow">PROTOCOL · ${i + 1}</span>
+          `<button type="button" class="sv-choice protocol${state.cache.mega ? ' mega-protocol' : ''}" data-i="${i}">
+            <span class="eyebrow">${state.cache.mega ? 'MEGA PROTOCOL' : 'PROTOCOL'} · ${i + 1}</span>
             <strong>${c.title}</strong>
             <small>${c.body}</small>
           </button>`,

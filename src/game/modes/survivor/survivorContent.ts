@@ -63,7 +63,7 @@ export const SURVIVOR = {
    * 2:00 boss survives ~18–25s for a representative astronaut build and ~10–15s
    * with Mech, instead of the ~2s deletion the 2,200 value produced.
    */
-  firstBossBaseHealth: 5600,
+  firstBossBaseHealth: 4700,
   arenaHalf: 32, // 64×64 playable
   cameraHalf: 12,
   actorScale: {
@@ -222,6 +222,9 @@ export const SURVIVOR = {
     /** The run opens with Mech unavailable; first readiness is one full cooldown in. */
     initialCooldown: 45,
     damageTakenMul: 0.65,
+    weaponDamageMul: 1.35,
+    weaponCadenceMul: 1.15,
+    weaponAreaMul: 1.15,
   },
   /**
    * Elites are rare, unmistakable and durable.
@@ -254,6 +257,25 @@ export const SURVIVOR = {
     pulsePush: 13.0,
     pulseElitePushMul: 0.45,
     pulseMinibossPushMul: 0.2,
+  },
+  megaProtocol: {
+    titanDuration: 25,
+    titanDamageMul: 1.35,
+    titanAreaMul: 1.35,
+    titanDamageTakenMul: 0.72,
+    fleetPasses: 3,
+    fleetWarn: 0.8,
+    fleetTravel: 1.65,
+    fleetGap: 0.55,
+    fleetLaneHalfWidth: 4.6,
+    fleetMinibossFraction: 0.9,
+    fleetBossFraction: 0.06,
+    fleetMegaFraction: 0.03,
+    singularityDuration: 5.5,
+    singularityRadius: 16,
+    singularityTick: 0.25,
+    singularityDamage: 34,
+    singularityBossFraction: 0.055,
   },
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
@@ -1430,20 +1452,31 @@ export interface BossDifficulty {
   summonAdd: number;
 }
 
-/** Boss index n begins at 1. */
 /**
- * Quadratic regular boss HP growth (replaces the 1.55^n exponential wall).
+ * Authored boss-health anchors, followed by an accelerating endless tail.
  *
- * Flattened for endless-2.3.0. The first boss's base health nearly quadrupled to fix
- * two-second deletion, so keeping the old 0.65k + 0.10k² slope on top of it would have
- * rebuilt the impossible late wall this curve was written to remove. The reshaped
- * slope keeps later regular bosses in the 25–40s band against a build that has kept
- * pace, without multiplying every boss by the same factor as the first.
+ * One quadratic could not keep the opening boss relevant, boss 5 inside its Mega band,
+ * and boss 10 below a 90-second slog after the final weapon retune. These measured anchors
+ * satisfy those distinct beats; the post-20 acceleration still guarantees eventual defeat.
  */
 export function bossHealthMulFor(index: number): number {
   const n = Math.max(1, Math.floor(index));
-  const k = n - 1;
-  return 1 + 0.72 * k + 0.012 * k * k;
+  const anchors: ReadonlyArray<readonly [number, number]> = [
+    [1, 1],
+    [3, 2.5],
+    [5, 4.1],
+    [10, 6.5],
+    [15, 9.2],
+    [20, 12.5],
+  ];
+  for (let i = 0; i < anchors.length - 1; i += 1) {
+    const [x0, y0] = anchors[i]!;
+    const [x1, y1] = anchors[i + 1]!;
+    if (n <= x1) return y0 + ((n - x0) / (x1 - x0)) * (y1 - y0);
+  }
+  // Beyond forty minutes the curve accelerates so additive Overclocks cannot win forever.
+  const k = n - 20;
+  return 12.5 + 0.76 * k + 0.035 * k * k;
 }
 
 export function isMegaBossIndex(index: number): boolean {
@@ -1577,7 +1610,13 @@ export const TEMP_BUFFS: TempBuffDef[] = [
   { id: 'thruster-surge', title: 'Thruster Surge', body: 'Temporary move-speed boost.' },
 ];
 
-export type ProtocolId = 'aegis-barrier' | 'gunship-flyby' | 'gravitic-recall';
+export type ProtocolId =
+  | 'aegis-barrier'
+  | 'gunship-flyby'
+  | 'gravitic-recall'
+  | 'titan-protocol'
+  | 'fleet-annihilation'
+  | 'singularity-event';
 
 export interface ProtocolDef {
   id: ProtocolId;
@@ -1604,6 +1643,28 @@ export const PROTOCOLS: ProtocolDef[] = [
     title: 'Gravitic Recall',
     body: 'Pull all energy on the arena to you over ~1.2s.',
     duration: 1.4,
+  },
+];
+
+/** Mega Caches are a separate reward tier and never reuse ordinary Cache choices. */
+export const MEGA_PROTOCOLS: ProtocolDef[] = [
+  {
+    id: 'titan-protocol',
+    title: 'Titan Protocol',
+    body: 'Deploy an enhanced Mech for 25s without consuming or resetting Mech Overdrive.',
+    duration: 25,
+  },
+  {
+    id: 'fleet-annihilation',
+    title: 'Fleet Annihilation',
+    body: 'Call three intersecting gunship passes that erase ordinary enemies and maul larger threats.',
+    duration: 7,
+  },
+  {
+    id: 'singularity-event',
+    title: 'Singularity Event',
+    body: 'Create a crushing anomaly that recalls all current Energy and collapses the horde.',
+    duration: 5.5,
   },
 ];
 
@@ -1659,6 +1720,7 @@ export type SurvivorFixture =
   | 'survivor-arc'
   | 'survivor-orbital'
   | 'survivor-mega'
+  | 'survivor-mega-cache'
   | 'survivor-cache'
   | 'survivor-shield'
   | 'survivor-recall'
@@ -1680,6 +1742,7 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-arc',
   'survivor-orbital',
   'survivor-mega',
+  'survivor-mega-cache',
   'survivor-cache',
   'survivor-shield',
   'survivor-recall',

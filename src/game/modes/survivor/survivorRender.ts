@@ -34,6 +34,7 @@ export class SurvivorRenderer {
   private heroShipUrl: string | null = null;
   private enemies = new Map<number, ActorVis>();
   private bosses = new Map<number, ActorVis>();
+  private bossPose = new Map<number, { x: number; z: number }>();
   private projectiles = new Map<number, THREE.Mesh>();
   private pickups = new Map<number, THREE.Object3D>();
   private hazards = new Map<number, THREE.Object3D>();
@@ -61,6 +62,10 @@ export class SurvivorRenderer {
   private shieldMats: THREE.MeshBasicMaterial[] = [];
   private shieldWasActive = false;
   private boltGeo = new THREE.SphereGeometry(0.14, 8, 8);
+  private eliteShellGeo = new THREE.SphereGeometry(1.05, 16, 12);
+  private eliteRingGeo = new THREE.TorusGeometry(0.9, 0.055, 8, 30);
+  private eliteBarGeo = new THREE.PlaneGeometry(1.7, 0.16);
+  private eliteFillGeo = new THREE.PlaneGeometry(1.62, 0.1);
   private animFrame = 0;
   private readonly mats = new Map<string, THREE.MeshStandardMaterial>();
   private readonly basicMats = new Map<string, THREE.MeshBasicMaterial>();
@@ -308,6 +313,13 @@ export class SurvivorRenderer {
         this.enemies.delete(id);
       }
     }
+    const visibleEliteBars = new Set(
+      state.enemies
+        .filter((e) => e.alive && e.isElite && Math.hypot(e.x - state.player.x, e.z - state.player.z) <= SURVIVOR.elite.barVisibleRange)
+        .sort((a, b) => Math.hypot(a.x - state.player.x, a.z - state.player.z) - Math.hypot(b.x - state.player.x, b.z - state.player.z))
+        .slice(0, SURVIVOR.elite.maxVisibleBars)
+        .map((e) => e.id),
+    );
     let i = 0;
     for (const e of state.enemies) {
       if (!e.alive) continue;
@@ -340,6 +352,7 @@ export class SurvivorRenderer {
         });
         this.enemies.set(e.id, vis);
         this.root.add(vis.root);
+        if (e.isElite) this.addElitePresentation(vis);
       }
       const scale = e.isMiniboss
         ? SURVIVOR.actorScale.miniboss
@@ -355,6 +368,60 @@ export class SurvivorRenderer {
         vis.animator.update(dt * (e.isElite || e.isMiniboss ? 1 : 1.15));
       }
       this.flash(vis, e.hitFlash, e.specialWindup > 0);
+      if (e.isElite) this.updateElitePresentation(vis, e.health / Math.max(1, e.maxHealth), visibleEliteBars.has(e.id));
+    }
+  }
+
+  private addElitePresentation(vis: ActorVis): void {
+    if (vis.root.getObjectByName('elite-presentation')) return;
+    const fx = new THREE.Group();
+    fx.name = 'elite-presentation';
+    const shell = new THREE.Mesh(
+      this.eliteShellGeo,
+      this.basic('#ffb24a', 0.16, true),
+    );
+    shell.position.y = 1.05;
+    shell.scale.set(1, 1.35, 1);
+    shell.name = 'elite-shell';
+    const ring = new THREE.Mesh(
+      this.eliteRingGeo,
+      this.basic('#ffd46a', 0.72, true),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.12;
+    ring.name = 'elite-ring';
+    const bar = new THREE.Group();
+    bar.name = 'elite-health';
+    bar.position.set(0, 2.45, 0);
+    const bg = new THREE.Mesh(this.eliteBarGeo, this.basic('#170d24', 0.85));
+    bg.rotation.x = -Math.PI / 8;
+    const fill = new THREE.Mesh(this.eliteFillGeo, this.basic('#ffb24a', 0.95, true));
+    fill.position.z = 0.015;
+    fill.rotation.x = -Math.PI / 8;
+    fill.name = 'elite-health-fill';
+    bar.add(bg, fill);
+    fx.add(shell, ring, bar);
+    vis.root.add(fx);
+  }
+
+  private updateElitePresentation(vis: ActorVis, health: number, showBar: boolean): void {
+    const fx = vis.root.getObjectByName('elite-presentation');
+    if (!fx) return;
+    const t = performance.now() * 0.001;
+    const ring = fx.getObjectByName('elite-ring');
+    if (ring) ring.rotation.z = t * 1.25;
+    const shell = fx.getObjectByName('elite-shell');
+    if (shell) {
+      const pulse = 0.96 + Math.sin(t * 4.5) * 0.05;
+      shell.scale.set(pulse, pulse * 1.35, pulse);
+    }
+    const bar = fx.getObjectByName('elite-health');
+    if (bar) bar.visible = showBar;
+    const fill = fx.getObjectByName('elite-health-fill');
+    if (fill) {
+      const frac = Math.max(0, Math.min(1, health));
+      fill.scale.x = frac;
+      fill.position.x = -(1 - frac) * 0.81;
     }
   }
 
@@ -366,6 +433,7 @@ export class SurvivorRenderer {
       if (!aliveIds.has(id)) {
         this.root.remove(vis.root);
         this.bosses.delete(id);
+        this.bossPose.delete(id);
       }
     }
     for (const b of state.bosses) {
@@ -414,12 +482,16 @@ export class SurvivorRenderer {
       // CRITICAL: apply simulation position, facing, and visualScale.
       // Without place(), bosses animate at world origin at native GLTF size.
       const scale = b.visualScale > 0.1 ? b.visualScale : def.visualScale * (b.isMega ? SURVIVOR.megaVisualMul : 1);
+      const previous = this.bossPose.get(b.id);
+      const moved = previous ? Math.hypot(b.x - previous.x, b.z - previous.z) > 0.003 : false;
+      this.bossPose.set(b.id, { x: b.x, z: b.z });
       this.place(vis, b.x, b.z, b.facingX, b.facingZ, scale);
       if (vis.animator) {
         if (b.state === 'dead') vis.animator.play('death', 0.08);
         else if (b.state === 'windup' || b.state === 'active') vis.animator.play('shoot', 0.06);
-        else if (b.hitFlash > 0.08) vis.animator.play('hit', 0.05);
-        else if (b.state === 'idle' || b.state === 'recover') vis.animator.play('walk');
+        // Routine weapon ticks use emissive feedback only. Restarting a skeletal hit
+        // clip for every tick produced the Blue Demon "stutter step".
+        else if (moved) vis.animator.play('walk', 0.14);
         else vis.animator.play('idle');
         vis.animator.update(dt);
       }
@@ -912,6 +984,19 @@ export class SurvivorRenderer {
       if (e.kind === 'repulsor') {
         const grow = 0.12 + t * 0.95;
         obj.scale.setScalar(grow);
+      } else if (e.kind === 'fleet-ship') {
+        obj.scale.setScalar(1);
+        const fx = e.facingX ?? 0;
+        const fz = e.facingZ ?? 1;
+        const len = e.length ?? 30;
+        obj.position.set(e.x + fx * len * t, 6.5 + Math.sin(t * Math.PI) * 1.2, e.z + fz * len * t);
+      } else if (e.kind === 'singularity') {
+        const pulse = 0.96 + Math.sin(t * 20) * 0.06;
+        obj.scale.setScalar((0.35 + Math.min(1, t * 2.8) * 0.65) * pulse);
+        const ring = obj.getObjectByName('singularity-ring');
+        if (ring) ring.rotation.z = t * 7.5;
+      } else if (e.kind === 'arc' || e.kind === 'orbital' || e.kind === 'orbital-strike' || e.kind === 'titan-deploy') {
+        obj.scale.setScalar(1);
       } else {
         obj.scale.setScalar(0.5 + t * 1.4);
       }
@@ -972,6 +1057,146 @@ export class SurvivorRenderer {
       mesh.position.set((e.facingX ?? 0) * len * 0.5, 1.1, (e.facingZ ?? 1) * len * 0.5);
       mesh.rotation.y = Math.atan2(e.facingX ?? 0, e.facingZ ?? 1);
       g.add(mesh);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'arc') {
+      // Jagged white-core/cyan-glow lightning. Segmented boxes are cheaper and more
+      // deterministic than allocating TubeGeometry on every chain jump.
+      const len = Math.max(0.2, e.length ?? 1);
+      const fx = (e.facingX ?? 0) / len;
+      const fz = (e.facingZ ?? 1) / len;
+      const px = -fz;
+      const pz = fx;
+      const segments = Math.max(4, Math.min(10, Math.ceil(len / 1.2)));
+      const points: Array<{ x: number; z: number }> = [{ x: 0, z: 0 }];
+      for (let i = 1; i < segments; i += 1) {
+        const u = i / segments;
+        const jitter = Math.sin((i * 19.37 + e.id * 0.73) * 2.1) * Math.min(0.34, len * 0.055);
+        points.push({ x: fx * len * u + px * jitter, z: fz * len * u + pz * jitter });
+      }
+      points.push({ x: fx * len, z: fz * len });
+      const addSegment = (a: { x: number; z: number }, b: { x: number; z: number }, width: number, mat: THREE.Material) => {
+        mat.depthTest = false;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const l = Math.hypot(dx, dz) || 0.01;
+        const mesh = this.ownMesh(new THREE.Mesh(new THREE.BoxGeometry(width, width, l), mat));
+        mesh.position.set((a.x + b.x) / 2, 2.8, (a.z + b.z) / 2);
+        mesh.rotation.y = Math.atan2(dx, dz);
+        mesh.renderOrder = 30;
+        g.add(mesh);
+      };
+      for (let i = 0; i < points.length - 1; i += 1) {
+        addSegment(points[i]!, points[i + 1]!, 0.3, this.effectMat('#33ddff', 0.5, true));
+        addSegment(points[i]!, points[i + 1]!, 0.1, this.effectMat('#ffffff', 1, true));
+      }
+      for (const p of [points[0]!, points[points.length - 1]!]) {
+        const flash = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8), this.effectMat('#eaffff', 0.9, true)));
+        (flash.material as THREE.Material).depthTest = false;
+        flash.renderOrder = 31;
+        flash.position.set(p.x, 2.8, p.z);
+        g.add(flash);
+      }
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'orbital') {
+      const r = e.radius ?? e.scale ?? 1.6;
+      for (const [mul, op] of [[1, 0.75], [0.68, 0.55], [0.35, 0.4]] as const) {
+        const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * mul * 0.86, r * mul, 48), this.effectMat('#ffd46a', op, true)));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.07;
+        g.add(ring);
+      }
+      const aim = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.12, 8, 8), this.effectMat('#fff4c8', 0.25, true)));
+      aim.position.y = 4;
+      g.add(aim);
+      g.position.set(e.x, 0, e.z);
+      g.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.material.depthTest = false;
+          o.renderOrder = 24;
+        }
+      });
+      return g;
+    }
+    if (e.kind === 'orbital-strike') {
+      const r = e.radius ?? e.scale ?? 1.6;
+      const glow = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.38, r * 0.65, 16, 20, 1, true), this.effectMat('#ffd46a', 0.48, true)));
+      glow.position.y = 8;
+      const core = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.12, r * 0.2, 18, 16), this.effectMat('#ffffff', 0.98, true)));
+      core.position.y = 9;
+      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.35, r * 1.8, 56), this.effectMat('#fff0a0', 0.68, true)));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.08;
+      g.add(glow, core, ring);
+      g.position.set(e.x, 0, e.z);
+      g.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.material.depthTest = false;
+          o.renderOrder = 32;
+        }
+      });
+      return g;
+    }
+    if (e.kind === 'fleet-ship') {
+      let ship: THREE.Object3D | null = null;
+      if (this.heroShipUrl) ship = this.assets.clone(this.heroShipUrl)?.root ?? null;
+      if (ship) {
+        ship.scale.setScalar(1.15);
+        ship.traverse((o) => {
+          if (o instanceof THREE.Mesh) {
+            o.userData.ownsGeometry = false;
+            o.userData.ownsMaterial = false;
+          }
+        });
+        g.add(ship);
+      } else {
+        const body = this.ownMesh(new THREE.Mesh(new THREE.ConeGeometry(0.72, 3.4, 8), this.effectMat('#e9f6ff', 0.95, true)));
+        body.rotation.x = Math.PI / 2;
+        const wing = this.ownMesh(new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.15, 1.1), this.effectMat(e.color, 0.82, true)));
+        g.add(body, wing);
+      }
+      const flame = this.ownMesh(new THREE.Mesh(new THREE.ConeGeometry(0.48, 3.6, 10, 1, true), this.effectMat('#ffdd66', 0.9, true)));
+      flame.rotation.x = -Math.PI / 2;
+      flame.position.z = -2.6;
+      g.add(flame);
+      g.rotation.y = Math.atan2(e.facingX ?? 0, e.facingZ ?? 1);
+      g.position.set(e.x, 6.5, e.z);
+      return g;
+    }
+    if (e.kind === 'singularity') {
+      const r = e.radius ?? 16;
+      const core = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 18), this.effectMat('#080016', 0.95, false)));
+      core.position.y = 2.8;
+      const accretion = this.ownMesh(new THREE.Mesh(new THREE.TorusGeometry(r * 0.42, 0.28, 12, 64), this.effectMat('#a881ff', 0.78, true)));
+      accretion.rotation.x = Math.PI / 2.25;
+      accretion.position.y = 2.6;
+      accretion.name = 'singularity-ring';
+      const reach = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.82, r, 72), this.effectMat('#66eaff', 0.25, true)));
+      reach.rotation.x = -Math.PI / 2;
+      reach.position.y = 0.06;
+      g.add(reach, accretion, core);
+      g.position.set(e.x, 0, e.z);
+      g.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.material.depthTest = false;
+          o.renderOrder = 26;
+        }
+      });
+      return g;
+    }
+    if (e.kind === 'titan-deploy') {
+      const r = e.radius ?? 5.5;
+      const beam = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(1.2, 2.2, 18, 20, 1, true), this.effectMat('#fff1a8', 0.55, true)));
+      beam.position.y = 9;
+      const core = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.55, 20, 16), this.effectMat('#ffffff', 0.95, true)));
+      core.position.y = 10;
+      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.35, r, 64), this.effectMat('#66eaff', 0.75, true)));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.08;
+      g.add(beam, core, ring);
       g.position.set(e.x, 0, e.z);
       return g;
     }
@@ -1145,6 +1370,10 @@ export class SurvivorRenderer {
     this.shieldRoot = null;
     this.shieldWasActive = false;
     this.boltGeo.dispose();
+    this.eliteShellGeo.dispose();
+    this.eliteRingGeo.dispose();
+    this.eliteBarGeo.dispose();
+    this.eliteFillGeo.dispose();
     for (const m of this.mats.values()) m.dispose();
     this.mats.clear();
     for (const m of this.basicMats.values()) m.dispose();
@@ -1164,6 +1393,6 @@ export class SurvivorRenderer {
     this.exhaustL = null;
     this.exhaustR = null;
     this.bosses.clear();
+    this.bossPose.clear();
   }
 }
-

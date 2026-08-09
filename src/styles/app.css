@@ -1988,6 +1988,21 @@ button {
 .survivor-hud .sv-choice.protocol {
   border-color: color-mix(in srgb, #ffd46a 55%, white 10%);
 }
+.survivor-hud .sv-protocol-modal.mega-protocol {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255, 205, 91, 0.18), transparent 42%),
+    rgba(5, 12, 25, 0.96);
+  box-shadow: inset 0 0 70px rgba(255, 190, 70, 0.12), 0 0 50px rgba(255, 190, 70, 0.2);
+}
+.survivor-hud .sv-choice.protocol.mega-protocol {
+  border-color: #ffd46a;
+  background: linear-gradient(145deg, rgba(45, 31, 12, 0.92), rgba(8, 28, 42, 0.94));
+  box-shadow: inset 0 0 24px rgba(255, 212, 106, 0.1), 0 0 18px rgba(255, 212, 106, 0.1);
+}
+.survivor-hud .sv-choice.protocol.mega-protocol:hover {
+  transform: translateY(-4px) scale(1.025);
+  box-shadow: inset 0 0 30px rgba(255, 212, 106, 0.18), 0 0 28px rgba(255, 212, 106, 0.24);
+}
 .survivor-hud .sv-boss.mega .sv-track.boss i {
   background: linear-gradient(90deg, #a01860, #ff66aa);
 }

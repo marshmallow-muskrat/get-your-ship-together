@@ -165,9 +165,14 @@ export interface SurvivorEffect {
     | 'shield'
     | 'arc'
     | 'orbital'
+    | 'orbital-strike'
     | 'cache'
     | 'mega'
-    | 'gunship';
+    | 'gunship'
+    | 'fleet-ship'
+    | 'singularity'
+    | 'titan-deploy'
+    | 'elite-aura';
   x: number;
   z: number;
   life: number;
@@ -475,6 +480,26 @@ export interface SurvivorState {
     duration: number;
     orbIds: number[];
     totalXp: number;
+  };
+  /** Exclusive Mega-Cache effects. Ordinary Cache state remains separate. */
+  megaProtocol: {
+    id: 'titan-protocol' | 'fleet-annihilation' | 'singularity-event' | null;
+    remaining: number;
+    elapsed: number;
+    /** Titan leaves the ordinary Mech cooldown schedule untouched. */
+    titanActive: boolean;
+    /** Fleet pass index scheduled next (0..2). */
+    fleetNextPass: number;
+    fleetTelegraphed: number;
+    fleetNextAt: number;
+    fleetDamageDue: Array<{ pass: number; at: number }>;
+    /** Singularity center and damage cadence. */
+    x: number;
+    z: number;
+    tickCd: number;
+    /** Current Energy snapshot; later spawns are excluded. */
+    orbIds: number[];
+    hitIds: number[];
   };
 
   enemies: SurvivorEnemy[];
@@ -786,6 +811,21 @@ export function createSurvivorState(
       spawnSuppress: 0,
     },
     recall: { active: false, t: 0, duration: SURVIVOR.recallDuration, orbIds: [], totalXp: 0 },
+    megaProtocol: {
+      id: null,
+      remaining: 0,
+      elapsed: 0,
+      titanActive: false,
+      fleetNextPass: 0,
+      fleetTelegraphed: 0,
+      fleetNextAt: 0,
+      fleetDamageDue: [],
+      x: 0,
+      z: 0,
+      tickCd: 0,
+      orbIds: [],
+      hitIds: [],
+    },
     enemies: [],
     projectiles: [],
     hazards: [],
@@ -867,6 +907,24 @@ function grantBuild(
   }
 }
 
+function seedFixtureHorde(state: SurvivorState, count: number, radius: number): void {
+  for (let i = 0; i < count; i += 1) {
+    const e = emptyEnemy();
+    const a = (i / count) * Math.PI * 2;
+    e.id = state.nextId++;
+    e.alive = true;
+    e.x = Math.cos(a) * (radius + (i % 3) * 0.8);
+    e.z = Math.sin(a) * (radius + (i % 3) * 0.8);
+    e.defId = i % 7 === 0 ? 'elite' : i % 4 === 0 ? 'bruiser' : 'basic';
+    e.role = e.defId === 'elite' ? 'elite' : e.defId === 'bruiser' ? 'bruiser' : 'fodder';
+    e.isElite = e.defId === 'elite';
+    e.health = e.maxHealth = e.isElite ? 900 : e.defId === 'bruiser' ? 280 : 130;
+    e.radius = e.isElite ? 0.85 : 0.58;
+    e.xp = 0;
+    state.enemies.push(e);
+  }
+}
+
 function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
   if (!fixture || fixture === 'survivor-start') return;
   if (fixture === 'survivor-levelup') {
@@ -891,12 +949,29 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.player.health = state.player.maxHealth * 0.45;
     state.player.invuln = 8;
   } else if (fixture === 'survivor-arc') {
-    state.time = SURVIVOR.arcUnlockTime - 0.05;
-    state.xp = state.xpNext;
+    state.time = SURVIVOR.arcUnlockTime;
+    grantBuild(state, [{ id: 'arc', level: 5 }], { area: 2, 'weapon-haste': 2 }, 14);
+    state.weapons[0]!.prototype = true;
+    state.unlocks.arc = true;
+    state.unlocks.arcOffered = true;
+    state.player.invuln = 30;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 18, 7);
   } else if (fixture === 'survivor-orbital') {
-    state.time = SURVIVOR.orbitalUnlockTime - 0.05;
-    grantBuild(state, [{ id: state.weapons[0]!.weaponId, level: 4 }, { id: 'pulse', level: 3 }], {}, 10);
-    state.xp = state.xpNext;
+    state.time = SURVIVOR.orbitalUnlockTime;
+    grantBuild(state, [{ id: 'orbital', level: 5 }], { area: 2, 'weapon-haste': 2 }, 24);
+    state.weapons[0]!.prototype = true;
+    state.unlocks.orbital = true;
+    state.unlocks.orbitalOffered = true;
+    state.unlocks.arc = true;
+    state.unlocks.arcOffered = true;
+    state.player.invuln = 30;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 22, 9);
   } else if (fixture === 'survivor-mega') {
     state.time = SURVIVOR.bossInterval * 5 - 0.05;
     state.nextBossIndex = 5;
@@ -911,6 +986,29 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       { 'weapon-haste': 2, area: 2, 'max-health': 2 },
       12,
     );
+  } else if (fixture === 'survivor-mega-cache') {
+    state.time = SURVIVOR.bossInterval * 5 + 5;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    state.unlocks.arc = true;
+    state.unlocks.arcOffered = true;
+    state.player.invuln = 60;
+    state.cache = { active: true, x: 0, z: 0, life: 999, maxLife: 999, mega: true, potency: 1.5 };
+    seedFixtureHorde(state, 28, 11);
+    for (let i = 0; i < 20; i += 1) {
+      const a = (i / 20) * Math.PI * 2;
+      state.pickups.push({
+        id: 9700 + i,
+        kind: 'xp',
+        x: Math.cos(a) * (13 + (i % 4)),
+        z: Math.sin(a) * (13 + (i % 4)),
+        value: 6,
+        active: true,
+        magnetized: false,
+        life: Infinity,
+      });
+    }
   } else if (fixture === 'survivor-cache') {
     state.time = SURVIVOR.bossInterval - SURVIVOR.cacheLeadBeforeBoss - 0.05;
     state.nextCacheTime = SURVIVOR.bossInterval - SURVIVOR.cacheLeadBeforeBoss;

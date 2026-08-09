@@ -11,11 +11,6 @@ The version names below are retrospective product milestones unless a balance ve
 ### Remaining follow-up
 
 - Bundle code splitting (main chunk is ~830 kB before gzip).
-- **Sections deferred from 2.3.0** (see the 2.3.0 entry for scope and status):
-  exclusive Mega Protocols (Titan / Fleet Annihilation / Singularity Event), the Aegis
-  emergency rework, the Arc Conductor chain-lightning renderer, the Orbital Lance
-  presentation, the boss animation state machine, and elite emissive/health-bar
-  presentation. The balance, telemetry and card work these depend on has landed.
 
 ## [2.3.0] — 2026-08-09 — Readable pressure, fixed-cooldown Mech, upgrade clarity
 
@@ -147,8 +142,9 @@ faucet that erased every mistake.
 - Fully invested maximum uptime is **45.8%** (17.5s of 38.25s) — powerful, never permanent.
 - The HUD meter is readiness, not kill charge; the large `MECH READY` presentation and glow are
   preserved.
-- Mech damage is deliberately **not** gutted in this pass, per the release brief. Damage taken
-  remains `0.65×` pending live evidence.
+- Mech remains powerful without multiplying every weapon's projectile count. It uses `1.35×`
+  weapon damage, `1.15×` cadence and `1.15×` area; damage taken remains `0.65×`. This preserves
+  the ultimate fantasy while preventing a single 14s activation from trivially erasing bosses.
 
 ### 10. Elites
 
@@ -161,24 +157,27 @@ faucet that erased every mistake.
 - Premium energy rewards preserved.
 - Frequency follows the revised elite curve, and the forced-elite floor was raised from 8s to a
   14s+ event cadence.
+- Elites now carry an animated gold energy shell and compact world-space health bars. Bars are
+  limited to the four nearest relevant elites within 16 units so late hordes remain readable.
 
 ### 11. Boss durability and phase transitions
 
 - **Root cause (durability):** 2,200 base health meant the first boss could die in about two
   seconds and was irrelevant.
-- First-boss base health is **5,600**, chosen against a new deterministic boss benchmark
-  (`bossTimeToKill`) rather than asserted. Later growth is reshaped to `1 + 0.72k + 0.012k²` and
-  the Mega health multiplier lowered from 2.2 to 1.6, so raising the floor did not rebuild an
-  impossible late wall.
+- First-boss base health is **4,700**, chosen against a deterministic boss benchmark
+  (`bossTimeToKill`) rather than asserted. Later growth uses authored anchors rather than one
+  quadratic that cannot satisfy both early and late targets: `1.0×` boss 1, `2.5×` boss 3,
+  `4.1×` boss 5, `6.5×` boss 10, `9.2×` boss 15 and `12.5×` boss 20, then accelerates so endless
+  Overclocks cannot win forever. Mega health remains `1.6×` its regular index.
 - Measured time-to-kill against representative moving builds:
 
   | Boss | HP | Astronaut | Mech | Target |
   |---|---:|---:|---:|---|
-  | 1 (appropriate build) | 5,600 | 24.6s | 12.8s | 18–25s / 10–15s |
-  | 1 (balanced build) | 5,600 | 36.3s | 14.9s | slower build, allowed |
-  | 3 | 13,933 | 26.8s | — | 25–40s |
-  | 5 (Mega) | 36,485 | 62.1s | — | 45–75s |
-  | 10 (Mega) | 75,730 | 92.5s | — | 45–75s (over — see limitations) |
+  | 1 (appropriate build) | 4,700 | 24.8s | 13.0s | 18–25s / 10–15s |
+  | 1 (balanced build) | 4,700 | 36.8s | 22.8s | slower build, allowed |
+  | 3 | 11,750 | 27.2s | 9.0s | 25–40s astronaut |
+  | 5 (Mega) | 30,832 | 62.0s | 28.7s | 45–75s astronaut |
+  | 10 (Mega) | 48,880 | 71.7s | 28.8s | 45–75s astronaut |
 
 - **Root cause (phase transitions):** crossing 66%/33% dropped the boss straight into `recover`.
   High single-hit damage therefore cancelled live attacks, and enough DPS could stun-lock the boss
@@ -189,6 +188,49 @@ faucet that erased every mistake.
 - Phase thresholds are exactly 66% and 33%.
 - Shared AttackShape telegraph/collision correctness and `sourceBossId`-scoped cleanup are unchanged.
 - No permanent red boss floor auras were restored.
+
+### 12. Boss animation stutter removed
+
+- Boss animation now follows a stable priority: death, authored attack, actual movement, idle.
+- Routine weapon ticks use emissive hit feedback and no longer restart a skeletal hit clip every
+  few frames. This removes the Blue Demon stutter-step while preserving attack and death clips.
+
+### 16. Aegis is an emergency protocol
+
+- Selecting Aegis now creates a 14.5-unit repulsion wave, grants 1.5s invulnerability, and then
+  supplies its bounded barrier. Elite and miniboss push resistance is preserved; the pulse deals
+  only token damage and cannot replace Repulsor Burst.
+- The choice card states all three effects and the existing form-fitting shell remains visible.
+
+### 17. Exclusive Mega Protocols
+
+- Every fifth boss still drops a non-expiring Mega Cache, but it now offers exactly three unique
+  choices rather than enhanced ordinary protocols:
+  - **Titan Protocol:** a 25s enhanced Mech with +35% offense/area and reinforced armor. It does
+    not consume or reset the ordinary Mech cooldown and has a gold-white deployment beam.
+  - **Fleet Annihilation:** three ships cross distinct intersecting lanes, erasing ordinary
+    enemies, heavily damaging minibosses and applying capped percentage damage to bosses.
+  - **Singularity Event:** snapshots current Energy, pulls it with exact conservation, draws in
+    the horde, deals bounded ticks and ends in a lethal ordinary-enemy collapse. Health and later
+    Energy are excluded.
+- Each has dedicated lifecycle state, telemetry attribution, HUD TEMP tracking, choice copy,
+  fixtures, cleanup, bounded damage rules and regression tests. Singularity finishes its short
+  cinematic before any earned upgrade modal opens.
+
+### 18–19. Prototype weapons have readable identities
+
+- **Arc Conductor** renders every jump as a jagged white-core/cyan-glow bolt with endpoint flashes.
+  L5 chains remain visible above dense creature models and use segmented geometry rather than
+  per-shot tubes.
+- **Orbital Lance** shows concentric countdown reticles followed by a tall white/gold beam,
+  ground flash and shockwave. Judgment Array visibly produces multiple lances; collision radius
+  remains the authored reticle radius.
+
+### 21. Resource stability extended
+
+- Renderer stress now churns Aegis, Recall, Gunship, Titan, Fleet and Singularity alongside every
+  L5 weapon, boss attacks, elites and restarts. Owned effects dispose cleanly; fleet ship asset
+  geometry remains shared and is never accidentally disposed.
 
 ### 13. Upgrade cards explain the decision
 
@@ -276,7 +318,8 @@ Final contract state: starter band 0.89–1.14 (target 0.85–1.15); L5/L1 ratio
   typed damage sources and bounded death log, and the run report's overkill exclusion and
   form-attribution independence.
 - Existing suites updated to the new balance rather than relaxed.
-- Total: 254 tests passing.
+- Added six Mega-Protocol correctness tests plus expanded renderer stress coverage.
+- Total: 260 tests passing.
 
 ## [2.2.1] — 2026-08-09 — Containment Protocol repair release
 

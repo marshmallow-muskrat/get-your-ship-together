@@ -62,6 +62,9 @@ Energy is run XP. The timer pauses during level-up choices, pause, and Settings.
 - `/?mode=survivor&fixture=survivor-repulsor&hero=bee`
 - `/?mode=survivor&fixture=survivor-damage&hero=frog`
 - `/?mode=survivor&fixture=survivor-mech&hero=bee`
+- `/?mode=survivor&fixture=survivor-arc&hero=bee`
+- `/?mode=survivor&fixture=survivor-orbital&hero=red-panda`
+- `/?mode=survivor&fixture=survivor-mega-cache&hero=frog`
 
 ## Documentation
 

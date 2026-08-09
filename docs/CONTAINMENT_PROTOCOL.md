@@ -73,7 +73,7 @@ Implemented repeatable damage model (`weaponStatsAtLevel`):
 
 ```text
 overclockLevel = max(0, displayedLevel - 5)
-damage = level5Damage * (1 + 0.08 * overclockLevel)
+damage = level5Damage * (1 + 0.07 * overclockLevel)
 ```
 
 The increase is additive against the Level-5 base. It must not compound as `1.08 ^ overclockLevel`.
@@ -114,9 +114,12 @@ Weapons use deterministic focus-debt so late runs spend a rising share of fire o
 
 ## Boss health
 
-Regular: `HP = 2200 × (1 + 0.65(n−1) + 0.10(n−1)²)`.  
+Regular base: `4,700 HP`, multiplied by authored boss-index anchors (1.0× at boss 1, 2.5× at
+boss 3, 4.1× at boss 5, 6.5× at boss 10, 9.2× at boss 15, 12.5× at boss 20), then an
+accelerating post-20 curve.
 Enemy HP: `1 + 0.18m + 0.035×max(0,m−5)²`.  
-Every 5th boss is a **Mega-Boss** (2× visual scale, 2.2× HP of the rebalanced regular at that index). Persistent red floor auras are removed.
+Every 5th boss is a **Mega-Boss** (1.5× visual scale, 1.6× HP of the regular at that index).
+Persistent red floor auras are removed.
 
 ## Protocol Cache
 
@@ -128,7 +131,18 @@ Every 120s (≈15s before each boss window): corner beacon. Choices:
 | **Gunship Flyby** | Once-per-target corridor strike from the player. Deletes ordinary enemies; dents bosses (never auto-deletes a real boss). |
 | **Gravitic Recall** | Pull all active energy orbs to the player over ~1.25s with exact XP conservation (health orbs excluded). |
 
-Mega-Boss death leaves an enhanced non-expiring cache. The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Caches.
+Ordinary Aegis also repels the nearby horde and grants 1.5s invulnerability so it works as an
+emergency choice rather than delayed HP alone.
+
+Mega-Boss death leaves a non-expiring cache with exactly three exclusive choices:
+
+| Mega Protocol | Role |
+|---|---|
+| **Titan Protocol** | Enhanced 25s Mech; ordinary Mech cooldown continues untouched. |
+| **Fleet Annihilation** | Three intersecting ship passes; ordinary kills and bounded boss damage. |
+| **Singularity Event** | Pulls the horde and current Energy snapshot, then collapses. |
+
+The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Caches.
 
 ## Enemy speeds (endless-2.3.0)
 
@@ -203,6 +217,9 @@ Mech is a **fixed-cooldown ultimate**. Nothing in the run refills it.
 
 Kills, elites, minibosses and bosses have **no** effect on the cooldown. The HUD meter shows
 readiness, not kill charge.
+
+Mech weapon output uses bounded multipliers: `1.35×` damage, `1.15×` cadence and `1.15×` area.
+It no longer adds a projectile to every weapon, which was the largest cause of boss deletion.
 
 ## Bounded repair economy (endless-2.3.0)
 
