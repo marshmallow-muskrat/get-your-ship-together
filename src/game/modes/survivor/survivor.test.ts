@@ -12,6 +12,8 @@ import {
   magnetRadius,
   stepSurvivor,
   thrusterPower,
+  healthMagnetRadius,
+  energyMagnetRadius,
   tryDodge,
   tryMech,
   tryRepulsor,
@@ -39,6 +41,9 @@ import {
   spawnPressure,
   weaponStatsAtLevel,
   xpForLevel,
+  bossHealthMulFor,
+  isMegaBossIndex,
+  bossFocusBaseChance,
 } from './survivorContent';
 import {
   DEFAULT_KEYBINDS,
@@ -361,7 +366,7 @@ describe('endless simulation', () => {
     const state = createSurvivorState('bee', null, 7);
     state.weapons = (Object.keys(WEAPONS) as (keyof typeof WEAPONS)[])
       .slice(0, SURVIVOR.maxWeaponSlots)
-      .map((id) => ({ weaponId: id, level: 5, cooldown: 0 }));
+      .map((id) => ({ weaponId: id, level: 5, cooldown: 0, focusDebt: 0, prototype: false }));
     for (const pas of PASSIVES) {
       if (Number.isFinite(pas.maxLevel)) state.passives[pas.id] = pas.maxLevel as number;
     }
@@ -370,7 +375,7 @@ describe('endless simulation', () => {
     delete state.passives.regen;
     const choices = generateChoices(state);
     expect(choices.length).toBe(3);
-    expect(choices.some((c) => c.kind === 'weapon' || c.kind === 'passive' || c.kind === 'temp')).toBe(true);
+    expect(choices.some((c) => c.kind === 'weapon' || c.kind === 'passive' || c.kind === 'new-weapon')).toBe(true);
   });
 });
 
@@ -401,6 +406,8 @@ describe('ship pickup and thrusters', () => {
       weaponId: (['pulse', 'rail', 'rocket', 'microdrone', 'gravity'] as const)[i]!,
       level: 12,
       cooldown: 0,
+      focusDebt: 0,
+      prototype: false,
     }));
     state.passives = { 'move-speed': 5, area: 5, 'weapon-haste': 5 };
     const late = thrusterPower(state);
@@ -636,5 +643,115 @@ describe('player power scale', () => {
       passives: { 'move-speed': 99, area: 99 },
     });
     expect(capped).toBe(SURVIVOR.ship.powerScaleCap);
+  });
+});
+
+describe('health pickups and magnets', () => {
+  it('heals damaged player and clamps to max', () => {
+    const state = createSurvivorState('bee', null, 77);
+    state.player.health = 40;
+    state.pickups.push({
+      id: 9001,
+      kind: 'repair',
+      x: 0.2,
+      z: 0,
+      value: 50,
+      active: true,
+      magnetized: false,
+    });
+    for (let i = 0; i < 30; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.player.health).toBeLessThanOrEqual(state.player.maxHealth);
+    expect(state.player.health).toBeGreaterThan(40);
+    expect(state.pickups.find((p) => p.id === 9001)?.active).toBe(false);
+  });
+
+  it('does not consume health orb at full health', () => {
+    const state = createSurvivorState('bee', null, 78);
+    state.player.health = state.player.maxHealth;
+    state.pickups.push({
+      id: 9002,
+      kind: 'repair',
+      x: 0.1,
+      z: 0,
+      value: 40,
+      active: true,
+      magnetized: false,
+    });
+    for (let i = 0; i < 20; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.pickups.find((p) => p.id === 9002)?.active).toBe(true);
+  });
+
+  it('health magnet exceeds energy magnet with Magnet Field', () => {
+    const state = createSurvivorState('bee', null, 79);
+    state.passives['pickup-radius'] = 3;
+    expect(healthMagnetRadius(state)).toBeGreaterThan(energyMagnetRadius(state));
+  });
+});
+
+describe('permanent-only level-ups', () => {
+  it('never offers consumable/temp choices', () => {
+    for (let seed = 1; seed < 25; seed += 1) {
+      const state = createSurvivorState('frog', null, seed);
+      state.time = 200 + seed * 10;
+      state.unlocks.arc = seed > 10;
+      const choices = generateChoices(state);
+      expect(choices.length).toBe(3);
+      for (const c of choices) {
+        expect(c.kind).not.toBe('protocol');
+        expect((c as { tempId?: string }).tempId).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe('boss scaling and mega', () => {
+  it('uses quadratic boss HP not exponential wall', () => {
+    const h5 = bossDifficultyFor(5).healthMul;
+    const h10 = bossDifficultyFor(10).healthMul;
+    // Old 1.55^9 ≈ 38 for boss 10; new is much lower base before mega
+    expect(bossHealthMulFor(5)).toBeLessThan(Math.pow(1.55, 4));
+    expect(isMegaBossIndex(5)).toBe(true);
+    expect(isMegaBossIndex(4)).toBe(false);
+    expect(h10).toBeGreaterThan(h5);
+  });
+
+  it('spawns mega at index 5', () => {
+    const state = createSurvivorState('bee', 'survivor-mega', 2);
+    for (let i = 0; i < 20; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const mega = state.bosses.find((b) => b.isMega);
+    expect(mega).toBeTruthy();
+    expect(mega!.visualScale).toBeGreaterThan(5);
+  });
+});
+
+describe('boss focus policy', () => {
+  it('increases with time and caps at 70%', () => {
+    expect(bossFocusBaseChance(100)).toBe(0.08);
+    expect(bossFocusBaseChance(700)).toBe(0.25);
+    expect(bossFocusBaseChance(1000)).toBe(0.4);
+    expect(bossFocusBaseChance(1300)).toBe(0.55);
+  });
+});
+
+describe('shield system', () => {
+  it('absorbs then overflows to health', () => {
+    const state = createSurvivorState('bee', 'survivor-shield', 3);
+    expect(state.player.shieldPoints).toBeGreaterThan(0);
+    const hp = state.player.health;
+    const sh = state.player.shieldPoints;
+    state.player.invuln = 0;
+    damagePlayer(state, sh + 20, 'enemy');
+    expect(state.player.shieldPoints).toBe(0);
+    expect(state.player.health).toBeLessThan(hp);
+  });
+});
+
+describe('prototype unlock gates', () => {
+  it('arc not eligible before 5:00', () => {
+    const state = createSurvivorState('bee', null, 5);
+    state.time = 299;
+    state.unlocks.arc = false;
+    const choices = generateChoices(state);
+    expect(choices.every((c) => c.weaponId !== 'arc')).toBe(true);
   });
 });

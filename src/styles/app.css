@@ -1817,3 +1817,62 @@ button {
     max-height: none;
   }
 }
+
+/* Protocol / shield / banners */
+.survivor-hud .sv-shield-row {
+  margin-top: 0.25rem;
+}
+.survivor-hud .sv-track.shield i {
+  background: linear-gradient(90deg, #3a8cff, #a8e8ff);
+}
+.survivor-hud .sv-unlock-banner {
+  position: absolute;
+  left: 50%;
+  top: 16%;
+  transform: translateX(-50%) scale(var(--ui-scale));
+  transform-origin: top center;
+  font-family: 'Audiowide', sans-serif;
+  font-size: clamp(0.95rem, 1.6vw, 1.35rem);
+  letter-spacing: 0.14em;
+  color: #88e0ff;
+  text-shadow: 0 0 18px rgba(100, 220, 255, 0.65);
+  padding: 0.45rem 1rem;
+  border: 1px solid rgba(120, 220, 255, 0.45);
+  border-radius: 0.4rem;
+  background: rgba(8, 16, 32, 0.82);
+  pointer-events: none;
+  z-index: 7;
+}
+.survivor-hud .sv-unlock-banner.mega {
+  color: #ff88cc;
+  border-color: rgba(255, 100, 180, 0.55);
+  text-shadow: 0 0 22px rgba(255, 80, 160, 0.7);
+  font-size: clamp(1.2rem, 2.2vw, 1.8rem);
+}
+.survivor-hud .sv-cache-arrow {
+  position: absolute;
+  left: 50%;
+  top: 28%;
+  transform: translateX(-50%);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.72rem;
+  color: #ffd46a;
+  pointer-events: none;
+  z-index: 6;
+  text-shadow: 0 0 10px rgba(255, 200, 80, 0.6);
+}
+.survivor-hud .sv-protocol-modal h2 {
+  color: #ffd46a;
+}
+.survivor-hud .sv-choice.protocol {
+  border-color: color-mix(in srgb, #ffd46a 55%, white 10%);
+}
+.survivor-hud .sv-boss.mega .sv-track.boss i {
+  background: linear-gradient(90deg, #a01860, #ff66aa);
+}
+.survivor-hud .sv-dmg-heal {
+  color: #ff88cc;
+}
+.survivor-hud .sv-dmg-absorb {
+  color: #88d4ff;
+}

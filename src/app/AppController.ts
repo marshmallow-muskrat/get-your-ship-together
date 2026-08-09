@@ -23,6 +23,7 @@ function parseLaunch(): {
     'survivor-ship',
     'survivor-damage',
     'survivor-miniboss',
+    'survivor-pickups',
   ];
 
   const knownFixture =

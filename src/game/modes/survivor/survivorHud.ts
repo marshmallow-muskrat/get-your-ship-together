@@ -121,6 +121,11 @@ export class SurvivorHud {
               <span id="sv-hp-num" class="sv-num">100 / 100</span>
             </div>
             <div class="sv-track"><i id="sv-hp"></i></div>
+            <div id="sv-shield-row" class="sv-shield-row hidden">
+              <span class="eyebrow">SHIELD</span>
+              <span id="sv-shield-num" class="sv-num">0</span>
+              <div class="sv-track shield"><i id="sv-shield"></i></div>
+            </div>
           </div>
           <div class="sv-vital">
             <div class="sv-vital-label">
@@ -198,10 +203,19 @@ export class SurvivorHud {
         </div>
       </div>
 
+      <div id="sv-banner-arc" class="sv-unlock-banner hidden">PROTOTYPE UNLOCKED · ARC CONDUCTOR</div>
+      <div id="sv-banner-orbital" class="sv-unlock-banner hidden">PROTOTYPE UNLOCKED · ORBITAL LANCE</div>
+      <div id="sv-banner-mega" class="sv-unlock-banner mega hidden">MEGA BREACH</div>
+      <div id="sv-cache-arrow" class="sv-cache-arrow hidden">◀ CACHE</div>
       <div id="sv-levelup" class="sv-modal hidden">
         <p class="eyebrow">SYSTEM UPLINK</p>
         <h2>Choose Upgrade</h2>
         <div id="sv-choices" class="sv-choices"></div>
+      </div>
+      <div id="sv-protocol" class="sv-modal sv-protocol-modal hidden">
+        <p class="eyebrow">PROTOCOL CACHE</p>
+        <h2>Select Protocol</h2>
+        <div id="sv-protocol-choices" class="sv-choices"></div>
       </div>
       <div id="sv-end" class="sv-modal hidden">
         <p class="eyebrow" id="sv-end-eye">RUN COMPLETE</p>
@@ -428,6 +442,9 @@ export class SurvivorHud {
     set('sv-xp-num', `${Math.floor(state.xp)} / ${state.xpNext}`);
 
     this.publishAbilities(state);
+    this.publishShield(state);
+    this.publishBanners(state);
+    this.publishProtocol(state);
     this.publishBossBars(state);
     this.publishWeapons(state);
     this.publishPause(state);
@@ -558,6 +575,71 @@ export class SurvivorHud {
     el.classList.toggle('charged', charge >= 1);
   }
 
+
+  private publishShield(state: SurvivorState): void {
+    const row = this.root.querySelector('#sv-shield-row');
+    const p = state.player;
+    const show = p.shieldPoints > 0 && p.shieldTime > 0;
+    row?.classList.toggle('hidden', !show);
+    if (show) {
+      const bar = this.root.querySelector<HTMLElement>('#sv-shield');
+      if (bar && p.shieldMax > 0) bar.style.width = `${(p.shieldPoints / p.shieldMax) * 100}%`;
+      const num = this.root.querySelector('#sv-shield-num');
+      if (num) num.textContent = `${Math.ceil(p.shieldPoints)} · ${Math.ceil(p.shieldTime)}s`;
+    }
+  }
+
+  private publishBanners(state: SurvivorState): void {
+    this.root.querySelector('#sv-banner-arc')?.classList.toggle('hidden', state.unlocks.arcBanner <= 0);
+    this.root.querySelector('#sv-banner-orbital')?.classList.toggle('hidden', state.unlocks.orbitalBanner <= 0);
+    this.root.querySelector('#sv-banner-mega')?.classList.toggle('hidden', state.megaBanner <= 0);
+    const arrow = this.root.querySelector('#sv-cache-arrow');
+    if (arrow) {
+      const show = state.cache.active && state.phase === 'playing';
+      arrow.classList.toggle('hidden', !show);
+      if (show) {
+        const dx = state.cache.x - state.player.x;
+        const dz = state.cache.z - state.player.z;
+        const ang = Math.atan2(dx, dz);
+        (arrow as HTMLElement).style.transform = `translateX(-50%) rotate(${(ang * 180) / Math.PI}deg)`;
+        arrow.textContent = `CACHE ${Math.ceil(state.cache.life)}s`;
+      }
+    }
+  }
+
+  private lastProtocolKey = '';
+  private publishProtocol(state: SurvivorState): void {
+    const modal = this.root.querySelector('#sv-protocol');
+    if (!modal) return;
+    const open = state.phase === 'protocol';
+    modal.classList.toggle('hidden', !open);
+    if (!open) {
+      this.lastProtocolKey = '';
+      return;
+    }
+    const key = state.protocolChoices.map((c) => c.id).join('|');
+    if (key === this.lastProtocolKey) return;
+    this.lastProtocolKey = key;
+    const box = this.root.querySelector('#sv-protocol-choices');
+    if (!box) return;
+    box.innerHTML = state.protocolChoices
+      .map(
+        (c, i) =>
+          `<button type="button" class="sv-choice protocol" data-i="${i}">
+            <span class="eyebrow">PROTOCOL · ${i + 1}</span>
+            <strong>${c.title}</strong>
+            <small>${c.body}</small>
+          </button>`,
+      )
+      .join('');
+    box.querySelectorAll<HTMLButtonElement>('.sv-choice').forEach((btn) => {
+      btn.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        this.onChoice(Number(btn.dataset.i));
+      });
+    });
+  }
+
   private publishBossBars(state: SurvivorState): void {
     const pb = primaryBoss(state);
     const boss = this.root.querySelector('#sv-boss');
@@ -571,6 +653,7 @@ export class SurvivorHud {
       if (phase && pb) phase.textContent = String(pb.phase);
       const bname = this.root.querySelector('#sv-boss-name');
       if (bname) bname.textContent = pb ? pb.displayName.toUpperCase() : 'CONTAINMENT BREACH';
+      boss.classList.toggle('mega', !!(pb && pb.isMega));
     }
     const mb = this.root.querySelector('#sv-miniboss');
     if (mb) {
@@ -652,7 +735,7 @@ export class SurvivorHud {
           const kindLabel = (c: (typeof state.choices)[0]) => {
             if (c.kind === 'passive') return 'PASSIVE';
             if (c.kind === 'new-weapon') return 'NEW WEAPON';
-            if (c.kind === 'temp') return 'CONSUMABLE';
+            if (c.kind === 'protocol') return 'PROTOCOL';
             if (c.kind === 'weapon' && c.weaponId) {
               const slot = state.weapons.find((w) => w.weaponId === c.weaponId);
               if (slot && slot.level >= 5) return 'WEAPON OVERCLOCK';
@@ -713,7 +796,7 @@ export class SurvivorHud {
       const prev = rec?.previousBest ?? 0;
       set(
         'sv-end-body',
-        `Survived ${formatSurvivalTime(state.time)} · Best ${formatSurvivalTime(prev)} · L${state.level} · ${state.kills} kills · ${state.bossesDefeated} bosses`,
+        `Survived ${formatSurvivalTime(state.time)} · Best ${formatSurvivalTime(prev)} · L${state.level} · ${state.kills} kills · ${state.bossesDefeated} bosses · ${state.megasDefeated} mega`,
       );
       const nr = this.root.querySelector('#sv-end-record');
       if (nr) nr.classList.toggle('hidden', !(rec?.isNewOverall || rec?.isNewHeroBest));

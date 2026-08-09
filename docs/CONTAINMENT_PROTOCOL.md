@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-1.2.0`
+**Current balance line:** `endless-2.0.0`
 
 ## Purpose
 
@@ -92,7 +92,36 @@ Overclock labels: Roman I–X, then Arabic (`Overclock 27`).
 
 Breach Shielding maxes at 40% boss-damage reduction.
 
-Temporary repair, barrier, and overcharge rewards remain valid choices.
+Normal level-ups are **permanent only** (weapons, Overclocks, passives). Temporary Protocols are offered exclusively via **Protocol Caches**.
+
+## Repair / health pickups
+
+- Distinct magnet radii: energy base 3.2 (+0.35/Magnet Field level); health base 4.25 (+0.60/level).
+- Full-health players do not magnetize or consume repair orbs.
+- Ship form health magnet ≈ 6.5+.
+- Healing feedback shows actual integrity restored.
+
+## Time-gated prototypes
+
+| Unlock | Time | Slot |
+|---|---|---|
+| Arc Conductor | 5:00 | Prototype (does not consume ordinary slots) |
+| Orbital Lance | 15:00 | Prototype |
+
+## Boss targeting
+
+Weapons use deterministic focus-debt so late runs spend a rising share of fire on living bosses (8% → 55% base, +modifiers, hard-capped 70%).
+
+## Boss health
+
+Regular: `HP = 2200 × (1 + 0.65(n−1) + 0.10(n−1)²)`.  
+Enemy HP: `1 + 0.18m + 0.035×max(0,m−5)²`.  
+Every 5th boss is a **Mega-Boss** (2× visual scale, 2.2× HP of the rebalanced regular at that index). Persistent red floor auras are removed.
+
+## Protocol Cache
+
+Every 120s (≈15s before each boss window): corner beacon with Aegis Barrier, Rocket Barrage, or Gunship Flyby. Mega-Boss death leaves an enhanced non-expiring cache.
+
 
 ## Endless difficulty
 

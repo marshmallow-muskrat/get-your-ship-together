@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-1.2.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.0.0';
 
 /** Additive Overclock damage growth per level past L5. */
 export const OVERCLOCK_DAMAGE_PER_LEVEL = 0.08;
@@ -42,12 +42,37 @@ export const SURVIVOR = {
   playerRadius: 0.55,
   playerInvuln: 0.38,
   xpMagnetBase: 3.2,
+  /** Magnet Field energy gain per level. */
+  xpMagnetPerLevel: 0.35,
+  /** Health/repair magnet base — larger than energy. */
+  healthMagnetBase: 4.25,
+  healthMagnetPerLevel: 0.6,
+  healthDirectRadius: 0.8,
+  healthMagnetSpeed: 20,
+  xpMagnetSpeed: 14,
+  healthShipMagnet: 6.5,
+  healthMechMagnetMul: 1.25,
   enemyCap: 160,
   projectileCap: 220,
   pickupCap: 120,
   hazardCap: 80,
   damageEventCap: 48,
   maxWeaponSlots: 5,
+  /** Prototype weapons (arc/orbital) do not consume ordinary slots. */
+  maxPrototypeSlots: 2,
+  arcUnlockTime: 300,
+  orbitalUnlockTime: 900,
+  cacheInterval: 120,
+  cacheLeadBeforeBoss: 15,
+  cacheLifetime: 38,
+  cacheOfferDuration: 0,
+  shieldDuration: 60,
+  megaEvery: 5,
+  megaHealthMul: 2.2,
+  megaDamageMul: 1.25,
+  megaVisualMul: 2.0,
+  megaColliderMul: 1.55,
+  megaMoveMul: 0.85,
   fixedDt: 1 / 60,
   repairDropChance: 0.04,
   regenPerLevel: 0.45,
@@ -136,7 +161,15 @@ export const SURVIVOR = {
 
 export type SurvivorForm = 'astronaut' | 'ship' | 'mech';
 
-export type WeaponId = 'pulse' | 'microdrone' | 'rail' | 'gravity' | 'rocket' | 'bioplasma';
+export type WeaponId =
+  | 'pulse'
+  | 'microdrone'
+  | 'rail'
+  | 'gravity'
+  | 'rocket'
+  | 'bioplasma'
+  | 'arc'
+  | 'orbital';
 
 export interface WeaponLevelDef {
   level: number;
@@ -164,6 +197,9 @@ export interface WeaponFamily {
   description: string;
   color: string;
   levels: WeaponLevelDef[];
+  /** Time-gated prototype weapon; does not consume ordinary slots. */
+  prototype?: boolean;
+  unlockTime?: number;
 }
 
 export const WEAPONS: Record<WeaponId, WeaponFamily> = {
@@ -314,6 +350,38 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       },
     ],
   },
+
+  arc: {
+    id: 'arc',
+    name: 'Arc Conductor',
+    description: 'Chain lightning that jumps between hostiles and bosses.',
+    color: '#88eeff',
+    prototype: true,
+    unlockTime: 300,
+    levels: [
+      { level: 1, label: 'Arc Conductor I', damage: 34, cadence: 1.15, count: 1, radius: 3.2, pierce: 2 },
+      { level: 2, label: 'Arc Conductor II', damage: 42, cadence: 1.05, count: 1, radius: 3.6, pierce: 2 },
+      { level: 3, label: 'Arc Conductor III', damage: 48, cadence: 0.95, count: 1, radius: 4.0, pierce: 3 },
+      { level: 4, label: 'Arc Conductor IV', damage: 56, cadence: 0.88, count: 1, radius: 4.4, pierce: 3 },
+      { level: 5, label: 'Arc Storm', damage: 68, cadence: 0.78, count: 1, radius: 5.0, pierce: 4, splash: 1.2 },
+    ],
+  },
+  orbital: {
+    id: 'orbital',
+    name: 'Orbital Lance',
+    description: 'Delayed orbital strike that prefers bosses and dense elites.',
+    color: '#ffd46a',
+    prototype: true,
+    unlockTime: 900,
+    levels: [
+      { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 1.6, life: 0.85 },
+      { level: 2, label: 'Orbital Lance II', damage: 170, cadence: 3.9, count: 1, radius: 1.85, life: 0.8 },
+      { level: 3, label: 'Orbital Lance III', damage: 190, cadence: 3.6, count: 2, radius: 1.75, life: 0.75 },
+      { level: 4, label: 'Orbital Lance IV', damage: 220, cadence: 3.35, count: 2, radius: 2.0, life: 0.7 },
+      { level: 5, label: 'Judgment Array', damage: 260, cadence: 3.0, count: 3, radius: 2.15, life: 0.65 },
+    ],
+  },
+
 };
 
 export type PassiveId =
@@ -428,8 +496,26 @@ export interface BossDef {
     hit: string[];
     death: string[];
   };
-  preferredPatterns: Array<'pulse' | 'line' | 'fan' | 'summon'>;
+  preferredPatterns: Array<BossPatternId>;
+  uniquePattern: BossPatternId;
 }
+
+export type BossPatternId =
+  | 'pulse'
+  | 'line'
+  | 'fan'
+  | 'summon'
+  | 'breach-orb'
+  | 'contamination'
+  | 'rupture-ring'
+  | 'cryo-lanes'
+  | 'ravage-charge'
+  | 'sweeping-beam'
+  | 'aerial-strafe'
+  | 'spore-bloom'
+  | 'gravity-collapse'
+  | 'cataclysm';
+
 
 export const BOSS_DEFS: BossDef[] = [
   {
@@ -442,7 +528,8 @@ export const BOSS_DEFS: BossDef[] = [
     role: 'brute',
     accent: '#ff4455',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
-    preferredPatterns: ['pulse', 'line', 'fan', 'summon'],
+    preferredPatterns: ['pulse', 'line', 'fan', 'summon', 'breach-orb', 'contamination'],
+    uniquePattern: 'rupture-ring',
   },
   {
     id: 'yeti',
@@ -454,7 +541,8 @@ export const BOSS_DEFS: BossDef[] = [
     role: 'brute',
     accent: '#88c8ff',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
-    preferredPatterns: ['pulse', 'line', 'summon'],
+    preferredPatterns: ['pulse', 'line', 'summon', 'breach-orb', 'contamination'],
+    uniquePattern: 'cryo-lanes',
   },
   {
     id: 'dino',
@@ -466,7 +554,8 @@ export const BOSS_DEFS: BossDef[] = [
     role: 'charger',
     accent: '#7dff9a',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Bite_Front', 'Jump'], hit: ['HitReact'], death: ['Death'] },
-    preferredPatterns: ['line', 'pulse', 'fan'],
+    preferredPatterns: ['line', 'pulse', 'fan', 'breach-orb', 'contamination'],
+    uniquePattern: 'ravage-charge',
   },
   {
     id: 'demon',
@@ -478,7 +567,8 @@ export const BOSS_DEFS: BossDef[] = [
     role: 'caster',
     accent: '#ff3366',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
-    preferredPatterns: ['fan', 'pulse', 'line'],
+    preferredPatterns: ['fan', 'pulse', 'line', 'breach-orb', 'contamination'],
+    uniquePattern: 'sweeping-beam',
   },
   {
     id: 'dragon',
@@ -490,7 +580,8 @@ export const BOSS_DEFS: BossDef[] = [
     role: 'flyer',
     accent: '#c080ff',
     anim: { idle: ['Flying_Idle', 'Idle'], walk: ['Fast_Flying', 'Fly'], attack: ['Punch', 'Headbutt', 'Attack'], hit: ['HitReact'], death: ['Death'] },
-    preferredPatterns: ['fan', 'line', 'summon'],
+    preferredPatterns: ['fan', 'line', 'summon', 'breach-orb', 'contamination'],
+    uniquePattern: 'aerial-strafe',
   },
   {
     id: 'mushroom-king',
@@ -502,7 +593,8 @@ export const BOSS_DEFS: BossDef[] = [
     role: 'summoner',
     accent: '#ffaa44',
     anim: { idle: ['Idle'], walk: ['Walk', 'Run'], attack: ['Punch', 'Weapon', 'Jump'], hit: ['HitReact'], death: ['Death'] },
-    preferredPatterns: ['summon', 'pulse', 'fan'],
+    preferredPatterns: ['summon', 'pulse', 'fan', 'breach-orb', 'contamination'],
+    uniquePattern: 'spore-bloom',
   },
 ];
 
@@ -660,8 +752,18 @@ export const SURVIVOR_BOSS = {
   patterns: {
     pulse: { windup: 1.0, active: 0.7, recovery: 0.85, damage: 16, maxRadius: 8 },
     line: { windup: 0.9, active: 0.45, recovery: 0.95, damage: 20, length: 20, width: 1.25 },
-    fan: { windup: 0.75, active: 0.15, recovery: 0.9, damage: 12, count: 6, speed: 14 },
+    fan: { windup: 1.05, active: 0.18, recovery: 0.95, damage: 12, count: 5, speed: 10 },
     summon: { windup: 0.95, active: 0.12, recovery: 1.15, count: 5 },
+    'breach-orb': { windup: 1.1, active: 0.2, recovery: 1.0, damage: 18, speed: 7 },
+    contamination: { windup: 1.0, active: 0.35, recovery: 1.05, damage: 10, radius: 3.0, life: 6 },
+    'rupture-ring': { windup: 1.15, active: 0.9, recovery: 1.1, damage: 18, maxRadius: 10 },
+    'cryo-lanes': { windup: 1.1, active: 0.7, recovery: 1.15, damage: 14, length: 22, width: 1.1 },
+    'ravage-charge': { windup: 1.2, active: 0.55, recovery: 1.2, damage: 22, length: 28, width: 1.4 },
+    'sweeping-beam': { windup: 1.15, active: 1.4, recovery: 1.1, damage: 16, length: 24, width: 1.0 },
+    'aerial-strafe': { windup: 1.0, active: 1.1, recovery: 1.0, damage: 14, length: 30, width: 1.6 },
+    'spore-bloom': { windup: 1.05, active: 0.4, recovery: 1.2, damage: 12, count: 5, radius: 1.4 },
+    'gravity-collapse': { windup: 1.3, active: 1.5, recovery: 1.3, damage: 22, maxRadius: 11 },
+    cataclysm: { windup: 1.2, active: 2.0, recovery: 1.4, damage: 20, count: 4, radius: 3.2 },
   },
   phaseMods: {
     1: { recoveryMul: 1.0, damageMul: 1.0, fanCountAdd: 0, summonCount: 3, idleGap: 0.55 },
@@ -685,10 +787,11 @@ export interface EndlessDifficulty {
 /** Unbounded endless enemy difficulty (pure). m = minutes elapsed. */
 export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
   const m = Math.max(0, timeSec / 60);
-  const late = Math.max(0, m - 8);
-  const healthMul = 1 + 0.12 * m + 0.02 * late * late;
-  const damageMul = 1 + 0.08 * m + 0.05 * Math.max(0, m - 10);
-  const speedMul = Math.min(1.3, 1 + 0.015 * m);
+  const late = Math.max(0, m - 5);
+  // Stronger late enemy HP so basics stop being permanent one-shots
+  const healthMul = 1 + 0.18 * m + 0.035 * late * late;
+  const damageMul = 1 + 0.07 * m + 0.04 * Math.max(0, m - 10);
+  const speedMul = Math.min(1.28, 1 + 0.014 * m);
   const attackRateMul = Math.min(1.7, 1 + 0.025 * m);
   const targetActive = Math.min(SURVIVOR.enemyCap, Math.floor(18 + 8 * m));
   const eliteChance = Math.min(0.45, 0.02 + 0.015 * m);
@@ -726,16 +829,31 @@ export interface BossDifficulty {
 }
 
 /** Boss index n begins at 1. */
+/** Quadratic regular boss HP growth (replaces 1.55^n exponential wall). */
+export function bossHealthMulFor(index: number): number {
+  const n = Math.max(1, Math.floor(index));
+  const k = n - 1;
+  return 1 + 0.65 * k + 0.1 * k * k;
+}
+
+export function isMegaBossIndex(index: number): boolean {
+  const n = Math.max(1, Math.floor(index));
+  return n % SURVIVOR.megaEvery === 0;
+}
+
 export function bossDifficultyFor(index: number): BossDifficulty {
   const n = Math.max(1, Math.floor(index));
+  const mega = isMegaBossIndex(n);
+  const healthMul = bossHealthMulFor(n) * (mega ? SURVIVOR.megaHealthMul : 1);
+  const damageMul = (1 + 0.12 * (n - 1)) * (mega ? SURVIVOR.megaDamageMul : 1);
   return {
     index: n,
-    healthMul: Math.pow(1.55, n - 1),
-    damageMul: Math.pow(1.18, n - 1),
-    recoveryMul: Math.max(0.45, Math.pow(0.94, n - 1)),
-    moveMul: Math.min(1.3, 1 + 0.035 * (n - 1)),
-    fanAdd: Math.min(8, Math.floor((n - 1) * 0.75)),
-    summonAdd: Math.min(8, Math.floor((n - 1) * 0.5)),
+    healthMul,
+    damageMul: Math.min(mega ? 4.5 : 3.2, damageMul),
+    recoveryMul: Math.max(0.5, Math.pow(0.95, n - 1)),
+    moveMul: Math.min(1.25, 1 + 0.03 * (n - 1)) * (mega ? SURVIVOR.megaMoveMul : 1),
+    fanAdd: Math.min(6, Math.floor((n - 1) * 0.55)),
+    summonAdd: Math.min(6, Math.floor((n - 1) * 0.4)),
   };
 }
 
@@ -772,16 +890,16 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
       { id: 'bruiser', weight: 2 },
       { id: 'elite', weight: 1.2 },
     ];
-  // Late endless — heavy elites and mixed pressure forever
+  // Late endless — fewer trivials, more bruisers/elites/ranged
   return [
-    { id: 'basic', weight: 2 },
-    { id: 'fast', weight: 3 },
+    { id: 'basic', weight: 1 },
+    { id: 'fast', weight: 2 },
     { id: 'spiky', weight: 2 },
-    { id: 'flyer', weight: 2 },
-    { id: 'ghost', weight: 2 },
-    { id: 'bruiser', weight: 3 },
-    { id: 'elite', weight: 2 },
-    { id: 'bee', weight: 1 },
+    { id: 'flyer', weight: 3 },
+    { id: 'ghost', weight: 3 },
+    { id: 'bruiser', weight: 4 },
+    { id: 'elite', weight: 3.2 },
+    { id: 'bee', weight: 1.5 },
   ];
 }
 
@@ -798,6 +916,7 @@ export interface TempBuffDef {
   body: string;
 }
 
+/** Legacy list — no longer offered on normal level-ups. Protocol Cache uses PROTOCOLS. */
 export const TEMP_BUFFS: TempBuffDef[] = [
   { id: 'emergency-repair', title: 'Emergency Repair', body: 'Restore integrity immediately.' },
   { id: 'weapon-overcharge', title: 'Weapon Overcharge', body: 'Temporary damage boost (~20s).' },
@@ -805,6 +924,59 @@ export const TEMP_BUFFS: TempBuffDef[] = [
   { id: 'emergency-barrier', title: 'Emergency Barrier', body: 'Absorb the next hit.' },
   { id: 'thruster-surge', title: 'Thruster Surge', body: 'Temporary move-speed boost.' },
 ];
+
+export type ProtocolId = 'aegis-barrier' | 'rocket-barrage' | 'gunship-flyby';
+
+export interface ProtocolDef {
+  id: ProtocolId;
+  title: string;
+  body: string;
+  duration: number;
+}
+
+export const PROTOCOLS: ProtocolDef[] = [
+  {
+    id: 'aegis-barrier',
+    title: 'Aegis Barrier',
+    body: 'Deploy a scalable shield that absorbs incoming damage first.',
+    duration: 60,
+  },
+  {
+    id: 'rocket-barrage',
+    title: 'Rocket Barrage',
+    body: 'Call a temporary rocket battery that prioritizes bosses (~15s).',
+    duration: 15,
+  },
+  {
+    id: 'gunship-flyby',
+    title: 'Gunship Flyby',
+    body: 'Your ship strafes the arena, raining fire along a telegraphed lane.',
+    duration: 6,
+  },
+];
+
+/** Shield points granted by Aegis Barrier at acquisition time. */
+export function computeShieldPoints(elapsedSec: number, maxHealth: number): number {
+  const m = Math.max(0, elapsedSec / 60);
+  return Math.round(35 + 6 * m + 0.08 * maxHealth);
+}
+
+/** Boss-focus base probability from elapsed time (before modifiers). */
+export function bossFocusBaseChance(timeSec: number): number {
+  if (timeSec < 600) return 0.08;
+  if (timeSec < 900) return 0.25;
+  if (timeSec < 1200) return 0.4;
+  return 0.55;
+}
+
+export function isPrototypeWeapon(id: WeaponId): boolean {
+  return !!WEAPONS[id]?.prototype;
+}
+
+export function ordinaryWeaponIds(): WeaponId[] {
+  return (Object.keys(WEAPONS) as WeaponId[]).filter((id) => !WEAPONS[id]!.prototype);
+}
+
 
 export function bossPhaseFromHealth(health: number, maxHealth: number): BossPhase {
   if (maxHealth <= 0) return 1;
@@ -824,6 +996,12 @@ export type SurvivorFixture =
   | 'survivor-ship'
   | 'survivor-damage'
   | 'survivor-miniboss'
+  | 'survivor-pickups'
+  | 'survivor-arc'
+  | 'survivor-orbital'
+  | 'survivor-mega'
+  | 'survivor-cache'
+  | 'survivor-shield'
   | null;
 
 export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
@@ -836,4 +1014,10 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-ship',
   'survivor-damage',
   'survivor-miniboss',
+  'survivor-pickups',
+  'survivor-arc',
+  'survivor-orbital',
+  'survivor-mega',
+  'survivor-cache',
+  'survivor-shield',
 ];

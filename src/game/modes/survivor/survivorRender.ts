@@ -31,7 +31,6 @@ export class SurvivorRenderer {
   private heroAccent = '#88e0ff';
   private enemies = new Map<number, ActorVis>();
   private bosses = new Map<number, ActorVis>();
-  private bossAuras = new Map<number, THREE.Group>();
   private projectiles = new Map<number, THREE.Mesh>();
   private pickups = new Map<number, THREE.Object3D>();
   private hazards = new Map<number, THREE.Object3D>();
@@ -292,73 +291,6 @@ export class SurvivorRenderer {
     }
   }
 
-  private makeBossAura(radius: number, color: string): THREE.Group {
-    const g = new THREE.Group();
-    g.name = 'boss-aura';
-    // Considerably stronger red hostile aura (readable in dense hordes)
-    const outerRing = new THREE.Mesh(
-      new THREE.RingGeometry(radius * 0.7, radius * 1.55, 56),
-      new THREE.MeshBasicMaterial({
-        color: '#ff1122',
-        transparent: true,
-        opacity: 0.72,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    outerRing.rotation.x = -Math.PI / 2;
-    outerRing.position.y = 0.06;
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(radius * 0.45, radius * 1.05, 48),
-      new THREE.MeshBasicMaterial({
-        color: '#ff3344',
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.08;
-    const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(radius * 1.15, 40),
-      new THREE.MeshBasicMaterial({
-        color: color || '#ff2244',
-        transparent: true,
-        opacity: 0.32,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = 0.04;
-    const light = new THREE.PointLight('#ff2233', 2.8, radius * 7, 1.6);
-    light.position.y = 1.8;
-    const particles = new THREE.Group();
-    particles.name = 'boss-aura-particles';
-    const pMat = new THREE.MeshBasicMaterial({
-      color: '#ff3355',
-      transparent: true,
-      opacity: 0.85,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const pGeo = new THREE.SphereGeometry(0.14, 6, 6);
-    for (let i = 0; i < 16; i += 1) {
-      const p = new THREE.Mesh(pGeo, pMat);
-      p.userData.baseY = 0.25 + (i % 6) * 0.22;
-      p.userData.speed = 0.7 + (i % 4) * 0.18;
-      p.userData.angle = (i / 16) * Math.PI * 2;
-      p.userData.orbit = radius * (0.45 + (i % 4) * 0.14);
-      particles.add(p);
-    }
-    g.add(glow, ring, outerRing, light, particles);
-    return g;
-  }
-
   private syncBoss(state: SurvivorState, dt: number): void {
     const aliveIds = new Set(
       state.bosses.filter((b) => b.active || (b.state === 'dead' && b.timer > 0)).map((b) => b.id),
@@ -367,12 +299,6 @@ export class SurvivorRenderer {
       if (!aliveIds.has(id)) {
         this.root.remove(vis.root);
         this.bosses.delete(id);
-      }
-    }
-    for (const [id, aura] of this.bossAuras) {
-      if (!aliveIds.has(id)) {
-        this.root.remove(aura);
-        this.bossAuras.delete(id);
       }
     }
     for (const b of state.bosses) {
@@ -417,53 +343,6 @@ export class SurvivorRenderer {
         }
         this.bosses.set(b.id, vis);
         this.root.add(vis.root);
-      }
-      let aura = this.bossAuras.get(b.id);
-      if (!aura && b.active && b.state !== 'dead') {
-        // Aura radius tracks doubled boss visual footprint
-        aura = this.makeBossAura(def.colliderRadius * 3.6 * (def.visualScale / 1.85), def.accent);
-        this.bossAuras.set(b.id, aura);
-        this.root.add(aura);
-      }
-      const scale =
-        def.visualScale * (b.phase >= 3 ? 1.08 : 1) * (1 + b.breachEmpower * 0.05);
-      this.place(vis, b.x, b.z, b.facingX, b.facingZ, scale);
-      if (aura) {
-        aura.visible = b.active && b.state !== 'dead';
-        aura.position.set(b.x, 0, b.z);
-        const t = performance.now() * 0.001;
-        const pulse = 0.9 + Math.sin(t * 6 + b.id) * 0.12;
-        const phaseBoost = b.phase === 3 ? 1.35 : b.phase === 2 ? 1.15 : 1;
-        aura.scale.setScalar(pulse * phaseBoost);
-        const particles = aura.getObjectByName('boss-aura-particles');
-        if (particles) {
-          for (const child of particles.children) {
-            const u = child.userData as {
-              baseY: number;
-              speed: number;
-              angle: number;
-              orbit: number;
-            };
-            const rise = ((t * u.speed + u.baseY) % 2.2);
-            child.position.set(
-              Math.cos(u.angle + t * 0.8) * u.orbit,
-              rise,
-              Math.sin(u.angle + t * 0.8) * u.orbit,
-            );
-          }
-        }
-        aura.traverse((c) => {
-          if (c instanceof THREE.PointLight) {
-            c.intensity = 1.2 * phaseBoost * pulse;
-          }
-          if (
-            c instanceof THREE.Mesh &&
-            c.material instanceof THREE.MeshBasicMaterial &&
-            c.parent?.name !== 'boss-aura-particles'
-          ) {
-            c.material.opacity = Math.min(0.7, (c.geometry.type === 'RingGeometry' ? 0.45 : 0.18) * phaseBoost);
-          }
-        });
       }
       if (vis.animator) {
         if (b.state === 'dead') vis.animator.play('death', 0.08);
@@ -554,16 +433,71 @@ export class SurvivorRenderer {
       if (!p.active) continue;
       let obj = this.pickups.get(p.id);
       if (!obj) {
-        const color = p.kind === 'xp' ? '#66ffcc' : p.kind === 'repair' ? '#4df0d0' : '#ffcc44';
-        const mesh = new THREE.Mesh(
-          new THREE.OctahedronGeometry(p.kind === 'supply' ? 0.35 : 0.18, 0),
-          this.mat(color),
-        );
-        obj = mesh;
+        const g = new THREE.Group();
+        if (p.kind === 'xp') {
+          // Cyan crystalline energy core + additive halo
+          const core = new THREE.Mesh(
+            new THREE.OctahedronGeometry(0.22, 0),
+            this.effectMat('#66ffcc', 0.95, true),
+          );
+          const halo = new THREE.Mesh(
+            new THREE.SphereGeometry(0.32, 10, 10),
+            this.effectMat('#88ffdd', 0.22, true),
+          );
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.28, 0.03, 6, 16),
+            this.effectMat('#aaffee', 0.7, true),
+          );
+          ring.rotation.x = Math.PI / 2;
+          g.add(halo, core, ring);
+        } else if (p.kind === 'repair') {
+          // Magenta/white integrity cross — unmistakable vs energy
+          const core = new THREE.Mesh(
+            new THREE.SphereGeometry(0.16, 12, 12),
+            this.effectMat('#ffffff', 0.95, true),
+          );
+          const barH = new THREE.Mesh(
+            new THREE.BoxGeometry(0.42, 0.1, 0.1),
+            this.effectMat('#ff66aa', 0.92, true),
+          );
+          const barV = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.42, 0.1),
+            this.effectMat('#ff88cc', 0.92, true),
+          );
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.38, 0.04, 8, 20),
+            this.effectMat('#88ccff', 0.75, true),
+          );
+          ring.rotation.x = Math.PI / 2;
+          const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.4, 10, 10),
+            this.effectMat('#ff44aa', 0.18, true),
+          );
+          g.add(glow, ring, core, barH, barV);
+        } else {
+          // Gold supply beacon
+          const core = new THREE.Mesh(
+            new THREE.OctahedronGeometry(0.28, 0),
+            this.effectMat('#ffd46a', 0.95, true),
+          );
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.4, 0.05, 6, 18),
+            this.effectMat('#ffe8a0', 0.8, true),
+          );
+          ring.rotation.x = Math.PI / 2;
+          const pillar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.04, 0.04, 1.2, 6),
+            this.effectMat('#ffcc66', 0.45, true),
+          );
+          pillar.position.y = 0.6;
+          g.add(core, ring, pillar);
+        }
+        obj = g;
         this.pickups.set(p.id, obj);
         this.root.add(obj);
       }
-      obj.position.set(p.x, 0.5 + Math.sin(performance.now() * 0.008 + p.id) * 0.1, p.z);
+      const bob = 0.55 + Math.sin(performance.now() * 0.008 + p.id) * 0.12;
+      obj.position.set(p.x, bob, p.z);
       obj.rotation.y += 0.04;
     }
   }
@@ -752,7 +686,6 @@ export class SurvivorRenderer {
     this.exhaustL = null;
     this.exhaustR = null;
     this.bosses.clear();
-    this.bossAuras.clear();
   }
 }
 

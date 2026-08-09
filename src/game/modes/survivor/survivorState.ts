@@ -11,7 +11,7 @@ import {
   xpForLevel,
 } from './survivorContent';
 
-export type SurvivorPhase = 'playing' | 'levelup' | 'supply' | 'victory' | 'defeat' | 'paused';
+export type SurvivorPhase = 'playing' | 'levelup' | 'protocol' | 'supply' | 'victory' | 'defeat' | 'paused';
 
 export interface SurvivorEnemy {
   id: number;
@@ -47,7 +47,7 @@ export interface SurvivorEnemy {
   specialWindup: number;
 }
 
-export type ProjectileKind = 'bolt' | 'drone' | 'rocket' | 'enemy' | 'bioplasma';
+export type ProjectileKind = 'bolt' | 'drone' | 'rocket' | 'enemy' | 'bioplasma' | 'boss-orb' | 'boss-fan' | 'orbital-marker';
 
 export interface SurvivorProjectile {
   id: number;
@@ -75,7 +75,7 @@ export interface SurvivorProjectile {
   active: boolean;
 }
 
-export type HazardKind = 'wake' | 'puddle';
+export type HazardKind = 'wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
 
 export interface SurvivorHazard {
   id: number;
@@ -88,6 +88,9 @@ export interface SurvivorHazard {
   damage: number;
   color: string;
   active: boolean;
+  owner: 'player' | 'enemy';
+  tickCd: number;
+  armTimer: number;
 }
 
 export interface SurvivorPickup {
@@ -104,6 +107,9 @@ export interface SurvivorWeaponSlot {
   weaponId: WeaponId;
   level: number;
   cooldown: number;
+  /** Deterministic boss-focus debt accumulator [0,1). */
+  focusDebt: number;
+  prototype: boolean;
 }
 
 export interface SurvivorEffect {
@@ -119,7 +125,15 @@ export interface SurvivorEffect {
     | 'telegraph'
     | 'muzzle'
     | 'repulsor'
-    | 'wake';
+    | 'wake'
+    | 'heal'
+    | 'shield'
+    | 'arc'
+    | 'orbital'
+    | 'cache'
+    | 'mega'
+    | 'beam'
+    | 'gunship';
   x: number;
   z: number;
   life: number;
@@ -133,7 +147,7 @@ export interface SurvivorEffect {
   width?: number;
 }
 
-export type UpgradeChoiceKind = 'weapon' | 'passive' | 'new-weapon' | 'temp';
+export type UpgradeChoiceKind = 'weapon' | 'passive' | 'new-weapon' | 'protocol';
 
 export interface UpgradeChoice {
   kind: UpgradeChoiceKind;
@@ -142,7 +156,7 @@ export interface UpgradeChoice {
   body: string;
   weaponId?: WeaponId;
   passiveId?: PassiveId;
-  tempId?: import('./survivorContent').TempBuffId;
+  protocolId?: import('./survivorContent').ProtocolId;
 }
 
 export interface ActiveTempBuff {
@@ -158,16 +172,23 @@ export interface SurvivorBoss {
   defId: string;
   displayName: string;
   active: boolean;
+  isMega: boolean;
+  spawnTime: number;
   x: number;
   z: number;
   health: number;
   maxHealth: number;
   state: 'idle' | 'windup' | 'active' | 'recover' | 'dead';
-  pattern: 'pulse' | 'line' | 'fan' | 'summon' | null;
+  pattern: import('./survivorContent').BossPatternId | null;
   timer: number;
   facingX: number;
   facingZ: number;
   telegraphR: number;
+  /** Locked telegraph origin/direction (must not retarget after windup). */
+  lockX: number;
+  lockZ: number;
+  lockFx: number;
+  lockFz: number;
   chargeX: number;
   chargeZ: number;
   hitFlash: number;
@@ -180,8 +201,12 @@ export interface SurvivorBoss {
   moveMul: number;
   fanAdd: number;
   summonAdd: number;
-  /** Extra power from breach stacks while this boss lives */
   breachEmpower: number;
+  colliderRadius: number;
+  visualScale: number;
+  uniquePattern: import('./survivorContent').BossPatternId;
+  /** Cataclysm zone index / sweep angle progress */
+  patternParam: number;
 }
 
 export interface SurvivorMiniboss {
@@ -194,7 +219,7 @@ export interface SurvivorMiniboss {
 }
 
 /** Presentation-only damage event (does not affect sim authority). */
-export type DamageNumberKind = 'enemy' | 'player' | 'boss' | 'large' | 'ability' | 'kill';
+export type DamageNumberKind = 'enemy' | 'player' | 'boss' | 'large' | 'ability' | 'kill' | 'heal' | 'absorb';
 
 export interface DamageEvent {
   id: number;
@@ -241,13 +266,56 @@ export interface SurvivorState {
     invuln: number;
     hitFlash: number;
     alive: boolean;
+    /** @deprecated hit-count barrier removed; use shieldPoints. */
     barrierHits: number;
+    shieldPoints: number;
+    shieldMax: number;
+    shieldTime: number;
     damageMul: number;
     mechReadyAnnounced: boolean;
+    slowTimer: number;
+    slowMul: number;
   };
   weapons: SurvivorWeaponSlot[];
+  /** Ordinary + prototype weapons (prototypes flagged on slot). */
   passives: Partial<Record<PassiveId, number>>;
   tempBuffs: ActiveTempBuff[];
+  protocolActive: Array<{ id: import('./survivorContent').ProtocolId; remaining: number; potency: number }>;
+  protocolChoices: UpgradeChoice[];
+  cache: {
+    active: boolean;
+    x: number;
+    z: number;
+    life: number;
+    maxLife: number;
+    mega: boolean;
+    potency: number;
+  };
+  nextCacheTime: number;
+  unlocks: {
+    arc: boolean;
+    orbital: boolean;
+    arcOffered: boolean;
+    orbitalOffered: boolean;
+    arcBanner: number;
+    orbitalBanner: number;
+  };
+  megaBanner: number;
+  megasDefeated: number;
+  /** Temporary gunship presentation state. */
+  gunship: {
+    active: boolean;
+    t: number;
+    duration: number;
+    x0: number;
+    z0: number;
+    x1: number;
+    z1: number;
+    fireCd: number;
+    potency: number;
+  };
+  rocketProtocol: { active: boolean; remaining: number; fireCd: number; potency: number };
+
   enemies: SurvivorEnemy[];
   projectiles: SurvivorProjectile[];
   hazards: SurvivorHazard[];
@@ -299,6 +367,8 @@ export function emptyBoss(): SurvivorBoss {
     defId: 'blue-demon',
     displayName: 'Breach Demon',
     active: false,
+    isMega: false,
+    spawnTime: 0,
     x: 0,
     z: 0,
     health: 0,
@@ -309,6 +379,10 @@ export function emptyBoss(): SurvivorBoss {
     facingX: -1,
     facingZ: 0,
     telegraphR: 0,
+    lockX: 0,
+    lockZ: 0,
+    lockFx: 0,
+    lockFz: 1,
     chargeX: 0,
     chargeZ: 0,
     hitFlash: 0,
@@ -322,6 +396,10 @@ export function emptyBoss(): SurvivorBoss {
     fanAdd: 0,
     summonAdd: 0,
     breachEmpower: 0,
+    colliderRadius: 0.95,
+    visualScale: 3.7,
+    uniquePattern: 'rupture-ring',
+    patternParam: 0,
   };
 }
 
@@ -434,12 +512,51 @@ export function createSurvivorState(
       hitFlash: 0,
       alive: true,
       barrierHits: 0,
+      shieldPoints: 0,
+      shieldMax: 0,
+      shieldTime: 0,
       damageMul: 1,
       mechReadyAnnounced: false,
+      slowTimer: 0,
+      slowMul: 1,
     },
-    weapons: [{ weaponId: starter, level: 1, cooldown: 0.4 }],
+    weapons: [{ weaponId: starter, level: 1, cooldown: 0.4, focusDebt: 0, prototype: false }],
     passives: {},
     tempBuffs: [],
+    protocolActive: [],
+    protocolChoices: [],
+    cache: {
+      active: false,
+      x: 0,
+      z: 0,
+      life: 0,
+      maxLife: SURVIVOR.cacheLifetime,
+      mega: false,
+      potency: 1,
+    },
+    nextCacheTime: SURVIVOR.bossInterval - SURVIVOR.cacheLeadBeforeBoss,
+    unlocks: {
+      arc: false,
+      orbital: false,
+      arcOffered: false,
+      orbitalOffered: false,
+      arcBanner: 0,
+      orbitalBanner: 0,
+    },
+    megaBanner: 0,
+    megasDefeated: 0,
+    gunship: {
+      active: false,
+      t: 0,
+      duration: 0,
+      x0: 0,
+      z0: 0,
+      x1: 0,
+      z1: 0,
+      fireCd: 0,
+      potency: 1,
+    },
+    rocketProtocol: { active: false, remaining: 0, fireCd: 0, potency: 1 },
     enemies: [],
     projectiles: [],
     hazards: [],
@@ -488,7 +605,13 @@ function grantBuild(
   passives: Partial<Record<PassiveId, number>> = {},
   level = 8,
 ): void {
-  state.weapons = weapons.map((w) => ({ weaponId: w.id, level: w.level, cooldown: 0.2 }));
+  state.weapons = weapons.map((w) => ({
+    weaponId: w.id,
+    level: w.level,
+    cooldown: 0.2,
+    focusDebt: 0,
+    prototype: false,
+  }));
   state.passives = { ...passives };
   state.level = level;
   state.xp = 0;
@@ -519,6 +642,39 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
   } else if (fixture === 'survivor-mech') {
     state.player.mechCharge = 1;
     state.time = 120;
+  } else if (fixture === 'survivor-pickups') {
+    state.player.health = state.player.maxHealth * 0.45;
+    state.player.invuln = 8;
+  } else if (fixture === 'survivor-arc') {
+    state.time = SURVIVOR.arcUnlockTime - 0.05;
+    state.xp = state.xpNext;
+  } else if (fixture === 'survivor-orbital') {
+    state.time = SURVIVOR.orbitalUnlockTime - 0.05;
+    grantBuild(state, [{ id: state.weapons[0]!.weaponId, level: 4 }, { id: 'pulse', level: 3 }], {}, 10);
+    state.xp = state.xpNext;
+  } else if (fixture === 'survivor-mega') {
+    state.time = SURVIVOR.bossInterval * 5 - 0.05;
+    state.nextBossIndex = 5;
+    state.nextBossTime = SURVIVOR.bossInterval * 5;
+    grantBuild(
+      state,
+      [
+        { id: state.weapons[0]!.weaponId, level: 5 },
+        { id: 'pulse', level: 4 },
+        { id: 'rail', level: 3 },
+      ],
+      { 'weapon-haste': 2, area: 2, 'max-health': 2 },
+      12,
+    );
+  } else if (fixture === 'survivor-cache') {
+    state.time = SURVIVOR.bossInterval - SURVIVOR.cacheLeadBeforeBoss - 0.05;
+    state.nextCacheTime = SURVIVOR.bossInterval - SURVIVOR.cacheLeadBeforeBoss;
+    state.player.invuln = 10;
+  } else if (fixture === 'survivor-shield') {
+    state.player.shieldPoints = 80;
+    state.player.shieldMax = 80;
+    state.player.shieldTime = 60;
+    state.player.invuln = 0;
   } else if (fixture === 'survivor-boss') {
     // Just before first endless boss at 2:00 with a representative mid-run build
     state.time = SURVIVOR.bossInterval - 0.05;
