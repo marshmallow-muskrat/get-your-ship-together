@@ -335,7 +335,7 @@ describe('§6 bounded repair economy', () => {
   });
 });
 
-describe('endless-2.6.0 identity and late repair contracts', () => {
+describe('endless-2.6.1 identity and late repair contracts', () => {
   it('never offers another hero signature and exposes every shared weapon', () => {
     const signatures = new Set<WeaponId>(['microdrone', 'rail', 'bioplasma', 'rocket']);
     const seen = new Set<WeaponId>();
@@ -1099,7 +1099,7 @@ describe('§11 boss phase transitions', () => {
 // ---------------------------------------------------------------- §22 balance version
 
 describe('§22 release metadata', () => {
-  it('stamps endless-2.6.0 after the content-completion experiment', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.0');
+  it('stamps endless-2.6.1 after the hero-parity experiment', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.1');
   });
 });

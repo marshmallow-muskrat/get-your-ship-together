@@ -8,6 +8,34 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### Hero parity and combat readability (`endless-2.6.1` Test Center candidate)
+
+- Kept Boswell's Drone Formation unchanged as the measured reference instead of solving parity by
+  nerfing the hero players already enjoy.
+- Reworked Fitzwilliam's Rail Lance to score bounded candidate lines and fire through the most
+  valuable aligned pack. Its beam is wider, while authored damage was redistributed so effective
+  starter output remains inside the shared parity contract rather than becoming a hidden outlier.
+- Gave Fortunato's Bio-Plasma direct kills a visible secondary toxic detonation, raised early splash
+  finishing power, and made corrosive puddles temporarily slow surviving monsters.
+- Re-authored Rutherford's starter as a four-rocket distributed salvo. Rockets lead moving clusters,
+  divide fire between nearby packs, and use a proximity fuse instead of sailing past valid targets.
+- Rebuilt Plasma Wake as a genuinely wide, thin elliptical burn with orange plasma, animated flame
+  tongues, matching collision, boss damage, and exclusive continued operation during ship form.
+- Gave Rotary Cannon a dedicated alternating gold/white ballistic tracer so it no longer reads as
+  Boswell's Drone Formation with different numbers.
+- Removed boss-body displacement for astronaut, mech, and ship forms. Boss contact and charge damage
+  remain dangerous, but bosses are no longer solid walls that shove, pin, or trap the player.
+- Added focused hero-identity regression tests and expanded the generated weapon report with exact L1
+  volley cadence and shot-throughput figures. All authored L1–L5 curves still satisfy the 3–4.2×
+  progression contract and all starters remain within the benchmark's ±15% output band.
+- The final 96-run competent simulation moved the overall median from the 2.6.0 baseline's 5:30 to
+  10:18, with hero medians Boswell 8:54, Fitzwilliam 7:51, Fortunato 9:32, and Rutherford 10:50.
+  Mean +2σ is 18:40 and mean +3σ is 23:10, inside the founders' provisional tail targets. The
+  remaining hero spread is explicitly retained for human Test Center calibration rather than hidden
+  behind global enemy nerfs or a Boswell nerf.
+- Added visual QA fixtures for the rebuilt arsenal; production remains unchanged while the candidate
+  is evaluated through Test Center.
+
 ### Hero identity and content completion (`endless-2.6.0` Test Center candidate)
 
 - Made each hero's starting weapon an exclusive signature: Boswell's drones now fire as a visible

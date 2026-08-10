@@ -163,6 +163,21 @@ export function formatMarkdown(balanceVersion: string): string {
   L.push('');
   L.push(`Mean weighted output: ${mean.toFixed(0)}.`);
   L.push('');
+  L.push('## Starter firing geometry (L1)');
+  L.push('');
+  L.push('| Hero | Signature | Volley interval | Volleys/s | Shots/volley | Shots/s | Identity |');
+  L.push('| --- | --- | ---: | ---: | ---: | ---: | --- |');
+  for (const s of starters) {
+    const family = WEAPONS[s.weaponId]!;
+    const l1 = family.levels[0]!;
+    L.push(
+      `| ${s.heroId} | ${family.name} | ${l1.cadence.toFixed(2)}s | ${(1 / l1.cadence).toFixed(2)} | ${l1.count} | ${(l1.count / l1.cadence).toFixed(2)} | ${family.description} |`,
+    );
+  }
+  L.push('');
+  L.push('Shots/s is presentation cadence, not a DPS ranking: Rail pierces full lines,');
+  L.push('Bio-Plasma chains splash/corrosion, and rockets distribute area explosions.');
+  L.push('');
   L.push('## Per-scenario output (L1 → L5)');
   L.push('');
   L.push(`| Weapon | ${ALL_SCENARIOS.map((s) => s).join(' | ')} |`);

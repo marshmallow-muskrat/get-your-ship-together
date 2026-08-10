@@ -534,6 +534,8 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   slot.interceptX = x;
   slot.interceptZ = z;
   slot.huntMomentum = 0;
+  slot.slowTimer = 0;
+  slot.slowMul = 1;
   pushEffect(state, 'impact', x, z, 0.25, isMb ? '#ffcc44' : '#ff6688', isMb ? 1.8 : 0.8);
   return slot;
 }
@@ -1003,6 +1005,7 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     sourceBossId: 0,
     hitPlayer: false,
     splitDone: false,
+    fuseDelay: 0,
   };
   state.projectiles.push(p);
   return p;
@@ -1035,6 +1038,10 @@ function acquireHazard(state: SurvivorState): SurvivorHazard | null {
     tickCd: 0,
     armTimer: 0,
     sourceBossId: 0,
+    scaleX: 1,
+    scaleZ: 1,
+    facingX: 0,
+    facingZ: 1,
   };
   state.hazards.push(h);
   return h;
@@ -1049,7 +1056,7 @@ function spawnHazard(
   life: number,
   damage: number,
   color: string,
-  opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd' | 'sourceBossId'>>,
+  opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd' | 'sourceBossId' | 'scaleX' | 'scaleZ' | 'facingX' | 'facingZ'>>,
 ): void {
   const h = acquireHazard(state);
   if (!h) return;
@@ -1067,6 +1074,10 @@ function spawnHazard(
   h.tickCd = opts?.tickCd ?? 0;
   h.armTimer = opts?.armTimer ?? 0;
   h.sourceBossId = opts?.sourceBossId ?? 0;
+  h.scaleX = opts?.scaleX ?? 1;
+  h.scaleZ = opts?.scaleZ ?? 1;
+  h.facingX = opts?.facingX ?? 0;
+  h.facingZ = opts?.facingZ ?? 1;
 }
 
 function nearestEnemy(state: SurvivorState, x: number, z: number, maxR: number): SurvivorEnemy | null {
@@ -1150,6 +1161,38 @@ function densestPoint(state: SurvivorState, originX: number, originZ: number): {
   return { x: s.sx / s.count, z: s.sz / s.count };
 }
 
+/** Ranked, motion-led clusters so a rocket salvo covers threats instead of overkilling one cell. */
+function rocketClusterTargets(
+  state: SurvivorState,
+  originX: number,
+  originZ: number,
+  count: number,
+  lead: number,
+): Array<{ x: number; z: number }> {
+  const cells = new Map<string, { x: number; z: number; weight: number; count: number }>();
+  const cellSize = 4.2;
+  for (const e of state.enemies) {
+    if (!e.alive || (e.x - originX) ** 2 + (e.z - originZ) ** 2 > 24 ** 2) continue;
+    const speed = enemyBaseSpeed(e);
+    const fl = Math.hypot(e.facingX, e.facingZ) || 1;
+    const x = e.x + (e.facingX / fl) * speed * lead;
+    const z = e.z + (e.facingZ / fl) * speed * lead;
+    const key = `${Math.round(x / cellSize)},${Math.round(z / cellSize)}`;
+    const cell = cells.get(key) ?? { x: 0, z: 0, weight: 0, count: 0 };
+    const weight = e.isMiniboss ? 5 : e.isElite ? 3 : 1;
+    cell.x += x * weight;
+    cell.z += z * weight;
+    cell.weight += weight;
+    cell.count += 1;
+    cells.set(key, cell);
+  }
+  const ranked = [...cells.values()]
+    .sort((a, b) => b.weight - a.weight)
+    .map((c) => ({ x: c.x / c.weight, z: c.z / c.weight }));
+  if (ranked.length === 0) ranked.push(densestPoint(state, originX, originZ));
+  return ranked.slice(0, Math.max(1, count));
+}
+
 function segmentHit(
   x0: number,
   z0: number,
@@ -1168,6 +1211,54 @@ function segmentHit(
   const px = x0 + dx * t;
   const pz = z0 + dz * t;
   return (cx - px) ** 2 + (cz - pz) ** 2 <= r * r;
+}
+
+/**
+ * Fitzwilliam aims through the most valuable current line, rather than at one body.
+ * Candidate count is bounded so this remains cheap at the 160-enemy cap.
+ */
+function bestRailDirection(
+  state: SurvivorState,
+  slot: SurvivorWeaponSlot,
+  x: number,
+  z: number,
+  length: number,
+  width: number,
+): { fx: number; fz: number } {
+  const preferred = selectWeaponTarget(state, slot, x, z, length + 2);
+  if (preferred?.kind === 'boss') {
+    const d = Math.hypot(preferred.boss.x - x, preferred.boss.z - z) || 1;
+    return { fx: (preferred.boss.x - x) / d, fz: (preferred.boss.z - z) / d };
+  }
+  const candidates = state.enemies
+    .filter((e) => e.alive && (e.x - x) ** 2 + (e.z - z) ** 2 <= (length + 2) ** 2)
+    .sort((a, b) => (a.x - x) ** 2 + (a.z - z) ** 2 - ((b.x - x) ** 2 + (b.z - z) ** 2))
+    .slice(0, 24);
+  if (preferred?.kind === 'enemy' && !candidates.some((e) => e.id === preferred.enemy.id)) {
+    candidates.unshift(preferred.enemy);
+  }
+  let best = { fx: state.player.facingX, fz: state.player.facingZ };
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const d = Math.hypot(candidate.x - x, candidate.z - z) || 1;
+    const fx = (candidate.x - x) / d;
+    const fz = (candidate.z - z) / d;
+    const x1 = x + fx * length;
+    const z1 = z + fz * length;
+    let score = 0;
+    for (const e of state.enemies) {
+      if (!e.alive || !segmentHit(x, z, x1, z1, e.x, e.z, e.radius + width * 0.5)) continue;
+      score += e.isMiniboss ? 6 : e.isElite ? 3 : 1;
+    }
+    for (const b of livingBosses(state)) {
+      if (segmentHit(x, z, x1, z1, b.x, b.z, b.colliderRadius + width * 0.5)) score += 4;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = { fx, fz };
+    }
+  }
+  return best;
 }
 
 function applyKnockback(e: SurvivorEnemy, nx: number, nz: number, force: number): void {
@@ -1296,16 +1387,24 @@ export function clearShipHazards(state: SurvivorState): void {
 
 function fireWeapons(state: SurvivorState, dt: number): void {
   const p = state.player;
+  const haste = hasteMul(state);
+  const area = areaMul(state);
   if (p.form === 'ship') {
-    // Weapons offline in ship form — still tick cooldowns lightly so they don't burst on exit
+    // Plasma Wake is the one authored ship synergy. Other weapons remain offline.
     for (const slot of state.weapons) {
-      slot.cooldown = Math.max(0, slot.cooldown - dt * 0.35);
+      if (slot.weaponId !== 'plasma-wake') {
+        slot.cooldown = Math.max(0, slot.cooldown - dt * 0.35);
+        continue;
+      }
+      slot.cooldown = Math.max(0, slot.cooldown - dt);
+      if (slot.cooldown > 0 || !p.isMoving) continue;
+      const def = wdef(slot.weaponId, slot.level);
+      slot.cooldown = def.cadence / haste;
+      firePlasmaWake(state, def, area, false, true);
     }
     return;
   }
 
-  const haste = hasteMul(state);
-  const area = areaMul(state);
   const mech = p.form === 'mech';
 
   for (const slot of state.weapons) {
@@ -1378,20 +1477,12 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       }
     } else if (slot.weaponId === 'rail') {
       for (let i = 0; i < count; i += 1) {
-        const aim = selectWeaponTarget(state, slot, p.x, p.z, 18);
-        const pos = targetPosition(aim);
-        let fx = p.facingX;
-        let fz = p.facingZ;
-        if (pos) {
-          const len = Math.hypot(pos.x - p.x, pos.z - p.z) || 1;
-          fx = (pos.x - p.x) / len;
-          fz = (pos.z - p.z) / len;
-        }
+        const length = (def.length ?? 14) * (mech ? 1.15 : 1);
+        const width = (def.width ?? 0.5) * area;
+        const { fx, fz } = bestRailDirection(state, slot, p.x, p.z, length, width);
         const off = (i - (count - 1) / 2) * 0.35;
         const ox = -fz * off;
         const oz = fx * off;
-        const length = (def.length ?? 14) * (mech ? 1.15 : 1);
-        const width = (def.width ?? 0.5) * area;
         const x1 = p.x + ox + fx * length;
         const z1 = p.z + oz + fz * length;
         state.rails.push({
@@ -1413,6 +1504,10 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           if (!e.alive) continue;
           if (segmentHit(p.x + ox, p.z + oz, x1, z1, e.x, e.z, e.radius + width * 0.5)) {
             damageEnemy(state, e, dmg, { src: weaponSrc('rail') });
+            if (e.alive) {
+              const push = e.isMiniboss ? 0.8 : e.isElite ? 2.2 : 5.5;
+              applyKnockback(e, fx, fz, push);
+            }
           }
         }
         for (const b of state.bosses) {
@@ -1463,15 +1558,19 @@ function fireWeapons(state: SurvivorState, dt: number): void {
     } else if (slot.weaponId === 'rocket') {
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 22);
       const bossPos = targetPosition(aim);
-      const cluster = bossPos && aim?.kind === 'boss' ? bossPos : densestPoint(state, p.x, p.z);
+      const travelBase = 0.32;
+      const clusters = bossPos && aim?.kind === 'boss'
+        ? [bossPos]
+        : rocketClusterTargets(state, p.x, p.z, count, travelBase);
       for (let i = 0; i < count; i += 1) {
+        const cluster = clusters[i % clusters.length]!;
         const ox = (i - (count - 1) / 2) * 0.9;
-        const tx = cluster.x - state.player.facingZ * ox + (rng(state) - 0.5) * 0.6;
-        const tz = cluster.z + state.player.facingX * ox + (rng(state) - 0.5) * 0.6;
+        const tx = cluster.x - state.player.facingZ * ox * 0.35 + (rng(state) - 0.5) * 0.3;
+        const tz = cluster.z + state.player.facingX * ox * 0.35 + (rng(state) - 0.5) * 0.3;
         const proj = acquireProjectile(state);
         if (!proj) break;
         // Launch from player and travel visibly to impact (not materialize on target).
-        const travel = 0.28 + i * 0.04;
+        const travel = travelBase + i * 0.035;
         const dx = tx - p.x;
         const dz = tz - p.z;
         const dist = Math.hypot(dx, dz) || 1;
@@ -1482,6 +1581,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           life: travel + 0.08,
           color: state.accent,
           armTimer: travel,
+          fuseDelay: 0.11,
           explodeRadius: (def.radius ?? 1.4) * area,
         });
         pushEffect(state, 'muzzle', p.x, p.z, 0.12, state.accent, 0.9);
@@ -1522,37 +1622,24 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const proj = acquireProjectile(state);
         if (!proj) break;
         const spd = def.speed ?? 35;
-        resetProj(proj, state, 'bolt', 'rotary', p.x, p.z, Math.sin(a + spread) * spd, Math.cos(a + spread) * spd, {
+        const barrel = state.nextId % 2 === 0 ? -0.22 : 0.22;
+        const sx = p.x - Math.cos(a) * barrel;
+        const sz = p.z + Math.sin(a) * barrel;
+        resetProj(proj, state, 'rotary-round', 'rotary', sx, sz, Math.sin(a + spread) * spd, Math.cos(a + spread) * spd, {
           damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
           radius: (def.radius ?? 0.17) * area,
           life: def.life ?? 1.1,
           pierce: def.pierce ?? 0,
           color: WEAPONS.rotary.color,
         });
+        pushEffect(state, 'muzzle', sx, sz, 0.1, '#fff0a8', 0.9);
       }
-      pushEffect(state, 'muzzle', p.x, p.z, 0.07, WEAPONS.rotary.color, 0.65);
     } else if (slot.weaponId === 'plasma-wake') {
       if (!p.isMoving) {
         slot.cooldown = 0.1;
         continue;
       }
-      const side = count > 1 ? 0.75 : 0;
-      for (let i = 0; i < count; i += 1) {
-        const offset = count > 1 ? (i === 0 ? -side : side) : 0;
-        spawnHazard(
-          state,
-          'plasma-wake',
-          p.x - p.facingX * 0.8 - p.facingZ * offset,
-          p.z - p.facingZ * 0.8 + p.facingX * offset,
-          (def.radius ?? 1.2) * area,
-          def.life ?? 2,
-          def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
-          WEAPONS['plasma-wake'].color,
-        );
-      }
-      pushEffect(state, 'wake', p.x, p.z, 0.35, WEAPONS['plasma-wake'].color, (def.radius ?? 1.2) * area, {
-        radius: (def.radius ?? 1.2) * area,
-      });
+      firePlasmaWake(state, def, area, mech, false);
     } else if (slot.weaponId === 'pulsar') {
       const radius = (def.radius ?? 4) * area;
       for (let pulse = 0; pulse < count; pulse += 1) {
@@ -1574,6 +1661,46 @@ function fireWeapons(state: SurvivorState, dt: number): void {
     } else if (slot.weaponId === 'orbital') {
       fireOrbitalLance(state, slot, def, area, mech);
     }
+  }
+}
+
+function firePlasmaWake(
+  state: SurvivorState,
+  def: ReturnType<typeof wdef>,
+  area: number,
+  mech: boolean,
+  ship: boolean,
+): void {
+  const p = state.player;
+  const count = def.count;
+  const radius = (def.radius ?? 1.2) * area * (ship ? 1.18 : 1);
+  const sideScale = ship ? 2.15 : 1.72;
+  const forwardScale = ship ? 0.52 : 0.48;
+  for (let i = 0; i < count; i += 1) {
+    const offset = count > 1 ? (i - (count - 1) / 2) * radius * 0.9 : 0;
+    const x = p.x - p.facingX * (ship ? 1.3 : 0.75) - p.facingZ * offset;
+    const z = p.z - p.facingZ * (ship ? 1.3 : 0.75) + p.facingX * offset;
+    spawnHazard(
+      state,
+      'plasma-wake',
+      x,
+      z,
+      radius,
+      def.life ?? 2,
+      def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+      WEAPONS['plasma-wake'].color,
+      {
+        scaleX: sideScale,
+        scaleZ: forwardScale,
+        facingX: p.facingX,
+        facingZ: p.facingZ,
+      },
+    );
+    pushEffect(state, 'plasma-flare', x, z, 0.38, '#ffb34a', radius * sideScale, {
+      radius: radius * sideScale,
+      facingX: p.facingX,
+      facingZ: p.facingZ,
+    });
   }
 }
 
@@ -1738,6 +1865,7 @@ function resetProj(
   proj.sourceBossId = opts.sourceBossId ?? 0;
   proj.hitPlayer = opts.hitPlayer ?? false;
   proj.splitDone = opts.splitDone ?? false;
+  proj.fuseDelay = opts.fuseDelay ?? 0;
 }
 
 function fireBioGlob(
@@ -1774,7 +1902,7 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
       const dx = e.x - hitX;
       const dz = e.z - hitZ;
       if (dx * dx + dz * dz <= (proj.splash + e.radius) ** 2) {
-        damageEnemy(state, e, proj.damage * 0.55, { src: weaponSrc('bioplasma') });
+        damageEnemy(state, e, proj.damage * 0.8, { src: weaponSrc('bioplasma') });
       }
     }
     for (const b of state.bosses) {
@@ -1817,6 +1945,17 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
         splitOnHit: 0,
       });
     }
+  }
+}
+
+/** Fortunato converts a direct kill into a readable secondary toxic detonation. */
+function toxicKillBurst(state: SurvivorState, proj: SurvivorProjectile, x: number, z: number): void {
+  const radius = Math.max(2.15, proj.splash * 1.35);
+  const damage = proj.damage * 0.6;
+  pushEffect(state, 'toxic-burst', x, z, 0.46, '#76ff68', radius, { radius });
+  for (const e of state.enemies) {
+    if (!e.alive || (e.x - x) ** 2 + (e.z - z) ** 2 > (radius + e.radius) ** 2) continue;
+    damageEnemy(state, e, damage, { kind: 'ability', pop: 0.7, src: weaponSrc('bioplasma') });
   }
 }
 
@@ -2036,11 +2175,22 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       proj.x += proj.vx * dt;
       proj.z += proj.vz * dt;
       proj.armTimer -= dt;
+      proj.fuseDelay = Math.max(0, proj.fuseDelay - dt);
       proj.life -= dt;
       if (proj.kind === 'rocket' && proj.armTimer > 0) {
         if ((proj.id + Math.floor(state.time * 30)) % 3 === 0) {
           pushEffect(state, 'muzzle', proj.x, proj.z, 0.08, proj.color, 0.45);
         }
+      }
+      if (proj.kind === 'rocket' && proj.armTimer > 0 && proj.fuseDelay <= 0) {
+        const fuseRadius = Math.max(0.7, proj.explodeRadius * 0.58);
+        const nearEnemy = state.enemies.some(
+          (e) => e.alive && (e.x - proj.x) ** 2 + (e.z - proj.z) ** 2 <= (fuseRadius + e.radius) ** 2,
+        );
+        const nearBoss = livingBosses(state).some(
+          (b) => (b.x - proj.x) ** 2 + (b.z - proj.z) ** 2 <= (fuseRadius + b.colliderRadius) ** 2,
+        );
+        if (nearEnemy || nearBoss) proj.armTimer = 0;
       }
       if (proj.armTimer > 0 && proj.life > 0) continue;
       const er = proj.explodeRadius || proj.radius;
@@ -2065,6 +2215,11 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         const dz = e.z - proj.z;
         if (dx * dx + dz * dz <= (er + e.radius) ** 2) {
           damageEnemy(state, e, proj.damage, { src: projSrc(proj) });
+          if (proj.kind === 'rocket' && e.alive) {
+            const len = Math.hypot(dx, dz) || 1;
+            const push = e.isMiniboss ? 0.35 : e.isElite ? 0.75 : 1.8;
+            applyKnockback(e, dx / len, dz / len, push);
+          }
         }
       }
       for (const b of state.bosses) {
@@ -2144,6 +2299,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         if (proj.kind === 'bioplasma') {
           const hx = hitEnemy.x;
           const hz = hitEnemy.z;
+          if (!hitEnemy.alive) toxicKillBurst(state, proj, hx, hz);
           if (proj.bounceLeft > 0) {
             proj.bounceLeft -= 1;
             const next = nearestEnemy(state, hx, hz, 10);
@@ -2212,6 +2368,21 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
   }
 }
 
+function hazardHitsPoint(h: SurvivorHazard, x: number, z: number, pointRadius = 0): boolean {
+  const fl = Math.hypot(h.facingX, h.facingZ) || 1;
+  const fx = h.facingX / fl;
+  const fz = h.facingZ / fl;
+  const sx = -fz;
+  const sz = fx;
+  const dx = x - h.x;
+  const dz = z - h.z;
+  const localSide = dx * sx + dz * sz;
+  const localForward = dx * fx + dz * fz;
+  const rx = Math.max(0.01, h.radius * h.scaleX + pointRadius);
+  const rz = Math.max(0.01, h.radius * h.scaleZ + pointRadius);
+  return (localSide * localSide) / (rx * rx) + (localForward * localForward) / (rz * rz) <= 1;
+}
+
 function updateHazards(state: SurvivorState, dt: number): void {
   for (const h of state.hazards) {
     if (!h.active) continue;
@@ -2247,20 +2418,21 @@ function updateHazards(state: SurvivorState, dt: number): void {
 
     for (const e of state.enemies) {
       if (!e.alive || e.hazardHitCd > 0) continue;
-      const dx = e.x - h.x;
-      const dz = e.z - h.z;
-      if (dx * dx + dz * dz <= (h.radius + e.radius) ** 2) {
+      if (hazardHitsPoint(h, e.x, e.z, e.radius)) {
         damageEnemy(state, e, h.damage, { src: hazardSrc(h) });
+        if (h.kind === 'puddle') {
+          e.slowTimer = Math.max(e.slowTimer, 0.7);
+          e.slowMul = Math.min(e.slowMul, 0.72);
+        }
         e.hazardHitCd = SURVIVOR.ship.wakeTickCd;
       }
     }
-    if (h.kind === 'wake') {
+    if (h.kind === 'wake' || h.kind === 'plasma-wake') {
       for (const b of state.bosses) {
         if (!b.active || b.state === 'dead' || b.hitFlash > 0.02) continue;
-        const dx = b.x - h.x;
-        const dz = b.z - h.z;
-        if (dx * dx + dz * dz <= (h.radius + b.colliderRadius) ** 2) {
-          damageBoss(state, h.damage * 0.7, { boss: b, src: hazardSrc(h) });
+        if (hazardHitsPoint(h, b.x, b.z, b.colliderRadius)) {
+          const bossMul = h.kind === 'plasma-wake' ? 0.65 : 0.7;
+          damageBoss(state, h.damage * bossMul, { boss: b, src: hazardSrc(h) });
         }
       }
     }
@@ -2352,8 +2524,16 @@ function updateEnemies(state: SurvivorState, dt: number): void {
   const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
   for (const e of state.enemies) {
     if (!e.alive) continue;
+    // Older fixtures and in-memory records predate temporary enemy slows. Keep
+    // absent values from poisoning movement with `undefined * speed` / NaN.
+    if (!Number.isFinite(e.slowTimer)) e.slowTimer = 0;
+    if (!Number.isFinite(e.slowMul) || e.slowMul <= 0) e.slowMul = 1;
     if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
     if (e.hazardHitCd > 0) e.hazardHitCd = Math.max(0, e.hazardHitCd - dt);
+    if (e.slowTimer > 0) {
+      e.slowTimer = Math.max(0, e.slowTimer - dt);
+      if (e.slowTimer <= 0) e.slowMul = 1;
+    }
     e.attackCd = Math.max(0, e.attackCd - dt);
     e.lungeCd = Math.max(0, e.lungeCd - dt);
     e.interceptTimer = Math.max(0, e.interceptTimer - dt);
@@ -2410,7 +2590,7 @@ function updateEnemies(state: SurvivorState, dt: number): void {
         ndz = mz / ml;
       }
     }
-    const speed = enemyBaseSpeed(e) * advance;
+    const speed = enemyBaseSpeed(e) * advance * e.slowMul;
 
     // Elite/hunter: windup (no move) → locked dash → recovery
     if ((role === 'elite' || role === 'hunter') && e.windup > 0) {
@@ -4412,7 +4592,7 @@ const bossApi = makeBossApi();
 // transition actually does. This wiring keeps that split without an import cycle.
 setPhaseTransitionHandler(resolveBossPhaseTransition);
 
-function applyBossBodyContact(state: SurvivorState): void {
+export function applyBossBodyContact(state: SurvivorState): void {
   const p = state.player;
   if (!p.alive || p.invuln > 0 || p.dodgeActive > 0 || p.bossContactCd > 0) return;
   const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
@@ -4433,14 +4613,9 @@ function applyBossBodyContact(state: SurvivorState): void {
       makeBossSource(b, charging ? 'boss-charge' : 'boss-body', charging ? 'Ravage Charge' : 'Body Slam'),
     );
     p.bossContactCd = 0.45;
-    // Separation so player is not stuck inside the model.
-    const n = dist > 1e-4 ? dist : 1;
-    const push = 1.8 + b.colliderRadius * 0.15;
-    p.x += (dx / n) * push;
-    p.z += (dz / n) * push;
-    const c = clampArena(p.x, p.z, pr);
-    p.x = c.x;
-    p.z = c.z;
+    // Boss bodies are damage volumes, not solid walls. The player must remain
+    // free to pass through them in every form instead of being shoved, pinned,
+    // or trapped against the arena boundary.
     break;
   }
 }

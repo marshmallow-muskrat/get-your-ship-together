@@ -173,9 +173,25 @@ export class SurvivorRenderer {
 
   /** Distinct readable silhouettes for signature projectiles. */
   private createProjectileActor(kind: import('./survivorState').ProjectileKind, color: string): THREE.Object3D {
-    if (kind !== 'rocket' && kind !== 'drone') return new THREE.Mesh(this.boltGeo, this.mat(color));
+    if (kind !== 'rocket' && kind !== 'drone' && kind !== 'rotary-round') {
+      return new THREE.Mesh(this.boltGeo, this.mat(color));
+    }
 
     const g = new THREE.Group();
+    if (kind === 'rotary-round') {
+      const glow = this.ownMesh(new THREE.Mesh(
+        new THREE.BoxGeometry(0.13, 0.11, 1.05),
+        this.effectMat('#ffb52f', 0.45, true),
+      ));
+      const core = this.ownMesh(new THREE.Mesh(
+        new THREE.BoxGeometry(0.045, 0.05, 0.78),
+        this.effectMat('#fff8d6', 1, true),
+      ));
+      glow.position.z = -0.25;
+      core.position.z = -0.08;
+      g.add(glow, core);
+      return g;
+    }
     const bodyMat = this.effectMat(kind === 'rocket' ? '#dbeeff' : color, 1, true);
     const accentMat = this.effectMat(kind === 'rocket' ? '#ff6a32' : '#e8fbff', 0.95, true);
     const glowMat = this.effectMat(kind === 'rocket' ? '#ffbf45' : color, 0.9, true);
@@ -621,25 +637,42 @@ export class SurvivorRenderer {
           const group = new THREE.Group();
           const core = this.ownMesh(new THREE.Mesh(
             new THREE.CircleGeometry(1, 32),
-            this.effectMat('#ff6f3d', 0.5, true),
+            this.effectMat('#ff4f24', 0.48, false),
           ));
           core.rotation.x = -Math.PI / 2;
           core.userData.baseOpacity = 0.5;
           const corona = this.ownMesh(new THREE.Mesh(
             new THREE.RingGeometry(0.52, 1.08, 40),
-            this.effectMat('#ffd36a', 0.72, true),
+            this.effectMat('#ff8a32', 0.62, true),
           ));
           corona.rotation.x = -Math.PI / 2;
           corona.position.y = 0.035;
           corona.userData.baseOpacity = 0.72;
           const hot = this.ownMesh(new THREE.Mesh(
             new THREE.RingGeometry(0.12, 0.42, 28),
-            this.effectMat('#fff4c8', 0.86, true),
+            this.effectMat('#ffd45a', 0.72, true),
           ));
           hot.rotation.x = -Math.PI / 2;
           hot.position.y = 0.055;
           hot.userData.baseOpacity = 0.86;
           group.add(core, corona, hot);
+          // Procedural flame tongues and sparks: visually strong without external assets.
+          for (let i = 0; i < 7; i += 1) {
+            const flame = this.ownMesh(new THREE.Mesh(
+              new THREE.ConeGeometry(0.11 + (i % 3) * 0.03, 0.62 + (i % 2) * 0.24, 7, 1, true),
+              this.effectMat(i % 2 === 0 ? '#ff5a24' : '#ffb83d', 0.8, true),
+            ));
+            flame.name = 'plasma-flame';
+            flame.userData.baseOpacity = 0.72;
+            flame.userData.flamePhase = i * 0.83;
+            flame.position.set(-0.72 + i * 0.24, 0.2 + (i % 2) * 0.08, (i % 3 - 1) * 0.2);
+            group.add(flame);
+          }
+          group.traverse((child) => {
+            if (!(child instanceof THREE.Mesh)) return;
+            child.material.depthTest = false;
+            child.renderOrder = 18;
+          });
           obj = group;
         } else {
           const ring = this.ownMesh(new THREE.Mesh(
@@ -655,12 +688,23 @@ export class SurvivorRenderer {
       }
       const t = h.life / h.maxLife;
       obj.position.set(h.x, h.kind === 'wake' || h.kind === 'plasma-wake' ? 0.06 : 0.04, h.z);
-      obj.scale.setScalar(h.radius * (0.85 + (1 - t) * 0.2));
-      if (h.kind === 'plasma-wake') obj.rotation.y += 0.025;
+      const growth = 0.85 + (1 - t) * 0.2;
+      if (h.kind === 'plasma-wake') {
+        obj.scale.set(h.radius * h.scaleX * growth, 1, h.radius * h.scaleZ * growth);
+        obj.rotation.y = Math.atan2(h.facingX, h.facingZ);
+      } else {
+        obj.scale.setScalar(h.radius * growth);
+      }
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
           const base = (c.userData.baseOpacity as number | undefined) ?? (h.kind === 'wake' ? 0.5 : 0.42);
           c.material.opacity = Math.max(0.08, t * base);
+          if (c.name === 'plasma-flame') {
+            const phase = (c.userData.flamePhase as number | undefined) ?? 0;
+            const flicker = 0.78 + Math.sin(performance.now() * 0.012 + phase) * 0.25;
+            c.scale.y = flicker;
+            c.position.y = 0.22 + flicker * 0.08;
+          }
         }
       });
     }
@@ -1291,6 +1335,60 @@ export class SurvivorRenderer {
       ring.position.y = 0.08;
       g.add(beam, core, ring);
       g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'toxic-burst') {
+      const r = e.radius ?? e.scale ?? 2.2;
+      const shock = this.ownMesh(new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.2, r, 40),
+        this.effectMat('#75ff6a', 0.78, true),
+      ));
+      shock.rotation.x = -Math.PI / 2;
+      shock.position.y = 0.08;
+      const cloud = this.ownMesh(new THREE.Mesh(
+        new THREE.SphereGeometry(r * 0.52, 18, 12),
+        this.effectMat('#a6ff67', 0.34, true),
+      ));
+      cloud.scale.y = 0.55;
+      cloud.position.y = 0.65;
+      g.add(shock, cloud);
+      for (let i = 0; i < 8; i += 1) {
+        const mote = this.ownMesh(new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.1 + (i % 3) * 0.035, 0),
+          this.effectMat(i % 2 ? '#d8ff8a' : '#62ff70', 0.9, true),
+        ));
+        const a = (i / 8) * Math.PI * 2;
+        mote.position.set(Math.cos(a) * r * 0.55, 0.35 + (i % 3) * 0.24, Math.sin(a) * r * 0.55);
+        g.add(mote);
+      }
+      g.position.set(e.x, 0, e.z);
+      g.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        child.material.depthTest = false;
+        child.renderOrder = 19;
+      });
+      return g;
+    }
+    if (e.kind === 'plasma-flare') {
+      const r = Math.min(2.8, (e.radius ?? e.scale ?? 1.5) * 0.35);
+      const flash = this.ownMesh(new THREE.Mesh(
+        new THREE.SphereGeometry(r, 16, 10),
+        this.effectMat('#ff8a3d', 0.28, true),
+      ));
+      flash.scale.y = 0.4;
+      flash.position.y = 0.28;
+      const spark = this.ownMesh(new THREE.Mesh(
+        new THREE.ConeGeometry(r * 0.24, r * 1.45, 9, 1, true),
+        this.effectMat('#fff0a0', 0.72, true),
+      ));
+      spark.position.y = r * 0.55;
+      g.add(flash, spark);
+      g.position.set(e.x, 0, e.z);
+      g.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        child.material.depthTest = false;
+        child.renderOrder = 20;
+      });
       return g;
     }
     if (e.kind === 'telegraph' && (e.length ?? 0) > 2) {

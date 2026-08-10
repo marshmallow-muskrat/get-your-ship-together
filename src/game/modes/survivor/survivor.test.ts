@@ -31,6 +31,7 @@ import {
 import {
   EMPTY_SURVIVOR_INPUT,
   applyChoice,
+  applyBossBodyContact,
   applyProtocolChoice,
   applyShipExhaust,
   bossDamageReduction,
@@ -1559,8 +1560,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.6.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.0');
+  it('is endless-2.6.1', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.1');
   });
 });
 
@@ -1694,6 +1695,36 @@ describe('melee horde and endless-2.3.0 balance', () => {
     expect(bossCategoryDamage('charge', 1, false)).toBeGreaterThan(bossCategoryDamage('body', 1, false));
     expect(bossCategoryDamage('body', 1, true)).toBeGreaterThan(bossCategoryDamage('body', 1, false));
   });
+
+  it.each(['astronaut', 'mech', 'ship'] as const)(
+    'boss contact damages but never displaces the %s form',
+    (form) => {
+      const state = createSurvivorState('bee', null, 1701);
+      state.player.form = form;
+      state.player.x = 2.25;
+      state.player.z = -1.75;
+      state.player.invuln = 0;
+      state.player.bossContactCd = 0;
+      const boss = emptyBoss();
+      boss.id = 9001;
+      boss.index = 1;
+      boss.active = true;
+      boss.state = 'idle';
+      boss.x = state.player.x;
+      boss.z = state.player.z;
+      boss.health = 10_000;
+      boss.maxHealth = 10_000;
+      state.bosses = [boss];
+
+      const before = { x: state.player.x, z: state.player.z, health: state.player.health };
+      applyBossBodyContact(state);
+
+      expect(state.player.health).toBeLessThan(before.health);
+      expect(state.player.x).toBe(before.x);
+      expect(state.player.z).toBe(before.z);
+      expect(state.player.bossContactCd).toBeGreaterThan(0);
+    },
+  );
 
   it('thruster boost is +6% per level and hard-capped at +30%', () => {
     const thr = PASSIVES.find((p) => p.id === 'move-speed')!;

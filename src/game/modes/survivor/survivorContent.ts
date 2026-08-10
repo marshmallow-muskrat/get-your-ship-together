@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.6.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.6.1';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -451,11 +451,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     color: '#ff7ab8',
     levels: [
       // Twin Rails at L4 is the explicit breakpoint; L3 widens instead of adding a rail.
-      { level: 1, label: 'Rail Lance I', damage: 110, cadence: 1.885, count: 1, width: 0.72, length: 16 },
-      { level: 2, label: 'Rail Lance II', damage: 122, cadence: 1.6288, count: 1, width: 0.78, length: 16.5 },
-      { level: 3, label: 'Focused Lance', damage: 129, cadence: 1.3568, count: 1, width: 0.8, length: 17 },
-      { level: 4, label: 'Wide Beam', damage: 158, cadence: 1.254, count: 1, width: 0.9, length: 17.5 },
-      { level: 5, label: 'Lance Battery', damage: 182, cadence: 2.1183, count: 2, width: 0.82, length: 18 },
+      { level: 1, label: 'Rail Lance I', damage: 100, cadence: 1.885, count: 1, width: 0.95, length: 16 },
+      { level: 2, label: 'Rail Lance II', damage: 115, cadence: 1.7, count: 1, width: 1.02, length: 16.5 },
+      { level: 3, label: 'Focused Lance', damage: 118, cadence: 1.3568, count: 1, width: 1.08, length: 17 },
+      { level: 4, label: 'Wide Beam', damage: 144, cadence: 1.254, count: 1, width: 1.2, length: 17.5 },
+      { level: 5, label: 'Lance Battery', damage: 174, cadence: 2.1183, count: 2, width: 1.1, length: 18 },
     ],
   },
   gravity: {
@@ -478,12 +478,14 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Visible mini-rockets launch from the hero and burst on impact.',
     color: '#ff8a4a',
     levels: [
-      // Cluster specialist: salvo size doubles across the span, blast radius grows gently.
-      { level: 1, label: 'Rocket Barrage I', damage: 42, cadence: 2.1404, count: 3, radius: 1.5, life: 0.36 },
-      { level: 2, label: 'Rocket Barrage II', damage: 49, cadence: 2.4, count: 4, radius: 1.54, life: 0.34 },
-      { level: 3, label: 'Salvo', damage: 52, cadence: 2.0224, count: 4, radius: 1.58, life: 0.32 },
-      { level: 4, label: 'Cluster', damage: 58, cadence: 2.1216, count: 5, radius: 1.63, life: 0.3 },
-      { level: 5, label: 'Carpet Fire', damage: 61, cadence: 1.8936, count: 6, radius: 1.68, life: 0.28 },
+      // Rutherford begins with a real distributed salvo. Growth then comes from
+      // cadence, blast coverage and one declared L4 launcher breakpoint rather
+      // than making the starter weak and asking upgrades to repair it.
+      { level: 1, label: 'Rocket Barrage I', damage: 46, cadence: 1.65, count: 4, radius: 1.6, life: 0.36 },
+      { level: 2, label: 'Rocket Barrage II', damage: 52, cadence: 1.5, count: 4, radius: 1.64, life: 0.34 },
+      { level: 3, label: 'Salvo', damage: 57, cadence: 1.25, count: 4, radius: 1.68, life: 0.32 },
+      { level: 4, label: 'Cluster', damage: 59, cadence: 1.6, count: 6, radius: 1.73, life: 0.3 },
+      { level: 5, label: 'Carpet Fire', damage: 72, cadence: 1.5, count: 7, radius: 1.8, life: 0.28 },
     ],
   },
   bioplasma: {
@@ -496,7 +498,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 1,
         label: 'Bio-Plasma Glob I',
-        damage: 34,
+        damage: 38,
         cadence: 0.626,
         count: 1,
         speed: 20,
@@ -510,7 +512,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 2,
         label: 'Bio-Plasma Glob II',
-        damage: 38,
+        damage: 43,
         cadence: 0.487,
         count: 1,
         speed: 21,
@@ -524,7 +526,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 3,
         label: 'Corrosive Glob',
-        damage: 42,
+        damage: 47,
         cadence: 0.401,
         count: 1,
         speed: 21.5,
@@ -538,7 +540,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 4,
         label: 'Twin Globs',
-        damage: 47,
+        damage: 53,
         cadence: 0.648,
         count: 2,
         speed: 22,
@@ -552,7 +554,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       {
         level: 5,
         label: 'Virulent Cascade',
-        damage: 52,
+        damage: 58,
         cadence: 0.897,
         count: 2,
         speed: 22.5,
@@ -591,7 +593,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       { level: 2, label: 'Plasma Wake II', damage: 66, cadence: 0.31, count: 1, radius: 1.22, life: 2.0 },
       { level: 3, label: 'Hot Trail', damage: 78, cadence: 0.28, count: 1, radius: 1.3, life: 2.2 },
       { level: 4, label: 'Fusion Footprint', damage: 90, cadence: 0.25, count: 1, radius: 1.4, life: 2.45 },
-      { level: 5, label: 'Twin Wake', damage: 99, cadence: 0.31, count: 2, radius: 1.5, life: 2.7 },
+      { level: 5, label: 'Twin Wake', damage: 99, cadence: 0.55, count: 2, radius: 1.5, life: 2.7 },
     ],
   },
   pulsar: {
@@ -1816,6 +1818,8 @@ export type SurvivorFixture =
   | 'survivor-shield'
   | 'survivor-recall'
   | 'survivor-gunship'
+  | 'survivor-identity'
+  | 'survivor-rotary'
   | 'survivor-stress'
   | null;
 
@@ -1838,5 +1842,7 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-shield',
   'survivor-recall',
   'survivor-gunship',
+  'survivor-identity',
+  'survivor-rotary',
   'survivor-stress',
 ];

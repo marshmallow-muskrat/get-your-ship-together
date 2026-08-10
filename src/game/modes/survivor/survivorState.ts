@@ -2,6 +2,7 @@ import type { HeroId } from '../../content/heroes';
 import { HEROES } from '../../content/heroes';
 import {
   SURVIVOR,
+  WEAPONS,
   type BossPhase,
   type PassiveId,
   type SurvivorFixture,
@@ -59,11 +60,15 @@ export interface SurvivorEnemy {
   interceptZ: number;
   /** Hunter momentum 0–1. */
   huntMomentum: number;
+  /** Temporary movement penalty from Fortunato corrosion. */
+  slowTimer: number;
+  slowMul: number;
 }
 
 export type ProjectileKind =
   | 'bolt'
   | 'drone'
+  | 'rotary-round'
   | 'rocket'
   | 'enemy'
   | 'bioplasma'
@@ -102,6 +107,8 @@ export interface SurvivorProjectile {
   /** One-hit flag for orbs. */
   hitPlayer: boolean;
   splitDone: boolean;
+  /** Minimum flight time before proximity detonation is armed. */
+  fuseDelay: number;
 }
 
 export type HazardKind = 'wake' | 'plasma-wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
@@ -122,6 +129,11 @@ export interface SurvivorHazard {
   armTimer: number;
   /** Owning boss for cleanup; 0 = none. */
   sourceBossId: number;
+  /** Elliptical footprint in local side/forward axes; 1/1 is circular. */
+  scaleX: number;
+  scaleZ: number;
+  facingX: number;
+  facingZ: number;
 }
 
 export interface SurvivorPickup {
@@ -172,6 +184,8 @@ export interface SurvivorEffect {
     | 'fleet-ship'
     | 'singularity'
     | 'titan-deploy'
+    | 'toxic-burst'
+    | 'plasma-flare'
     | 'elite-aura';
   x: number;
   z: number;
@@ -695,6 +709,8 @@ function emptyEnemy(): SurvivorEnemy {
     interceptX: 0,
     interceptZ: 0,
     huntMomentum: 0,
+    slowTimer: 0,
+    slowMul: 1,
   };
 }
 
@@ -1090,6 +1106,73 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       hitIds: [],
       spawnSuppress: 0,
     };
+  } else if (fixture === 'survivor-identity') {
+    state.time = 8 * 60;
+    grantBuild(
+      state,
+      [
+        { id: 'rail', level: 1 },
+        { id: 'bioplasma', level: 1 },
+        { id: 'rocket', level: 1 },
+        { id: 'rotary', level: 1 },
+        { id: 'plasma-wake', level: 1 },
+      ],
+      { area: 1 },
+      12,
+    );
+    for (const weapon of state.weapons) weapon.cooldown = 999;
+    state.player.invuln = 120;
+    state.player.shipCd = 0;
+    state.enemyCap = 0;
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    state.unlocks.arc = true;
+    state.unlocks.arcOffered = true;
+    state.hazards.push({
+      id: state.nextId++,
+      kind: 'plasma-wake',
+      x: 0,
+      z: 3,
+      radius: 1.15,
+      life: 120,
+      maxLife: 120,
+      damage: 0,
+      color: WEAPONS['plasma-wake'].color,
+      active: true,
+      owner: 'player',
+      tickCd: 0,
+      armTimer: 0,
+      sourceBossId: 0,
+      scaleX: 2.15,
+      scaleZ: 0.52,
+      facingX: 0,
+      facingZ: 1,
+    });
+    state.effects.push({
+      id: state.nextId++,
+      kind: 'toxic-burst',
+      x: 0,
+      z: -3,
+      life: 120,
+      maxLife: 120,
+      color: '#76ff68',
+      scale: 2.2,
+      radius: 2.2,
+    });
+  } else if (fixture === 'survivor-rotary') {
+    state.time = 8 * 60;
+    grantBuild(state, [{ id: 'rotary', level: 3 }], { 'weapon-haste': 1 }, 12);
+    state.player.invuln = 120;
+    state.enemyCap = 0;
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    state.unlocks.arc = true;
+    state.unlocks.arcOffered = true;
+    seedFixtureHorde(state, 14, 10);
   } else if (fixture === 'survivor-stress') {
     // Worst-case presentation load: full enemy cap, every weapon at L5, all abilities
     // ready and the boss schedule already deep. Used for the GPU stability procedure

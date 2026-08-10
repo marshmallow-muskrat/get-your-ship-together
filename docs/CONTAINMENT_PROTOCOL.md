@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.6.0` (Test Center candidate)
+**Current balance line:** `endless-2.6.1` (Test Center candidate)
 
 ## Purpose
 
@@ -111,9 +111,20 @@ Each hero owns one exclusive signature weapon: Boswell's directional Drone Forma
 Fitzwilliam's Rail Lance, Fortunato's Bio-Plasma Glob, and Rutherford's miniature Rocket Barrage.
 Signatures count toward the five ordinary weapon slots but cannot be offered to another hero.
 
+Boswell is the current performance reference and remains unchanged in `endless-2.6.1`. Rail Lance
+chooses the most valuable intersecting line rather than the nearest body; Bio-Plasma direct kills
+burst into nearby targets and its residue slows pursuit; Rocket Barrage distributes motion-led,
+proximity-fused mini-rockets across distinct clusters. These are mechanical identity improvements,
+not four recolored versions of one attack.
+
 Every hero can roll the shared Pulse Blaster, Gravity Pulse, Rotary Cannon, Plasma Wake, and Pulsar
 Core families. Arc Conductor and Orbital Lance remain prototype slots. The deterministic benchmark
 requires every authored family to grow 3–4.2× in its intended scenario from L1 to L5.
+
+Plasma Wake uses a wide, thin elliptical footprint whose renderer and collision share the same
+orientation and dimensions. It is the only ordinary weapon that continues operating during ship
+form and it can damage bosses. Rotary Cannon uses a dedicated ballistic tracer rather than the
+Drone Formation projectile presentation.
 
 ## Time-gated prototypes
 
@@ -137,6 +148,9 @@ accelerating post-20 curve.
 Enemy HP: `1 + 0.08m + 0.0125×max(0,m−10)²`, plus the post-30-minute Collapse tail.
 Every 5th boss is a **Mega-Boss** (1.5× visual scale, 1.6× HP of the regular at that index).
 Persistent red floor auras are removed.
+
+Boss bodies are contact-damage volumes, not solid obstacles. Astronaut, mech, and ship forms may
+pass through a boss without forced displacement; the normal contact-damage cooldown still applies.
 
 ## Protocol Cache
 
