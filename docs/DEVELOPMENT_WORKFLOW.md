@@ -47,11 +47,33 @@ Novice, competent and expert policies must eventually demonstrate monotonic sepa
 outputs are calibrated against real playtests, they measure repeatable candidate deltas—not an
 absolute prediction of human survival.
 
+## Comparative Titan Protocol benchmark
+
+The three Mega Protocols are mutually exclusive five-minute rewards, so the meaningful question is
+relative player value, not identical damage. `survivorTitanBenchmark.ts` runs each protocol through
+an identical scenario — same hero, authored build, elapsed time, seeded horde, movement path and
+window — with the granted protocol as the only difference. It reports direct damage, boss damage,
+protocol kills, total kills, elite/miniboss pressure, mean and peak living enemies, integrity lost
+and survival time.
+
+Two modes, because neither answers the whole question:
+
+- `sustained` holds the player alive for the full five minutes, so throughput, clearing and control
+  are measured over a complete window.
+- `mortal` leaves the player fully damageable, so the signal is how long each protocol keeps them
+  alive.
+
+A protocol is judged on total player value across both, never on matching a damage number.
+
 ## Experiment discipline
 
 - Change one balance mechanism at a time when practical.
 - Run the same seeds before and after the change.
 - Keep raw snapshots under `docs/generated/baselines/`.
+- Attribute a distribution shift before acting on it. Run results carry per-source and per-form
+  damage precisely so a change in the tail can be traced to a mechanic instead of guessed at, and
+  a candidate that breaches a guardrail should be A/B'd one mechanism at a time before anything is
+  retuned.
 - Never widen an acceptance range merely to make a candidate pass.
 - Never force a statistic toward target by changing unrelated systems.
 - Simulation explains and protects a chosen feel; founders and playtesters choose that feel.

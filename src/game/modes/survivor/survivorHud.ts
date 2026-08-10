@@ -21,6 +21,7 @@ import {
   damageTakenLabel,
   deathLogEntries,
   formReport,
+  sourceFormRows,
   sourceLabel,
   sourceReport,
 } from './survivorTelemetry';
@@ -33,8 +34,15 @@ import {
 import { aliveBossCount, primaryBoss } from './survivorState';
 import type { HeroId } from '../../content/heroes';
 
-/** Run-report views. Source and form are deliberately separate. */
+/** Run-report views. Source and form remain separate top-level views. */
 type StatsTab = 'source' | 'form' | 'run';
+
+/** Player-facing form names, shared by the form view and the source cross-tab rows. */
+const FORM_LABEL: Record<import('./survivorContent').SurvivorForm, string> = {
+  astronaut: 'Astronaut',
+  mech: 'Mech',
+  ship: 'Ship',
+};
 
 export type HudPublishOpts = {
   settingsOpen: boolean;
@@ -126,15 +134,21 @@ export class SurvivorHud {
         </div>
       </div>
 
-      <div id="sv-aegis-float" class="sv-aegis-float hidden">
-        <span class="sv-aegis-icon" aria-hidden="true">◈</span>
-        <div class="sv-aegis-body">
-          <span class="eyebrow">AEGIS</span>
-          <span id="sv-shield-num" class="sv-num">0</span>
-          <div class="sv-track shield"><i id="sv-shield"></i></div>
-        </div>
-      </div>
       <div class="sv-command">
+        <!--
+          Aegis lives *inside* the command deck and is anchored to its top edge with
+          bottom: calc(100% + gap). It is absolutely positioned, so it never
+          participates in the deck's grid and cannot resize or reflow it, and it
+          inherits the deck's --ui-scale transform instead of guessing a second one.
+        -->
+        <div id="sv-aegis-float" class="sv-aegis-float hidden">
+          <span class="sv-aegis-icon" aria-hidden="true">◈</span>
+          <div class="sv-aegis-body">
+            <span class="eyebrow">AEGIS</span>
+            <span id="sv-shield-num" class="sv-num">0</span>
+            <div class="sv-track shield"><i id="sv-shield"></i></div>
+          </div>
+        </div>
         <div class="sv-vitals">
           <div class="sv-vital">
             <div class="sv-vital-label">
@@ -794,7 +808,7 @@ export class SurvivorHud {
         return `<div class="sv-build-item passive"><span>${def?.name ?? id}</span><strong>L${lv}${capped}</strong></div>`;
       })
       .join('');
-    const titanIds = new Set(['carrier-wing', 'starbreaker-array', 'singularity-engine']);
+    const titanIds = new Set(['carrier-wing', 'cleanup-crew', 'singularity-engine']);
     const titan = state.protocolActive
       .filter((t) => titanIds.has(t.id))
       .map(
@@ -980,6 +994,8 @@ export class SurvivorHud {
 
   private statsOpen = false;
   private statsTab: StatsTab = 'source';
+  /** Source ids whose per-form breakdown is expanded in the Run Report. */
+  private expandedSources = new Set<string>();
   private statsState: SurvivorState | null = null;
 
   setStatsOpen(open: boolean): void {
@@ -996,7 +1012,7 @@ export class SurvivorHud {
   }
 
   /** Small helper: a labelled row in the run report. */
-  private statRow(parent: Element, cells: string[], cls = ''): void {
+  private statRow(parent: Element, cells: string[], cls = ''): HTMLElement {
     const row = document.createElement('div');
     row.className = `sv-stats-row ${cls}`.trim();
     for (const c of cells) {
@@ -1005,6 +1021,7 @@ export class SurvivorHud {
       row.appendChild(el);
     }
     parent.appendChild(row);
+    return row;
   }
 
   /**
@@ -1049,8 +1066,18 @@ export class SurvivorHud {
         this.statRow(body, ['No damage recorded yet']);
       }
       for (const r of rows) {
-        this.statRow(body, [
-          sourceLabel(r.id, (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id),
+        /*
+         * Source × form is presented as an expandable row rather than a fourth
+         * always-on column block. The default report stays exactly as dense as before;
+         * a player asking "how much of this happened in ship form?" opens one row.
+         */
+        const perForm = sourceFormRows(t, r.id);
+        const expandable = perForm.length > 1;
+        const open = this.expandedSources.has(r.id);
+        const marker = expandable ? (open ? '▾ ' : '▸ ') : '';
+        const label = sourceLabel(r.id, (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id);
+        const row = this.statRow(body, [
+          `${marker}${label}`,
           num(r.damage),
           pct(r.share),
           r.dps.toFixed(1),
@@ -1059,11 +1086,47 @@ export class SurvivorHud {
           num(r.bossDamage),
           num(r.maxHit),
         ]);
+        if (expandable) {
+          row.classList.add('expandable');
+          row.setAttribute('role', 'button');
+          row.setAttribute('tabindex', '0');
+          row.setAttribute('aria-expanded', open ? 'true' : 'false');
+          const toggle = () => {
+            if (this.expandedSources.has(r.id)) this.expandedSources.delete(r.id);
+            else this.expandedSources.add(r.id);
+            this.renderStats(state);
+          };
+          row.addEventListener('click', toggle);
+          row.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              toggle();
+            }
+          });
+        }
+        if (open) {
+          for (const f of perForm) {
+            this.statRow(
+              body,
+              [
+                FORM_LABEL[f.form],
+                num(f.damage),
+                pct(f.shareOfSource),
+                '',
+                String(f.hits),
+                String(f.kills),
+                num(f.bossDamage),
+                num(f.maxHit),
+              ],
+              'sub',
+            );
+          }
+        }
       }
       const note = document.createElement('p');
       note.className = 'sv-stats-note';
       note.textContent =
-        'Damage is health actually removed. Overkill on an already-dying target is not counted.';
+        'Damage is health actually removed. Overkill on an already-dying target is not counted. Select a source to break it down by form; the form rows sum to that source exactly.';
       body.appendChild(note);
     } else if (this.statsTab === 'form') {
       this.statRow(body, ['Form', 'Damage', '%', 'Uptime', 'Time', 'DPS while active'], 'head');

@@ -8,6 +8,74 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### Cleanup Crew, ship survivability and the Plasma Wake trail (`endless-2.7.0` Test Center candidate)
+
+**Aegis HUD placement.** The floating shield readout was a *sibling* of the command deck positioned
+by `bottom: calc(5.6rem * var(--ui-scale) + 0.35rem)` — a hard-coded guess at the deck's height,
+while the deck actually sits at `bottom: 0.85rem` with a content-driven height. It is now a child of
+the deck anchored at `bottom: calc(100% + gap)`, so it tracks the deck's real box at every UI scale.
+Being absolutely positioned it stays out of the deck's grid and cannot resize or reflow it, and it
+inherits the deck's scale instead of applying a second one.
+
+**Plasma Wake rebuilt as a connected trail.** 2.6.1 emitted an independent wide/thin ellipse per
+cadence tick; at astronaut speed the player covered ~2.2 world units between emissions while one
+ellipse reached ~1.1 units forward, so the weapon read *and collided* as a row of disconnected
+discs, and at L1 each disc expired after 1.8s. It now emits connected capsule segments where each
+segment begins exactly where the previous one ended, so continuity is structural at astronaut, Mech
+and ship speeds alike. The trail is laid ~0.5s behind the hero from a fixed-size position ring
+rather than underneath the character, emission is distance-driven rather than timed, lifetimes rose
+to 3.6s–4.5s, and an ember phase burns each segment down to a readable dissipating tail. Collision
+and rendering read the same capsule. A per-level integrated-damage normalization holds L4–L5 within
+~3% of the measured 2.6.1 output while L1 gains, keeping the published 3.0–4.2× progression contract
+(measured 3.09). The renderer uses shared pooled geometry, so a trail that can hold dozens of live
+segments does not churn allocations.
+
+**Ship form.** Damage taken multiplier moved from `0.60` to `0.20` — 80% reduction — applied
+uniformly to horde contact, boss physical attacks and boss hazards through the established
+mitigation order, with Breach Shielding still stacking on top for boss sources. Ship is not
+invulnerable and its duration and cooldown are unchanged. Ship Body dealt exactly zero boss damage
+in 2.6.1; a boss ram now applies `42 × thrusterPower` (capped at 420) under its own `ship-ram`
+telemetry source with a per-boss 0.75s internal cooldown, so a sustained overlap yields a bounded
+impact rate and two overlapped bosses are each credited once. Boss pass-through is preserved
+exactly — no knockback or positional correction on either party.
+
+**Overdrive Systems.** Core Cycling and Reactor Hold are removed and replaced by one five-level
+passive that improves Mech duration (6.0s → 7.0s), activation-to-activation cooldown (30.0s →
+28.0s) and Mech-only movement (+0% → +15%). L5 uptime is exactly 25%. The speed bonus multiplies
+after Thruster Boost, so maximum/maximum is `1.30 × 1.15 = 1.495`; the flat 0.92 Mech drag is gone,
+making an uninvested Mech move at plain astronaut speed. One card shows duration, cooldown, uptime
+and Mech speed before → after, explains that cooldown runs activation-to-activation and continues
+during Mech, and states the exact L5 caps.
+
+**Cleanup Crew replaces Starbreaker Array.** Starbreaker is deleted from the protocol id, content,
+state, simulation, renderer, HUD, telemetry, fixtures, tests and documentation. The third Mega
+Protocol now summons the three heroes the player is not piloting: they arrive in their own ships,
+deploy as allied Mechs, fight for five active minutes using only their exclusive signature weapon,
+then transform back and fly out. Allies are bounded actors rather than duplicate player states —
+they hold a position, a facing, a formation bearing, one weapon slot and a phase timer, and are
+invulnerable, non-colliding and aggro-free. Signature mechanics and visuals are the real ones,
+re-based by Titan coefficients. Telemetry keeps one bucket per ally and the report rolls them into a
+single Cleanup Crew total.
+
+**Orbital Lance coverage.** Core radius grew from 2.10–2.60 to 3.20–4.25, and every strike now lays
+a shockwave at 1.6× the core radius dealing 37.5% of central damage. A target is damaged by exactly
+one zone, so nothing is double-counted and the single-boss progression ratio is unchanged at 3.05.
+Presentation adds a larger descending beam, an expanding ring drawn at the true outer damage radius,
+and a floor scorch.
+
+**Source-by-form telemetry.** The Run Report gains an exact source × form cross-tab, reachable by
+expanding a source row. It is filled by the same `recordOutgoing` call that fills both marginals, so
+it reconciles with By Source and By Form exactly, keeps overkill excluded, and stays bounded at
+`|sources| × 3`.
+
+**Simulation.** Overall competent median moved 10:18 → 10:42 against the preserved 2.6.1 baseline on
+identical seeds and policy. The upper tail widened beyond the desired guardrail (mean + 2σ 18:40 →
+22:36, mean + 3σ 23:10 → 28:05). A controlled A/B attributes this almost entirely to the mandated
+80% ship mitigation — reverting only that value returns 19:33 / 24:19 — while reverting only
+Overdrive Systems returns 21:48 / 27:20. Cleanup Crew, Orbital Lance, the ship ram and Plasma Wake
+together account for under 4% of run damage in the simulated policy and are not the cause. The
+mandated values were kept and the deviation is recorded rather than hidden.
+
 ### Hero parity and combat readability (`endless-2.6.1` Test Center candidate)
 
 - Kept Boswell's Drone Formation unchanged as the measured reference instead of solving parity by

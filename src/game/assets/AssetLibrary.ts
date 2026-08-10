@@ -78,6 +78,24 @@ export class AssetLibrary {
     ]);
   }
 
+  /**
+   * Models the Cleanup Crew Mega Protocol needs.
+   *
+   * A run only ever preloads its *own* hero, but Cleanup Crew summons the other three
+   * and the renderer clones synchronously — an uncached URL yields `null`, so without
+   * this the allies would deploy as invisible actors with only their ground markers.
+   * Ships are included because they carry the arrival and departure choreography.
+   */
+  async preloadCleanupCrew(playerHeroId: HeroId): Promise<void> {
+    const tasks: Promise<unknown>[] = [];
+    for (const hero of Object.values(HEROES)) {
+      if (hero.id === playerHeroId) continue;
+      tasks.push(this.loadUrl(hero.mech.url, hero.mech.targetHeight));
+      tasks.push(this.loadUrl(hero.shipUrl));
+    }
+    await Promise.all(tasks);
+  }
+
   async preloadCombat(): Promise<void> {
     await Promise.all([
       ...ALL_ENEMIES.map((e) => this.loadUrl(e.url, e.targetHeight)),

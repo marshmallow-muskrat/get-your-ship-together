@@ -59,16 +59,30 @@ function runStress(
   const samples: ResourceCount[] = [];
   const steps = Math.floor(seconds / SURVIVOR.fixedDt);
   const sampleEvery = Math.floor(10 / SURVIVOR.fixedDt); // every 10 simulated seconds
+  const input = { ...EMPTY_SURVIVOR_INPUT };
   for (let i = 0; i < steps; i += 1) {
-    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    /*
+     * Keep the player moving.
+     *
+     * A stationary player lays no Plasma Wake trail, so a static stress run would not
+     * exercise the 2.7.0 ribbon at all — the very system most likely to churn geometry,
+     * since a L5 Twin Wake holds dozens of live segments that expire continuously.
+     */
+    const ang = i * SURVIVOR.fixedDt * 0.9;
+    input.moveX = Math.cos(ang);
+    input.moveY = Math.sin(ang);
+    stepSurvivor(state, input, SURVIVOR.fixedDt);
     renderer.sync(state, SURVIVOR.fixedDt);
     // Keep the protocol effects churning so their visuals are created and released.
     if (i % 900 === 0) forceStartProtocol(state, 'gravitic-recall', 1);
     if (i % 1500 === 700) forceStartProtocol(state, 'gunship-flyby', 1);
     if (i % 1800 === 1200) forceStartProtocol(state, 'aegis-barrier', 1);
-    if (i % 2100 === 1500) forceStartProtocol(state, 'starbreaker-array', 1.5);
+    if (i % 2100 === 1500) forceStartProtocol(state, 'cleanup-crew', 1.5);
     if (i % 2400 === 1800) forceStartProtocol(state, 'carrier-wing', 1.5);
     if (i % 2700 === 2100) forceStartProtocol(state, 'singularity-engine', 1.5);
+    // Force Cleanup Crew squads to expire, so arrival and departure actors churn too
+    // rather than one squad living for the whole run.
+    if (i % 2100 === 2050) state.megaProtocol.remaining = 0;
     if (i > 0 && i % sampleEvery === 0) {
       const c = countResources(renderer);
       samples.push(c);
@@ -76,6 +90,28 @@ function runStress(
     }
   }
   return samples;
+}
+
+/**
+ * Step without the protocol churn `runStress` applies.
+ *
+ * The stress runner deliberately re-triggers protocols on a cadence, which would
+ * re-summon a Cleanup Crew squad mid-teardown and make an actor-lifecycle assertion
+ * meaningless.
+ */
+function runQuiet(state: SurvivorState, renderer: SurvivorRenderer, seconds: number): void {
+  const steps = Math.floor(seconds / SURVIVOR.fixedDt);
+  const input = { ...EMPTY_SURVIVOR_INPUT };
+  for (let i = 0; i < steps; i += 1) {
+    const ang = i * SURVIVOR.fixedDt * 0.9;
+    input.moveX = Math.cos(ang);
+    input.moveY = Math.sin(ang);
+    // Level-up and Protocol modals halt the simulation, which would stall a squad
+    // mid-departure; resolve them immediately so the lifecycle actually advances.
+    input.choiceIndex = state.phase === 'levelup' || state.phase === 'protocol' ? 0 : null;
+    stepSurvivor(state, input, SURVIVOR.fixedDt);
+    renderer.sync(state, SURVIVOR.fixedDt);
+  }
 }
 
 function stressState(seed: number): SurvivorState {
@@ -120,6 +156,59 @@ describe('renderer resource stability', () => {
     expect(post.effects).toBeLessThanOrEqual(400);
     expect(peakGeo).toBeLessThan(4000);
     expect(peakMat).toBeLessThan(4000);
+  }, 120000);
+
+
+  it('builds and releases Cleanup Crew actors and long-lived Plasma trails', () => {
+    const renderer = new SurvivorRenderer(new AssetLibrary());
+    const state = stressState(9301);
+    // No Mega Cache interruptions: this test owns the protocol lifecycle.
+    state.nextCacheTime = 1e9;
+    // Warm up so first-use allocations are not counted as growth.
+    runStress(state, renderer, 20);
+    const warm = countResources(renderer);
+
+    const peaks: number[] = [];
+    for (let cycle = 0; cycle < 9; cycle += 1) {
+      forceStartProtocol(state, 'cleanup-crew', 1.5);
+      expect(state.allies.length).toBe(3);
+      // Arrival ships, then deployed Mechs firing ally projectiles.
+      runQuiet(state, renderer, 12);
+      peaks.push(countResources(renderer).geometries);
+      // Departure choreography, then full teardown of the squad.
+      state.megaProtocol.remaining = 0;
+      runQuiet(state, renderer, 8);
+      expect(state.allies.length).toBe(0);
+    }
+
+    const after = countResources(renderer);
+    // A long-lived L5 Twin Wake keeps many segments alive at once; they must be a
+    // bounded working set, not an ever-growing one.
+    const trailSegments = state.hazards.filter((h) => h.active && h.kind === 'plasma-wake').length;
+    expect(trailSegments).toBeLessThanOrEqual(SURVIVOR.hazardCap);
+    expect(state.hazards.length).toBeLessThanOrEqual(SURVIVOR.hazardCap);
+
+    // Five full arrive/fight/depart cycles must not ratchet geometry upward.
+    /*
+     * The opening cycles are the horde ramping to `enemyCap`, so scene geometry
+     * legitimately climbs before it saturates. What must not happen is a *continuing*
+     * climb once the field is full, which is the shape an actor or ribbon leak would
+     * produce. Compare the saturated half against the saturated half after it.
+     */
+    const saturated = peaks.slice(3);
+    expect(saturated.length).toBeGreaterThanOrEqual(4);
+    const mid = Math.floor(saturated.length / 2);
+    const earlyPeak = Math.max(...saturated.slice(0, mid));
+    const latePeak = Math.max(...saturated.slice(mid));
+    expect(latePeak).toBeLessThanOrEqual(earlyPeak * 1.25 + 12);
+    expect(after.geometries).toBeLessThanOrEqual(earlyPeak * 1.3 + 24);
+    expect(warm.geometries).toBeGreaterThan(0);
+
+    renderer.dispose();
+    const disposed = countResources(renderer);
+    expect(disposed.meshes).toBe(0);
+    expect(disposed.geometries).toBe(0);
+    expect(disposed.materials).toBe(0);
   }, 120000);
 
   it('full teardown releases everything the renderer owns', () => {

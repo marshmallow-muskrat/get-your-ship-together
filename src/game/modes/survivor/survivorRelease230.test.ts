@@ -23,8 +23,6 @@ import {
   endlessDifficultyAt,
   enemySpeedMulAt,
   maxMechUptimeFraction,
-  mechCooldownReduction,
-  mechDurationBonus,
   regenFractionAtLevel,
   regenPerSecondAtLevel,
   repairOrbBonusAtLevel,
@@ -445,7 +443,7 @@ describe('§8 other passives', () => {
   });
 
   it('keeps hard safety caps on every capped passive', () => {
-    for (const id of ['move-speed', 'weapon-haste', 'area', 'mech-cycle', 'mech-duration', 'breach-shielding'] as const) {
+    for (const id of ['move-speed', 'weapon-haste', 'area', 'overdrive-systems', 'breach-shielding'] as const) {
       const def = PASSIVES.find((p) => p.id === id)!;
       expect(def.maxLevel, id).toBe(5);
     }
@@ -514,25 +512,23 @@ describe('§9 fixed-cooldown Mech', () => {
     expect((state.player as Record<string, unknown>).mechCharge).toBeUndefined();
   });
 
-  it('caps Core Cycling at 15% and Reactor Hold at 25%', () => {
-    expect(mechCooldownReduction(5)).toBeCloseTo(0.15, 6);
-    expect(mechCooldownReduction(99)).toBeCloseTo(0.15, 6);
-    expect(mechDurationBonus(5)).toBeCloseTo(0.25, 6);
-    expect(mechDurationBonus(99)).toBeCloseTo(0.25, 6);
-  });
-
+  /*
+   * Core Cycling and Reactor Hold were merged into the single Overdrive Systems
+   * passive in 2.7.0. The uptime *ceiling* remains a 2.3.0-line concern and is asserted
+   * here; the authored progression itself is a 2.7.0 contract and lives in
+   * `survivorRelease270.test.ts` §4.
+   */
   it('caps maximum achievable uptime well short of permanent', () => {
     const uptime = maxMechUptimeFraction();
-    expect(uptime).toBeGreaterThan(0.28);
+    expect(uptime).toBeCloseTo(0.25, 6);
     expect(uptime).toBeLessThan(0.3);
   });
 
-  it('applies both passives to the live cooldown and duration', () => {
+  it('applies the Mech passive to the live cooldown and duration', () => {
     const state = quietRun(14);
-    state.passives['mech-cycle'] = 5;
-    state.passives['mech-duration'] = 5;
-    expect(mechCooldownFor(state)).toBeCloseTo(SURVIVOR.mech.cooldown * 0.85, 5);
-    expect(mechDurationFor(state)).toBeCloseTo(SURVIVOR.mech.duration * 1.25, 5);
+    state.passives['overdrive-systems'] = 5;
+    expect(mechCooldownFor(state)).toBeCloseTo(28.0, 5);
+    expect(mechDurationFor(state)).toBeCloseTo(7.0, 5);
   });
 
   it('cannot transform from ship form, and pausing does not advance the cooldown', () => {
@@ -1099,7 +1095,7 @@ describe('§11 boss phase transitions', () => {
 // ---------------------------------------------------------------- §22 balance version
 
 describe('§22 release metadata', () => {
-  it('stamps endless-2.6.1 after the hero-parity experiment', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.1');
+  it('stamps endless-2.7.0 after the Cleanup Crew release', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.7.0');
   });
 });

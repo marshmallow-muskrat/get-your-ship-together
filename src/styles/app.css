@@ -1128,6 +1128,8 @@ button {
   margin-bottom: 0.25rem;
 }
 .survivor-hud .sv-command {
+  /* Gap between the deck's top edge and the floating Aegis readout anchored to it. */
+  --sv-aegis-gap: 0.5rem;
   position: absolute;
   left: 50%;
   bottom: 0.85rem;
@@ -1955,11 +1957,24 @@ button {
   font-size: 0.68rem;
   letter-spacing: 0.06em;
 }
+/*
+ * Aegis floating readout.
+ *
+ * Anchored structurally to the command deck: it is a child of `.sv-command` and sits
+ * exactly `--sv-aegis-gap` above the deck's top padding edge via `bottom: calc(100% + gap)`.
+ * `100%` resolves against the deck's own padding box, so the offset tracks the deck's
+ * real rendered height instead of the former hard-coded `5.6rem` guess, which did not
+ * match the deck at any UI scale and produced the overlap.
+ *
+ * Because it is absolutely positioned it is out of the deck's grid flow and can never
+ * resize or reflow the command HUD, and because it is a descendant it inherits the
+ * deck's `scale(var(--ui-scale))` rather than applying a second, independent scale.
+ */
 .survivor-hud .sv-aegis-float {
   position: absolute;
   left: 50%;
-  bottom: calc(5.6rem * var(--ui-scale, 1) + 0.35rem);
-  transform: translateX(-50%) scale(var(--ui-scale, 1));
+  bottom: calc(100% + var(--sv-aegis-gap));
+  transform: translateX(-50%);
   transform-origin: bottom center;
   display: flex;
   align-items: center;
@@ -1972,7 +1987,8 @@ button {
   pointer-events: none;
   z-index: 5;
   min-width: 8.5rem;
-  width: min(15rem, calc(100vw - 2rem));
+  /* Bounded by the deck itself, so it can never be wider than the HUD it sits on. */
+  width: min(15rem, 100%);
   box-sizing: border-box;
 }
 .survivor-hud .sv-protocol-highlight {
@@ -2245,6 +2261,26 @@ button {
   margin-top: 0.6rem;
 }
 .survivor-hud .sv-stats-row span:not(:first-child) { text-align: right; }
+/* Source x form breakdown rows, revealed by expanding a source. */
+.survivor-hud .sv-stats-row.expandable {
+  cursor: pointer;
+  pointer-events: auto;
+}
+.survivor-hud .sv-stats-row.expandable:hover,
+.survivor-hud .sv-stats-row.expandable:focus-visible {
+  background: rgba(120, 190, 255, 0.1);
+  outline: none;
+}
+.survivor-hud .sv-stats-row.sub {
+  font-size: 0.78rem;
+  opacity: 0.78;
+  border-bottom-color: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
+}
+.survivor-hud .sv-stats-row.sub span:first-child {
+  color: #9fd0ff;
+  padding-left: 1.1rem;
+}
 .survivor-hud .sv-stats-note {
   margin-top: 0.6rem;
   font-size: 0.8rem;

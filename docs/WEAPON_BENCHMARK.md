@@ -1,6 +1,6 @@
 # Weapon Benchmark
 
-Balance version: `endless-2.6.1`
+Balance version: `endless-2.7.0`
 
 **This file is generated.** Every number below is produced by
 `src/game/modes/survivor/survivorWeaponBenchmark.ts` and printed by
@@ -53,7 +53,7 @@ Do not hand-edit the tables.
 | Rocket Barrage | `clustered` | 8326 | 9724 | 12825 | 17582 | 25992 | 3.12 | 17% | 32% | 37% | 48% | L5 |
 | Bio-Plasma Glob | `clustered` | 8159 | 11066 | 15083 | 20758 | 28679 | 3.52 | 36% | 36% | 38% | 38% | L5 |
 | Rotary Cannon | `single-boss` | 2937 | 3848 | 4995 | 5994 | 8880 | 3.02 | 31% | 30% | 20% | 48% | L5 |
-| Plasma Wake | `mobile-offaxis` | 2052 | 2838 | 3744 | 4680 | 6732 | 3.28 | 38% | 32% | 25% | 44% | L5 |
+| Plasma Wake | `mobile-offaxis` | 2249 | 2883 | 3717 | 4818 | 6949 | 3.09 | 28% | 29% | 30% | 44% | L5 |
 | Pulsar Core | `dense` | 6048 | 7776 | 10080 | 12960 | 18176 | 3.01 | 29% | 30% | 29% | 40% | L5 |
 | Arc Conductor | `mixed-elite` | 6525 | 8778 | 11280 | 14976 | 22360 | 3.43 | 35% | 29% | 33% | 49% | L5 |
 | Orbital Lance | `single-boss` | 4760 | 6048 | 7790 | 10000 | 14500 | 3.05 | 27% | 29% | 28% | 45% | L5 |
@@ -92,10 +92,10 @@ Bio-Plasma chains splash/corrosion, and rockets distribute area explosions.
 | Rocket Barrage | 1288 → 3168 | 2024 → 5544 | 2990 → 11448 | 2208 → 8424 | 2070 → 6696 | 2208 → 9216 | 3450 → 8136 |
 | Bio-Plasma Glob | 1029 → 4140 | 2076 → 7919 | 3143 → 11386 | 2518 → 9635 | 2092 → 8158 | 1890 → 7430 | 1804 → 7295 |
 | Rotary Cannon | 693 → 2080 | 913 → 2760 | 924 → 2800 | 924 → 2800 | 913 → 2800 | 913 → 2620 | 924 → 2640 |
-| Plasma Wake | 0 → 792 | 702 → 3366 | 6102 → 21780 | 3294 → 11880 | 2052 → 5445 | 2592 → 6831 | 3240 → 6534 |
+| Plasma Wake | 141 → 1502 | 1277 → 5379 | 11911 → 45137 | 5902 → 21970 | 2249 → 6949 | 3584 → 11128 | 3412 → 10566 |
 | Pulsar Core | 42 → 157 | 210 → 637 | 1764 → 5605 | 378 → 1118 | 126 → 373 | 336 → 1010 | 378 → 1215 |
 | Arc Conductor | 400 → 800 | 1400 → 4440 | 2113 → 6780 | 1963 → 6840 | 1775 → 4800 | 1625 → 5320 | 1463 → 4560 |
-| Orbital Lance | 560 → 1740 | 840 → 2030 | 1260 → 5220 | 560 → 2610 | 420 → 2900 | 840 → 4060 | 1120 → 6960 |
+| Orbital Lance | 560 → 1740 | 1155 → 5148 | 3588 → 17255 | 1523 → 8374 | 1365 → 5075 | 1680 → 7685 | 2573 → 13485 |
 
 ## Endless progression beyond L5
 

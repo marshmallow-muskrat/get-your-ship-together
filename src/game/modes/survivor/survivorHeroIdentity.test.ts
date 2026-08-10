@@ -7,7 +7,7 @@ import {
   type SurvivorEnemy,
   type SurvivorState,
 } from './survivorState';
-import { EMPTY_SURVIVOR_INPUT, stepSurvivor } from './survivorSim';
+import { EMPTY_SURVIVOR_INPUT, stepSurvivor, tryShip } from './survivorSim';
 
 function isolated(hero: Parameters<typeof createSurvivorState>[0], seed = 1): SurvivorState {
   const state = createSurvivorState(hero, null, seed);
@@ -81,6 +81,9 @@ describe('endless-2.6.1 hero identity mechanics', () => {
     state.hazards.push({
       id: 700,
       kind: 'puddle',
+      capsule: false,
+      x1: 0,
+      z1: 0,
       x: target.x,
       z: target.z,
       radius: 1.5,
@@ -135,17 +138,25 @@ describe('endless-2.6.1 hero identity mechanics', () => {
     expect(state.effects.some((e) => e.kind === 'impact' || e.kind === 'pulse')).toBe(true);
   });
 
-  it('Plasma Wake alone remains active in ship form and authors a wide, thin footprint', () => {
+  it('Plasma Wake alone remains active in ship form and lays a connected capsule trail', () => {
+    // 2.7.0 replaced the wide/thin ellipse footprint with swept capsule segments; the
+    // ship-form exclusivity and the burning-head presentation are unchanged.
     const state = isolated('frog', 106);
     state.weapons = [{ weaponId: 'plasma-wake', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
-    state.player.form = 'ship';
-    state.player.shipDuration = 2;
+    state.player.shipCd = 0;
+    expect(tryShip(state)).toBe(true);
 
-    stepSurvivor(state, { ...EMPTY_SURVIVOR_INPUT, moveX: 1 }, SURVIVOR.fixedDt);
+    for (let i = 0; i < 120; i += 1) {
+      stepSurvivor(state, { ...EMPTY_SURVIVOR_INPUT, moveX: 1 }, SURVIVOR.fixedDt);
+    }
 
-    const plasma = state.hazards.find((h) => h.active && h.kind === 'plasma-wake');
-    expect(plasma).toBeTruthy();
-    expect(plasma!.scaleX).toBeGreaterThan(plasma!.scaleZ * 3);
+    const plasma = state.hazards.filter((h) => h.active && h.kind === 'plasma-wake');
+    expect(plasma.length).toBeGreaterThan(0);
+    for (const seg of plasma) {
+      expect(seg.capsule).toBe(true);
+      // A real swept segment, not a degenerate point.
+      expect(Math.hypot(seg.x1 - seg.x, seg.z1 - seg.z)).toBeGreaterThan(0);
+    }
     expect(state.effects.some((e) => e.kind === 'plasma-flare')).toBe(true);
   });
 
@@ -165,9 +176,12 @@ describe('endless-2.6.1 hero identity mechanics', () => {
     state.hazards.push({
       id: 801,
       kind: 'plasma-wake',
-      x: 0,
+      x: -2,
       z: 0,
-      radius: 1.15,
+      x1: 2,
+      z1: 0,
+      capsule: true,
+      radius: 1.15 * SURVIVOR.plasmaTrail.widthMul,
       life: 1,
       maxLife: 1,
       damage: 100,
@@ -177,10 +191,10 @@ describe('endless-2.6.1 hero identity mechanics', () => {
       tickCd: 0,
       armTimer: 0,
       sourceBossId: 0,
-      scaleX: 1.72,
-      scaleZ: 0.48,
-      facingX: 0,
-      facingZ: 1,
+      scaleX: 1,
+      scaleZ: 1,
+      facingX: 1,
+      facingZ: 0,
     });
 
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);

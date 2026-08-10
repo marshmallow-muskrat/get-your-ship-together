@@ -109,6 +109,15 @@ export interface SurvivorProjectile {
   splitDone: boolean;
   /** Minimum flight time before proximity detonation is armed. */
   fuseDelay: number;
+  /**
+   * Telemetry bucket override.
+   *
+   * Normally a player projectile reports under its weapon. Cleanup Crew allies fire the
+   * same projectile kinds with the same mechanics, but their output must be attributed
+   * to the ally that fired it, so they stamp their own source id here. `null` means
+   * "attribute to the weapon", which is what every player-fired projectile does.
+   */
+  srcOverride: string | null;
 }
 
 export type HazardKind = 'wake' | 'plasma-wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
@@ -118,6 +127,21 @@ export interface SurvivorHazard {
   kind: HazardKind;
   x: number;
   z: number;
+  /**
+   * Capsule end point (2.7.0).
+   *
+   * When {@link SurvivorHazard.capsule} is set, the hazard is a *swept segment* from
+   * `(x, z)` to `(x1, z1)` with half-width `radius`, not a point footprint. This is the
+   * one authoritative geometry: `hazardHitsPoint` tests it and the renderer draws it,
+   * so a burning trail can never be a row of discs that collide as something else.
+   *
+   * For every point-shaped hazard these equal `x`/`z`, and the capsule degenerates to
+   * the circle/ellipse behaviour that kind already had.
+   */
+  x1: number;
+  z1: number;
+  /** True when this hazard is a swept segment rather than a point footprint. */
+  capsule: boolean;
   radius: number;
   life: number;
   maxLife: number;
@@ -134,6 +158,89 @@ export interface SurvivorHazard {
   scaleZ: number;
   facingX: number;
   facingZ: number;
+}
+
+/** Lifecycle of a Cleanup Crew ally. */
+export type AllyPhase = 'arriving' | 'active' | 'departing';
+
+/**
+ * A Cleanup Crew allied Titan.
+ *
+ * Deliberately *not* a second player state. An ally owns only what it needs to stand
+ * somewhere, aim, and fire one signature weapon: no health, no form, no passives, no
+ * Build, no cooldown bank, no pickup logic. It cannot be damaged, cannot be collided
+ * with, and never displaces the player, enemies or bosses.
+ *
+ * The single `slot` is a real {@link SurvivorWeaponSlot} so the ally reuses the shared
+ * targeting and boss-focus-debt machinery rather than reimplementing it.
+ */
+export interface SurvivorAlly {
+  id: number;
+  heroId: HeroId;
+  phase: AllyPhase;
+  /** Seconds remaining in the current phase. */
+  phaseTimer: number;
+  /** Seconds before the arrival sequence begins (arrival stagger). */
+  delay: number;
+  x: number;
+  z: number;
+  facingX: number;
+  facingZ: number;
+  /** Formation bearing around the player, in radians. */
+  slotAngle: number;
+  /** This ally's exclusive signature weapon and its focus-debt accumulator. */
+  slot: SurvivorWeaponSlot;
+  /** Transport ship origin/exit point for arrival and departure presentation. */
+  shipX: number;
+  shipZ: number;
+  active: boolean;
+}
+
+/** Fixed capacity of the delayed-position sample ring (≈1.6s at 60Hz). */
+export const PLASMA_TRAIL_SAMPLES = 96;
+
+/**
+ * Plasma Wake trail bookkeeping.
+ *
+ * Everything here is fixed-size. The sample ring replays where the player *was*, so the
+ * trail can be laid down roughly half a second behind the hero instead of underneath
+ * them, and the per-ribbon anchors are what guarantee continuity: every emitted segment
+ * starts exactly where the previous one ended, so no speed can open a gap.
+ */
+export interface PlasmaTrailState {
+  /** Ring of recent player positions and the time each was recorded. */
+  sx: number[];
+  sz: number[];
+  st: number[];
+  head: number;
+  count: number;
+  /** Last emitted end point per ribbon (Twin Wake uses two). */
+  anchorX: number[];
+  anchorZ: number[];
+  anchorSet: boolean[];
+  /** Path length walked since that ribbon last emitted. */
+  pathAcc: number[];
+  /** Previous delayed sample, used to accumulate true path length. */
+  prevX: number;
+  prevZ: number;
+  prevSet: boolean;
+}
+
+export function createPlasmaTrailState(): PlasmaTrailState {
+  return {
+    sx: new Array<number>(PLASMA_TRAIL_SAMPLES).fill(0),
+    sz: new Array<number>(PLASMA_TRAIL_SAMPLES).fill(0),
+    st: new Array<number>(PLASMA_TRAIL_SAMPLES).fill(0),
+    head: 0,
+    count: 0,
+    anchorX: [0, 0],
+    anchorZ: [0, 0],
+    anchorSet: [false, false],
+    pathAcc: [0, 0],
+    prevX: 0,
+    prevZ: 0,
+    prevSet: false,
+  };
 }
 
 export interface SurvivorPickup {
@@ -178,6 +285,10 @@ export interface SurvivorEffect {
     | 'arc'
     | 'orbital'
     | 'orbital-strike'
+    /** Expanding shockwave ring drawn at the true outer damage radius. */
+    | 'orbital-shock'
+    /** Short-lived floor scorch left by the central impact. */
+    | 'orbital-scorch'
     | 'cache'
     | 'mega'
     | 'gunship'
@@ -287,6 +398,14 @@ export interface SurvivorBoss {
   previousPattern: import('./survivorContent').BossPatternId | null;
   /** Total attack cycles completed this life. */
   attacksCompleted: number;
+  /**
+   * Per-boss ship-ram internal cooldown (seconds).
+   *
+   * Owned by the boss rather than the player so that overlapping two bosses at once
+   * cannot let one boss's impact suppress the other's, and so a sustained overlap
+   * produces a bounded impact *rate* instead of one impact per frame.
+   */
+  shipRamCd: number;
   /** Cataclysm / multi-zone payload (up to 5 zones). */
   zones: Array<{ x: number; z: number; r: number; detonated: boolean }>;
   /** Spore mine / sequence entity ids owned by this boss for cleanup. */
@@ -499,7 +618,7 @@ export interface SurvivorState {
   };
   /** Exclusive Mega-Cache effects. Ordinary Cache state remains separate. */
   megaProtocol: {
-    id: 'carrier-wing' | 'starbreaker-array' | 'singularity-engine' | null;
+    id: 'carrier-wing' | 'cleanup-crew' | 'singularity-engine' | null;
     remaining: number;
     elapsed: number;
     /** Titan leaves the ordinary Mech cooldown schedule untouched. */
@@ -539,6 +658,10 @@ export interface SurvivorState {
   boss: SurvivorBoss;
   miniboss: SurvivorMiniboss;
   damageEvents: DamageEvent[];
+  /** Plasma Wake trail sampling and per-ribbon anchors. Fixed size. */
+  plasmaTrail: PlasmaTrailState;
+  /** Cleanup Crew allied Titans. Bounded at three. */
+  allies: SurvivorAlly[];
   damageAgg: Map<
     string,
     { amount: number; x: number; z: number; kind: DamageEvent['kind']; timer: number; pop: number }
@@ -628,6 +751,7 @@ export function emptyBoss(): SurvivorBoss {
     attacksSinceMega: 0,
     previousPattern: null,
     attacksCompleted: 0,
+    shipRamCd: 0,
     zones: [],
     ownedMineIds: [],
   };
@@ -867,6 +991,8 @@ export function createSurvivorState(
       maxHealth: 0,
     },
     damageEvents: [],
+    plasmaTrail: createPlasmaTrailState(),
+    allies: [],
     damageAgg: new Map(),
     telemetry: createTelemetry(),
     level: 1,
@@ -991,6 +1117,118 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;
     seedFixtureHorde(state, 22, 9);
+    // ------------------------------------------------------------ endless-2.7.0
+  } else if (fixture === 'survivor-plasma-l1') {
+    /*
+     * Level-1 Plasma Wake in isolation.
+     *
+     * The 2.6.1 complaint was specifically that L1 "feels terrible because the fields
+     * disappear too quickly". This fixture exists to look at exactly that case: one
+     * weapon, level 1, nothing else on screen to explain the trail away.
+     */
+    state.time = 30;
+    grantBuild(state, [{ id: 'plasma-wake', level: 1 }], {}, 1);
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 16, 8);
+  } else if (fixture === 'survivor-plasma-ship') {
+    // L5 Twin Wake with the ship ready, for the widest, brightest trail.
+    state.time = 420;
+    grantBuild(state, [{ id: 'plasma-wake', level: 5 }], { area: 3 }, 18);
+    state.player.invuln = 1e9;
+    state.player.shipCd = 0;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 26, 10);
+  } else if (fixture === 'survivor-ship-ram') {
+    // Ship ready, boss in reach: 80% mitigation and the boss ram in one place.
+    state.time = SURVIVOR.bossInterval * 3 - 0.05;
+    state.nextBossIndex = 3;
+    state.nextBossTime = SURVIVOR.bossInterval * 3;
+    grantBuild(
+      state,
+      [
+        { id: state.weapons[0]!.weaponId, level: 4 },
+        { id: 'plasma-wake', level: 3 },
+      ],
+      { 'max-health': 3, 'breach-shielding': 2 },
+      16,
+    );
+    state.player.shipCd = 0;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+  } else if (fixture === 'survivor-overdrive') {
+    // Overdrive Systems at its L5 cap, with Mech ready immediately.
+    state.time = 240;
+    grantBuild(
+      state,
+      [{ id: state.weapons[0]!.weaponId, level: 4 }],
+      { 'overdrive-systems': 5, 'move-speed': 5 },
+      20,
+    );
+    state.player.mechCd = 0;
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 20, 9);
+  } else if (
+    fixture === 'survivor-cleanup-arrival' ||
+    fixture === 'survivor-cleanup-combat' ||
+    fixture === 'survivor-cleanup-departure'
+  ) {
+    /*
+     * Three separate Cleanup Crew fixtures, because the three moments have different
+     * failure modes: arrival is choreography, combat is readability under load, and
+     * departure is the part that must not look like actors being deleted.
+     *
+     * The protocol itself is started by the mode after construction (see SurvivorMode),
+     * because activation runs through the real `applyProtocol` path rather than being
+     * hand-assembled here.
+     */
+    state.time = 600;
+    grantBuild(
+      state,
+      [
+        { id: state.weapons[0]!.weaponId, level: 4 },
+        { id: 'pulse', level: 3 },
+      ],
+      { 'max-health': 3, area: 2 },
+      22,
+    );
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    /*
+     * Seeded well outside the formation ring: the fixture fast-forwards a few seconds
+     * of real simulation, during which the horde closes in. Seeding at 11 put every
+     * enemy on top of the player before the first frame and buried the squad entirely,
+     * which is the opposite of what a readability fixture is for.
+     */
+    seedFixtureHorde(state, fixture === 'survivor-cleanup-combat' ? 34 : 14, 21);
+  } else if (fixture === 'survivor-telemetry') {
+    // A build that exercises several sources across all three forms, so the Run Report
+    // source x form breakdown has something real to show.
+    state.time = 480;
+    grantBuild(
+      state,
+      [
+        { id: state.weapons[0]!.weaponId, level: 4 },
+        { id: 'plasma-wake', level: 4 },
+        { id: 'pulsar', level: 3 },
+      ],
+      { 'max-health': 3, 'overdrive-systems': 3, area: 2 },
+      22,
+    );
+    state.player.invuln = 1e9;
+    state.player.shipCd = 0;
+    state.player.mechCd = 0;
+    state.nextCacheTime = 1e9;
+    seedFixtureHorde(state, 28, 9);
   } else if (fixture === 'survivor-mega') {
     state.time = SURVIVOR.bossInterval * 5 - 0.05;
     state.nextBossIndex = 5;
@@ -1130,12 +1368,16 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.surge.nextSurgeAt = 1e9;
     state.unlocks.arc = true;
     state.unlocks.arcOffered = true;
+    // A short static trail segment so the identity fixture shows the capsule ribbon.
     state.hazards.push({
       id: state.nextId++,
       kind: 'plasma-wake',
-      x: 0,
+      x: -3,
       z: 3,
-      radius: 1.15,
+      x1: 3,
+      z1: 3,
+      capsule: true,
+      radius: 1.15 * SURVIVOR.plasmaTrail.widthMul,
       life: 120,
       maxLife: 120,
       damage: 0,
@@ -1145,10 +1387,10 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       tickCd: 0,
       armTimer: 0,
       sourceBossId: 0,
-      scaleX: 2.15,
-      scaleZ: 0.52,
-      facingX: 0,
-      facingZ: 1,
+      scaleX: 1,
+      scaleZ: 1,
+      facingX: 1,
+      facingZ: 0,
     });
     state.effects.push({
       id: state.nextId++,
@@ -1191,7 +1433,9 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
         { id: 'pulse', level: 5 },
         { id: 'rail', level: 5 },
         { id: 'gravity', level: 5 },
-        { id: 'bioplasma', level: 5 },
+        // Twin Wake at L5: the longest-lived, highest-segment-count trail the game can
+        // produce, so the GPU procedure exercises the 2.7.0 ribbon at its worst case.
+        { id: 'plasma-wake', level: 5 },
       ],
       { 'weapon-haste': 3, area: 3, 'max-health': 3, 'pickup-radius': 3 },
       20,

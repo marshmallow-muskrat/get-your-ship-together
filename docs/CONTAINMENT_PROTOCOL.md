@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.6.1` (Test Center candidate)
+**Current balance line:** `endless-2.7.0` (Test Center candidate)
 
 ## Purpose
 
@@ -88,7 +88,7 @@ Overclock labels: Roman I–X, then Arabic (`Overclock 27`).
 |---|---|
 | Hull Plating | Continues forever; +20 integrity L1–5, then +10 per level |
 | Nanite Bleed | Continues forever; `2.0% + 0.12%·√(level−5)` of max integrity per second after L5 |
-| Thruster Boost, Magnet Field, Weapon Overclock, Containment Field, Core Cycling, Reactor Hold, Breach Shielding | Hard-capped at L5; card shows MAX and is no longer offered |
+| Thruster Boost, Magnet Field, Weapon Overclock, Containment Field, Overdrive Systems, Breach Shielding | Hard-capped at L5; card shows MAX and is no longer offered |
 
 Breach Shielding maxes at 40% boss-damage reduction.
 
@@ -121,10 +121,33 @@ Every hero can roll the shared Pulse Blaster, Gravity Pulse, Rotary Cannon, Plas
 Core families. Arc Conductor and Orbital Lance remain prototype slots. The deterministic benchmark
 requires every authored family to grow 3–4.2× in its intended scenario from L1 to L5.
 
-Plasma Wake uses a wide, thin elliptical footprint whose renderer and collision share the same
-orientation and dimensions. It is the only ordinary weapon that continues operating during ship
-form and it can damage bosses. Rotary Cannon uses a dedicated ballistic tracer rather than the
-Drone Formation projectile presentation.
+Plasma Wake lays a **connected trail of capsule segments** (endless-2.7.0). Each segment is a
+swept segment from the previous segment's end point to the new one, so the trail is continuous by
+construction at astronaut, Mech and ship speeds — there is no speed at which it can open a gap.
+The renderer draws that exact capsule and collision tests that exact capsule. It is the only
+ordinary weapon that continues operating during ship form and it can damage bosses. Rotary Cannon
+uses a dedicated ballistic tracer rather than the Drone Formation projectile presentation.
+
+### Plasma Wake trail (endless-2.7.0)
+
+2.6.1 emitted an independent wide/thin ellipse every `cadence` seconds. At astronaut speed the
+player covered ~2.2 world units between emissions while one ellipse reached only ~1.1 units
+forward, so the weapon read — and collided — as a row of disconnected discs, and at L1 each disc
+expired after 1.8s before it could matter.
+
+| Property | Value |
+|---|---|
+| Trail delay behind the hero | 0.5s (replayed from a fixed 96-sample position ring) |
+| Emission | Distance-driven: 3.2 world units, 5.5 in ship form |
+| Lifetime | L1 3.6s · L2 3.8s · L3 4.0s · L4 4.2s · L5 4.5s |
+| Cross-track half-width | `radius × 1.72`, ×1.35 in ship form, ×0.72 per ribbon at Twin Wake |
+| Ember phase | Full strength for 45% of life, then linear decay to 25% |
+| Continuity | Each segment starts exactly where the previous ended |
+
+Because segments chain, coverage depends on lifetime and speed rather than emission frequency,
+which is why emission is now much *less* frequent while the trail is *denser*. A per-level
+integrated-damage normalization (`SURVIVOR.plasmaTrail.damageNorm`) re-bases the weapon so L4–L5
+stay within ~3% of the 2.6.1 measured output while L1 gains; see [`WEAPON_BENCHMARK.md`](WEAPON_BENCHMARK.md).
 
 ## Time-gated prototypes
 
@@ -135,6 +158,26 @@ Drone Formation projectile presentation.
 
 Arc Conductor is intentionally premium at acquisition rather than a weak weapon that asks for
 several later upgrades before paying off. Its L1 mixed-horde benchmark target is at least 130 DPS.
+
+### Orbital Lance two-zone strike (endless-2.7.0)
+
+Orbital hit hard in 2.6.1 (304 maximum hit) but covered almost nothing: 34,393 damage, 2.6% of a
+21:18 run. The identity — boss preference, motion-leading, delayed telegraph, one heavy impact — is
+unchanged; what changed is reach.
+
+| Level | Core radius (2.6.1 → 2.7.0) | Shockwave radius |
+|---:|---:|---:|
+| 1 | 2.10 → **3.20** | 5.12 |
+| 2 | 2.20 → **3.45** | 5.52 |
+| 3 | 2.32 → **3.70** | 5.92 |
+| 4 | 2.45 → **3.95** | 6.32 |
+| 5 | 2.60 → **4.25** | 6.80 |
+
+The shockwave is `1.6×` the core radius and deals `37.5%` of the central damage. **A target is
+damaged by exactly one zone**, the core taking precedence, so nothing is double-counted — which is
+also why the single-boss progression benchmark is unaffected by the ring and Orbital's L5/L1 ratio
+is unchanged at 3.05. Presentation adds a larger, more authoritative descending beam, an expanding
+shockwave ring drawn at the true outer damage radius, and a short-lived floor scorch.
 
 ## Boss targeting
 
@@ -151,6 +194,33 @@ Persistent red floor auras are removed.
 
 Boss bodies are contact-damage volumes, not solid obstacles. Astronaut, mech, and ship forms may
 pass through a boss without forced displacement; the normal contact-damage cooldown still applies.
+
+### Ship boss ram (endless-2.7.0)
+
+Ship Body dealt exactly **zero** boss damage in 2.6.1 — flying through a boss, the most committal
+thing ship form can do, was mechanically unrewarded. A ship overlapping a boss now applies:
+
+```text
+ramDamage = 42 × thrusterPower(state)          // capped at powerScaleCap 10 -> 420
+```
+
+under its own `ship-ram` telemetry source, with a **per-boss** 0.75s internal cooldown so a
+sustained overlap produces a bounded impact *rate* rather than one impact per frame, and so
+overlapping two bosses credits each exactly once. It is a separate pass from incoming boss
+contact: it neither consumes nor is gated by the player's `bossContactCd` or i-frames. No
+knockback or positional correction is applied to either party, so pass-through is preserved
+exactly. Ship Wake, Ship Exhaust and Ship Body are unchanged.
+
+### Ship survivability (endless-2.7.0)
+
+Ship form takes **20% of incoming damage** (80% reduction), raised from 0.60. It applies uniformly
+to horde contact, boss physical attacks and boss hazards through the established mitigation order:
+
+```text
+form multiplier -> Titan multiplier -> Breach Shielding (boss sources) -> Aegis shield -> integrity
+```
+
+Ship is not invulnerable, and its duration and cooldown are unchanged.
 
 ## Protocol Cache
 
@@ -170,10 +240,40 @@ Mega-Boss death leaves a non-expiring cache with exactly three exclusive choices
 | Mega Protocol | Role |
 |---|---|
 | **Carrier Wing** | Repeated fighter strafes across distributed threats for five minutes. |
-| **Starbreaker Array** | Twin colossal orbital beams fire every 2.7s for five minutes. |
+| **Cleanup Crew** | The three heroes you are not piloting arrive in their ships and fight beside you as allied Mechs for five minutes. |
 | **Singularity Engine** | Repeated anomalies pull and detonate dense horde clusters for five minutes. |
 
 Titan Armaments occupy one dedicated, non-upgradable slot and expose their remaining time in Build.
+
+### Cleanup Crew (endless-2.7.0)
+
+Summons the three heroes the player is **not** piloting. They arrive in their own ships, deploy as
+allied Mechs, fight for five active simulation minutes using only their exclusive signature
+weapon, then transform back and fly out.
+
+| Player | Summons |
+|---|---|
+| Boswell | Fitzwilliam, Fortunato, Rutherford |
+| Fitzwilliam | Boswell, Fortunato, Rutherford |
+| Fortunato | Boswell, Fitzwilliam, Rutherford |
+| Rutherford | Boswell, Fitzwilliam, Fortunato |
+
+Allies are **bounded actors, not duplicate player states**. An ally owns a position, a facing, a
+formation bearing, one `SurvivorWeaponSlot` and a phase timer — no health, form, passives, Build,
+cooldown bank or pickup logic. They are invulnerable and non-colliding, never block or displace
+the player, enemies or bosses, and carry no aggro: no horde or boss code reads them. Their ships
+are arrival/departure presentation only and deal no damage. Cleanup Crew never alters the player's
+Mech cooldown, form, passive levels or permanent Build.
+
+Signature identities are preserved: Boswell's directional Drone Formation, Fitzwilliam's optimised
+piercing Rail Lance lines, Fortunato's bursting Bio-Plasma globs with corrosive residue, and
+Rutherford's distributed cluster-leading proximity-fused mini-rockets — the same projectile kinds,
+effects and mechanics the player's versions use. Damage and cadence are re-based by Titan
+coefficients (`damageMul` 0.33, `cadenceMul` 1.28) and scaled by the shared bounded
+`playerPowerScale`, so the squad is not three extra maxed players.
+
+Telemetry keeps one bucket per ally (`titan-cleanup:<heroId>`) so individual contribution is
+preserved, and the Run Report rolls them into a single **Cleanup Crew** total.
 
 The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Caches.
 
@@ -246,18 +346,38 @@ elite 24, miniboss 28.
 Past 45m the same slope continues (the Collapse-era scaling), hard-capped at `6.0×`. The post-hit
 invulnerability window is preserved so simultaneous overlaps cannot instantly delete the player.
 
-## Mech Overdrive (endless-2.4.0)
+## Mech Overdrive (endless-2.7.0)
 
 Mech is a **fixed-cooldown ultimate**. Nothing in the run refills it.
 
+### Overdrive Systems
+
+Core Cycling and Reactor Hold were each too small to be worth a card slot, so the Mech ultimate
+was effectively un-upgradable in practice. 2.7.0 merges them into one five-level passive that
+moves duration, cooldown and Mech-only movement together.
+
+| Level | Duration | Cooldown | Mech-only speed | Scheduled uptime |
+|---:|---:|---:|---:|---:|
+| 0 | 6.0s | 30.0s | +0% | 20.0% |
+| 1 | 6.2s | 29.6s | +3% | 20.9% |
+| 2 | 6.4s | 29.2s | +6% | 21.9% |
+| 3 | 6.6s | 28.8s | +9% | 22.9% |
+| 4 | 6.8s | 28.4s | +12% | 23.9% |
+| 5 | 7.0s | 28.0s | +15% | **25.0%** |
+
+The Mech speed bonus is applied **multiplicatively after** Thruster Boost, so maximum Thruster
+plus maximum Overdrive Systems is `1.30 × 1.15 = 1.495` — +49.5% against unupgraded astronaut
+speed while Mech is active. Ship speed remains a separate multiplier. Level 0 is +0%, replacing
+the flat 0.92 Mech drag 2.6.1 applied.
+
 | Property | Value |
 |---|---|
-| Duration | 6s (Reactor Hold +5%/level, hard cap +25%) |
-| Cooldown | 30s activation-to-activation (Core Cycling −3%/level, hard cap −15%) |
+| Duration | 6.0s → 7.0s (Overdrive Systems, hard cap at L5) |
+| Cooldown | 30.0s → 28.0s activation-to-activation (hard cap at L5) |
 | Cooldown timing | Set on activation, counts down **during** Mech |
 | Astronaut time after a transformation | 24s |
 | Run start | Unavailable; first readiness one full cooldown in |
-| Base / maximum invested uptime | 20% / 29.4% (7.5s of 25.5s) |
+| Base / maximum invested uptime | 20% / 25.0% (7.0s of 28.0s) |
 
 Kills, elites, minibosses and bosses have **no** effect on the cooldown. The HUD meter shows
 readiness, not kill charge.
@@ -416,11 +536,26 @@ gyst.survivor.leaderboards.v2
 
 Records rank by survival time, then kills and bosses defeated as tie-breakers. Abandoned runs are not recorded.
 
+## Run Report
+
+Three views: **By Source**, **By Form** and **Run**. Source and Form remain separate top-level
+views because one damage event belongs to both.
+
+endless-2.7.0 adds an exact **source × form cross-tab**. Selecting a source in the By Source view
+expands it into per-form rows (applied damage, hits, kills, boss damage, maximum hit). It is not a
+third accumulator: the same `recordOutgoing` call fills the source marginal, the form marginal and
+the joint cell, so the cross-tab reconciles with both existing views *exactly* rather than
+approximately, and overkill remains excluded under the existing contract. The map is bounded at
+`|sources| × 3`. The default report is unchanged in density — the breakdown is opt-in per row.
+
 ## UI
 
 - Larger top HUD and survival/breach messaging
 - Bottom-center equal-size Dodge, Repulsor, Afterburner, and Mech slots
 - Independent build panel that cannot resize the command deck
+- Aegis shield readout anchored **inside** the command deck at `bottom: calc(100% + gap)`, so it
+  tracks the deck's real rendered height at every UI scale instead of a guessed fixed offset. It
+  is absolutely positioned, so it can never resize or reflow the deck.
 - Responsive level-up choice presentation
 - UI Scale setting that does not scale the Three.js world
 - Per-hero leaderboards available from crew selection and the run shell
@@ -442,7 +577,15 @@ Records rank by survival time, then kills and bosses defeated as tie-breakers. A
 | `survivor-mega` | Mega-Boss |
 | `survivor-miniboss` | Miniboss melee slam |
 | `survivor-gunship` | Gunship lethal corridor |
-| `survivor-stress` | Worst-case presentation load for the GPU procedure |
+| `survivor-stress` | Worst-case presentation load for the GPU procedure (now includes L5 Twin Wake) |
+| `survivor-plasma-l1` | Level-1 Plasma Wake trail in isolation |
+| `survivor-plasma-ship` | L5 Twin Wake in ship form — widest, brightest trail |
+| `survivor-ship-ram` | Ship mitigation and the boss ram |
+| `survivor-overdrive` | Overdrive Systems at its L5 cap, Mech ready |
+| `survivor-cleanup-arrival` | Cleanup Crew ships arriving and deploying |
+| `survivor-cleanup-combat` | Cleanup Crew fighting under dense horde load |
+| `survivor-cleanup-departure` | Cleanup Crew transforming back and flying out |
+| `survivor-telemetry` | Multi-source, multi-form build for the Run Report cross-tab |
 
 Example:
 

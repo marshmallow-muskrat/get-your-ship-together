@@ -17,6 +17,20 @@ interface ActorVis {
 }
 
 /**
+ * Presentation for one Cleanup Crew ally.
+ *
+ * Holds the hero's real Mech and ship clones plus two owned effect meshes. Built once
+ * when the ally arrives, disposed when it leaves — never rebuilt per frame.
+ */
+interface AllyVis {
+  root: THREE.Group;
+  mech: ActorVis | null;
+  ship: THREE.Object3D | null;
+  trail: THREE.Mesh;
+  glow: THREE.Mesh;
+}
+
+/**
  * Presentation for survivor mode.
  * Full skeletal animation for player/boss/elites; throttled mixers for horde.
  */
@@ -66,6 +80,8 @@ export class SurvivorRenderer {
   private eliteRingGeo = new THREE.TorusGeometry(0.9, 0.055, 8, 30);
   private eliteBarGeo = new THREE.PlaneGeometry(1.7, 0.16);
   private eliteFillGeo = new THREE.PlaneGeometry(1.62, 0.1);
+  /** Cleanup Crew ally visuals, keyed by ally id. Bounded at three. */
+  private readonly allies = new Map<number, AllyVis>();
   private animFrame = 0;
   private readonly mats = new Map<string, THREE.MeshStandardMaterial>();
   private readonly basicMats = new Map<string, THREE.MeshBasicMaterial>();
@@ -260,6 +276,7 @@ export class SurvivorRenderer {
     this.syncBoss(state, dt);
     this.syncProjectiles(state);
     this.syncHazards(state);
+    this.syncAllies(state, dt);
     this.syncPickups(state);
     this.syncCache(state);
     this.syncGunship(state, dt);
@@ -620,6 +637,232 @@ export class SurvivorRenderer {
     }
   }
 
+  /**
+   * Shared unit geometries for the Plasma Wake ribbon.
+   *
+   * Built once and reused by every trail segment. A long-lived trail can hold dozens of
+   * live segments at once and they churn constantly, so allocating geometry per segment
+   * — as the 2.6.1 disc renderer did — is exactly the uncontrolled churn the GPU
+   * stability procedure exists to catch. Marked `sharedGeometry` so segment teardown
+   * disposes materials but never these.
+   */
+  private plasmaQuad: THREE.PlaneGeometry | null = null;
+  private plasmaCap: THREE.CircleGeometry | null = null;
+
+  private plasmaGeometry(): { quad: THREE.PlaneGeometry; cap: THREE.CircleGeometry } {
+    if (!this.plasmaQuad) {
+      // Unit strip: 1x1 in XY, laid flat and scaled per segment.
+      this.plasmaQuad = new THREE.PlaneGeometry(1, 1);
+    }
+    if (!this.plasmaCap) this.plasmaCap = new THREE.CircleGeometry(1, 18);
+    return { quad: this.plasmaQuad, cap: this.plasmaCap };
+  }
+
+  private plasmaLayer(
+    geo: THREE.BufferGeometry,
+    color: string,
+    opacity: number,
+    name: string,
+    y: number,
+  ): THREE.Mesh {
+    const mesh = new THREE.Mesh(geo, this.effectMat(color, opacity, true));
+    mesh.userData.sharedGeometry = true;
+    mesh.userData.ownsGeometry = false;
+    mesh.userData.ownsMaterial = true;
+    mesh.userData.baseOpacity = opacity;
+    mesh.name = name;
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = y;
+    mesh.renderOrder = 18;
+    (mesh.material as THREE.MeshBasicMaterial).depthTest = false;
+    return mesh;
+  }
+
+  /**
+   * One burning trail segment.
+   *
+   * Three stacked strips (ember shell → fire body → plasma core) plus round caps at both
+   * ends. The caps are what make consecutive segments read as one continuous ribbon:
+   * because each segment starts exactly where the previous ended, a disc of the same
+   * half-width at the joint closes the corner on turns.
+   */
+  private createPlasmaSegment(): THREE.Object3D {
+    const { quad, cap } = this.plasmaGeometry();
+    const g = new THREE.Group();
+    g.add(this.plasmaLayer(quad, '#ff7a24', 0.3, 'pw-ember', 0.05));
+    g.add(this.plasmaLayer(cap, '#ff7a24', 0.3, 'pw-ember-cap0', 0.051));
+    g.add(this.plasmaLayer(cap, '#ff7a24', 0.3, 'pw-ember-cap1', 0.052));
+    g.add(this.plasmaLayer(quad, '#ff4f24', 0.52, 'pw-fire', 0.06));
+    g.add(this.plasmaLayer(cap, '#ff4f24', 0.52, 'pw-fire-cap0', 0.061));
+    g.add(this.plasmaLayer(cap, '#ff4f24', 0.52, 'pw-fire-cap1', 0.062));
+    g.add(this.plasmaLayer(quad, '#ffd45a', 0.8, 'pw-core', 0.07));
+    // Flame tongues licking off the strip; animated in layout.
+    for (let i = 0; i < 4; i += 1) {
+      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#ffb83d' : '#fff0b0', 0.55, 'pw-tongue', 0.075);
+      tongue.userData.tonguePhase = i * 1.37;
+      tongue.userData.tongueAt = 0.16 + i * 0.23;
+      g.add(tongue);
+    }
+    return g;
+  }
+
+  /**
+   * Place a segment's meshes on the authoritative capsule the simulation owns.
+   *
+   * The strip length is the true segment length and the strip/cap width is the true
+   * collision half-width, so what burns on screen is exactly what damages.
+   */
+  private layoutPlasmaSegment(obj: THREE.Object3D, h: SurvivorState['hazards'][0], t: number): void {
+    const ax = h.x;
+    const az = h.z;
+    const bx = h.x1;
+    const bz = h.z1;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len = Math.hypot(dx, dz);
+    const w = h.radius;
+    const midX = (ax + bx) / 2;
+    const midZ = (az + bz) / 2;
+    obj.position.set(midX, 0, midZ);
+    // Plane is authored in XY then laid flat, so +Y maps to world -Z: yaw accordingly.
+    obj.rotation.y = Math.atan2(dx, dz);
+
+    const age = 1 - t;
+    // Ember phase: the tail narrows and cools rather than simply fading out.
+    const cool = age < 0.45 ? 1 : 1 - ((age - 0.45) / 0.55) * 0.45;
+    const flicker = 0.9 + Math.sin(performance.now() * 0.009 + h.id * 0.7) * 0.1;
+
+    for (const child of obj.children) {
+      if (!(child instanceof THREE.Mesh)) continue;
+      const base = (child.userData.baseOpacity as number | undefined) ?? 0.5;
+      const mat = child.material as THREE.MeshBasicMaterial;
+      const n = child.name;
+      let widthMul = 1;
+      if (n.startsWith('pw-ember')) widthMul = 1.0;
+      else if (n.startsWith('pw-fire')) widthMul = 0.66;
+      else if (n === 'pw-core') widthMul = 0.3;
+
+      if (n === 'pw-ember' || n === 'pw-fire' || n === 'pw-core') {
+        // Strip: X = cross-track width, Y (pre-rotation) = along-track length.
+        child.scale.set(w * 2 * widthMul * cool, Math.max(0.001, len), 1);
+        child.position.set(0, child.position.y, 0);
+        mat.opacity = Math.max(0.05, base * t * (n === 'pw-core' ? flicker : 1));
+      } else if (n.endsWith('cap0') || n.endsWith('cap1')) {
+        const end = n.endsWith('cap0') ? -len / 2 : len / 2;
+        child.scale.setScalar(w * widthMul * cool);
+        child.position.set(0, child.position.y, end);
+        mat.opacity = Math.max(0.05, base * t);
+      } else if (n === 'pw-tongue') {
+        const phase = (child.userData.tonguePhase as number) ?? 0;
+        const at = (child.userData.tongueAt as number) ?? 0.5;
+        const lick = 0.55 + Math.sin(performance.now() * 0.011 + phase + h.id) * 0.45;
+        child.scale.setScalar(w * 0.42 * lick * cool);
+        child.position.set(
+          (phase % 2 === 0 ? 1 : -1) * w * 0.5 * lick,
+          child.position.y,
+          -len / 2 + len * at,
+        );
+        mat.opacity = Math.max(0, base * t * lick);
+      }
+    }
+  }
+
+  /**
+   * Cleanup Crew allied Titans.
+   *
+   * Each ally owns one lazily-built group holding that hero's real Mech model and real
+   * ship model — the same GLTF assets the player uses, cloned once per ally when the
+   * squad arrives and disposed when it leaves. Nothing is reloaded or re-cloned per
+   * frame; arrival, combat and departure only toggle visibility and move transforms.
+   */
+  private syncAllies(state: SurvivorState, dt: number): void {
+    const alive = new Set(state.allies.filter((a) => a.active).map((a) => a.id));
+    for (const [id, vis] of this.allies) {
+      if (alive.has(id)) continue;
+      this.root.remove(vis.root);
+      this.disposeEffectObject(vis.root);
+      this.allies.delete(id);
+    }
+
+    for (const a of state.allies) {
+      if (!a.active) continue;
+      let vis = this.allies.get(a.id);
+      if (!vis) {
+        vis = this.createAlly(a.heroId);
+        this.allies.set(a.id, vis);
+        this.root.add(vis.root);
+      }
+      vis.root.position.set(a.x, 0, a.z);
+      vis.root.rotation.y = Math.atan2(a.facingX, a.facingZ);
+
+      // Ship carries the hero in and out; the Mech is what actually fights.
+      const inTransit = a.phase !== 'active';
+      if (vis.ship) {
+        vis.ship.visible = inTransit;
+        // Bank and lift while flying so a transport reads as a transport.
+        vis.ship.position.y = inTransit ? 2.6 : 0;
+        vis.ship.rotation.z = inTransit ? Math.sin(state.time * 3) * 0.16 : 0;
+      }
+      if (vis.mech) {
+        vis.mech.root.visible = !inTransit;
+        vis.mech.animator?.update(dt);
+      }
+      if (vis.trail) {
+        vis.trail.visible = inTransit;
+        const mat = vis.trail.material as THREE.MeshBasicMaterial;
+        mat.opacity = inTransit ? 0.62 : 0;
+      }
+      if (vis.glow) {
+        // Deployment light: bright on landing, steady while fighting.
+        const mat = vis.glow.material as THREE.MeshBasicMaterial;
+        mat.opacity = a.phase === 'active' ? 0.3 : 0.6;
+        vis.glow.rotation.z = state.time * 1.4;
+      }
+    }
+  }
+
+  private createAlly(heroId: keyof typeof HEROES): AllyVis {
+    const hero = HEROES[heroId];
+    const root = new THREE.Group();
+    root.name = `ally-${heroId}`;
+
+    const mech = this.makeFromUrl(hero.mech.url, hero.mech.anim, 'mech');
+    if (mech) {
+      mech.root.scale.setScalar(1.0);
+      root.add(mech.root);
+      mech.animator?.play('idle');
+    }
+
+    let ship: THREE.Object3D | null = null;
+    const shipClone = this.assets.clone(hero.shipUrl);
+    if (shipClone) {
+      ship = shipClone.root;
+      root.add(ship);
+    }
+
+    // Landing streak behind the transport.
+    const trail = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.9, 7),
+      this.effectMat(hero.accent, 0.62, true),
+    );
+    trail.userData.ownsGeometry = true;
+    trail.rotation.x = -Math.PI / 2;
+    trail.position.set(0, 0.12, -3.6);
+    root.add(trail);
+
+    // Allied ground marker so the player can always tell friend from horde.
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(1.05, 1.5, 32),
+      this.effectMat(hero.accent, 0.4, true),
+    );
+    glow.userData.ownsGeometry = true;
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.06;
+    root.add(glow);
+
+    return { root, mech, ship, trail, glow };
+  }
+
   private syncHazards(state: SurvivorState): void {
     const alive = new Set(state.hazards.filter((h) => h.active).map((h) => h.id));
     for (const [id, obj] of this.hazards) {
@@ -634,46 +877,7 @@ export class SurvivorRenderer {
       let obj = this.hazards.get(h.id);
       if (!obj) {
         if (h.kind === 'plasma-wake') {
-          const group = new THREE.Group();
-          const core = this.ownMesh(new THREE.Mesh(
-            new THREE.CircleGeometry(1, 32),
-            this.effectMat('#ff4f24', 0.48, false),
-          ));
-          core.rotation.x = -Math.PI / 2;
-          core.userData.baseOpacity = 0.5;
-          const corona = this.ownMesh(new THREE.Mesh(
-            new THREE.RingGeometry(0.52, 1.08, 40),
-            this.effectMat('#ff8a32', 0.62, true),
-          ));
-          corona.rotation.x = -Math.PI / 2;
-          corona.position.y = 0.035;
-          corona.userData.baseOpacity = 0.72;
-          const hot = this.ownMesh(new THREE.Mesh(
-            new THREE.RingGeometry(0.12, 0.42, 28),
-            this.effectMat('#ffd45a', 0.72, true),
-          ));
-          hot.rotation.x = -Math.PI / 2;
-          hot.position.y = 0.055;
-          hot.userData.baseOpacity = 0.86;
-          group.add(core, corona, hot);
-          // Procedural flame tongues and sparks: visually strong without external assets.
-          for (let i = 0; i < 7; i += 1) {
-            const flame = this.ownMesh(new THREE.Mesh(
-              new THREE.ConeGeometry(0.11 + (i % 3) * 0.03, 0.62 + (i % 2) * 0.24, 7, 1, true),
-              this.effectMat(i % 2 === 0 ? '#ff5a24' : '#ffb83d', 0.8, true),
-            ));
-            flame.name = 'plasma-flame';
-            flame.userData.baseOpacity = 0.72;
-            flame.userData.flamePhase = i * 0.83;
-            flame.position.set(-0.72 + i * 0.24, 0.2 + (i % 2) * 0.08, (i % 3 - 1) * 0.2);
-            group.add(flame);
-          }
-          group.traverse((child) => {
-            if (!(child instanceof THREE.Mesh)) return;
-            child.material.depthTest = false;
-            child.renderOrder = 18;
-          });
-          obj = group;
+          obj = this.createPlasmaSegment();
         } else {
           const ring = this.ownMesh(new THREE.Mesh(
             new THREE.CircleGeometry(1, 20),
@@ -687,24 +891,17 @@ export class SurvivorRenderer {
         this.root.add(obj);
       }
       const t = h.life / h.maxLife;
-      obj.position.set(h.x, h.kind === 'wake' || h.kind === 'plasma-wake' ? 0.06 : 0.04, h.z);
-      const growth = 0.85 + (1 - t) * 0.2;
       if (h.kind === 'plasma-wake') {
-        obj.scale.set(h.radius * h.scaleX * growth, 1, h.radius * h.scaleZ * growth);
-        obj.rotation.y = Math.atan2(h.facingX, h.facingZ);
-      } else {
-        obj.scale.setScalar(h.radius * growth);
+        this.layoutPlasmaSegment(obj, h, t);
+        continue;
       }
+      obj.position.set(h.x, h.kind === 'wake' ? 0.06 : 0.04, h.z);
+      const growth = 0.85 + (1 - t) * 0.2;
+      obj.scale.setScalar(h.radius * growth);
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
           const base = (c.userData.baseOpacity as number | undefined) ?? (h.kind === 'wake' ? 0.5 : 0.42);
           c.material.opacity = Math.max(0.08, t * base);
-          if (c.name === 'plasma-flame') {
-            const phase = (c.userData.flamePhase as number | undefined) ?? 0;
-            const flicker = 0.78 + Math.sin(performance.now() * 0.012 + phase) * 0.25;
-            c.scale.y = flicker;
-            c.position.y = 0.22 + flicker * 0.08;
-          }
         }
       });
     }
@@ -1132,6 +1329,12 @@ export class SurvivorRenderer {
         obj.scale.setScalar((0.35 + Math.min(1, t * 2.8) * 0.65) * pulse);
         const ring = obj.getObjectByName('singularity-ring');
         if (ring) ring.rotation.z = t * 7.5;
+      } else if (e.kind === 'orbital-shock') {
+        // Expand from the core outward to the full outer damage radius.
+        obj.scale.setScalar(0.28 + t * 0.72);
+      } else if (e.kind === 'orbital-scorch') {
+        // Residue does not expand; it settles slightly and fades.
+        obj.scale.setScalar(1.02 - t * 0.06);
       } else if (e.kind === 'arc' || e.kind === 'orbital' || e.kind === 'orbital-strike' || e.kind === 'titan-deploy') {
         obj.scale.setScalar(1);
       } else {
@@ -1259,21 +1462,68 @@ export class SurvivorRenderer {
       return g;
     }
     if (e.kind === 'orbital-strike') {
+      /*
+       * The descending lance. 2.7.0 makes it substantially more authoritative: a wider
+       * outer column, a thicker white core, and an extra inner shaft, so the strike is
+       * unmistakable in a dense late-game fight without hiding what is underneath it.
+       */
       const r = e.radius ?? e.scale ?? 1.6;
-      const glow = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.38, r * 0.65, 16, 20, 1, true), this.effectMat('#ffd46a', 0.48, true)));
-      glow.position.y = 8;
-      const core = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.12, r * 0.2, 18, 16), this.effectMat('#ffffff', 0.98, true)));
-      core.position.y = 9;
-      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.35, r * 1.8, 56), this.effectMat('#fff0a0', 0.68, true)));
+      const glow = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.98, 22, 24, 1, true), this.effectMat('#ffd46a', 0.5, true)));
+      glow.position.y = 11;
+      const shaft = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.46, 20, 18, 1, true), this.effectMat('#ffe9a8', 0.7, true)));
+      shaft.position.y = 10;
+      const core = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.17, r * 0.28, 20, 16), this.effectMat('#ffffff', 0.98, true)));
+      core.position.y = 10;
+      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.35, r * 1.05, 56), this.effectMat('#fff0a0', 0.7, true)));
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.08;
-      g.add(glow, core, ring);
+      g.add(glow, shaft, core, ring);
       g.position.set(e.x, 0, e.z);
       g.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           o.material.depthTest = false;
           o.renderOrder = 32;
         }
+      });
+      return g;
+    }
+    if (e.kind === 'orbital-shock') {
+      /*
+       * The shockwave is drawn at exactly the outer damage radius so the ring the
+       * player sees is the ring that actually dealt the reduced damage. It is scaled
+       * from the centre outward in `syncEffects`, so the geometry is authored at full
+       * size here.
+       */
+      const r = e.radius ?? e.scale ?? 2.5;
+      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.74, r, 64), this.effectMat('#ffd46a', 0.62, true)));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.09;
+      const inner = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.5, r * 0.76, 64), this.effectMat('#ff9a3c', 0.3, true)));
+      inner.rotation.x = -Math.PI / 2;
+      inner.position.y = 0.085;
+      g.add(ring, inner);
+      g.position.set(e.x, 0, e.z);
+      g.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.material.depthTest = false;
+          o.renderOrder = 30;
+        }
+      });
+      return g;
+    }
+    if (e.kind === 'orbital-scorch') {
+      // Flat residue disc, drawn under the horde rather than over it.
+      const r = e.radius ?? e.scale ?? 2;
+      const disc = this.ownMesh(new THREE.Mesh(new THREE.CircleGeometry(r, 40), this.effectMat('#ff7a24', 0.34, true)));
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.y = 0.045;
+      const edge = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.82, r, 40), this.effectMat('#ffb347', 0.4, true)));
+      edge.rotation.x = -Math.PI / 2;
+      edge.position.y = 0.05;
+      g.add(disc, edge);
+      g.position.set(e.x, 0, e.z);
+      g.traverse((o) => {
+        if (o instanceof THREE.Mesh) o.renderOrder = 6;
       });
       return g;
     }
@@ -1560,7 +1810,17 @@ export class SurvivorRenderer {
     this.gunshipRoot = null;
     this.shieldRoot = null;
     this.shieldWasActive = false;
+    for (const [, vis] of this.allies) {
+      this.root.remove(vis.root);
+      this.disposeEffectObject(vis.root);
+    }
+    this.allies.clear();
     this.boltGeo.dispose();
+    // Shared Plasma Wake ribbon geometry: owned by the renderer, not by any segment.
+    this.plasmaQuad?.dispose();
+    this.plasmaQuad = null;
+    this.plasmaCap?.dispose();
+    this.plasmaCap = null;
     this.eliteShellGeo.dispose();
     this.eliteRingGeo.dispose();
     this.eliteBarGeo.dispose();
