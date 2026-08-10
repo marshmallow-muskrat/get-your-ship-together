@@ -35,6 +35,7 @@ import {
   EMPTY_SURVIVOR_INPUT,
   SURGE_KINDS,
   damagePlayer,
+  generateChoices,
   mechCooldownFor,
   mechDurationFor,
   stepSurvivor,
@@ -331,6 +332,59 @@ describe('§6 bounded repair economy', () => {
     expect(orb.active).toBe(false);
     // One heal of exactly 20 (no Nanite Bleed levels), never two.
     expect(state.telemetry.healedByOrbs).toBeCloseTo(20, 5);
+  });
+});
+
+describe('endless-2.6.0 identity and late repair contracts', () => {
+  it('never offers another hero signature and exposes every shared weapon', () => {
+    const signatures = new Set<WeaponId>(['microdrone', 'rail', 'bioplasma', 'rocket']);
+    const seen = new Set<WeaponId>();
+    for (let seed = 1; seed <= 160; seed += 1) {
+      const state = createSurvivorState('bee', null, seed);
+      const choices = generateChoices(state);
+      for (const choice of choices) {
+        if (choice.kind !== 'new-weapon' || !choice.weaponId) continue;
+        seen.add(choice.weaponId);
+        expect(signatures.has(choice.weaponId), `offered signature ${choice.weaponId}`).toBe(false);
+      }
+    }
+    expect(seen.has('rotary')).toBe(true);
+    expect(seen.has('plasma-wake')).toBe(true);
+    expect(seen.has('pulsar')).toBe(true);
+  });
+
+  it('Boswell fires a directional, non-homing drone formation', () => {
+    const state = quietRun(2600);
+    state.weapons = [{ weaponId: 'microdrone', level: 1, cooldown: 0, prototype: false, focusDebt: 0 }];
+    const target = emptyEnemy();
+    target.id = state.nextId++;
+    target.alive = true;
+    target.x = 10;
+    target.z = 0;
+    target.health = target.maxHealth = 1000;
+    state.enemies.push(target);
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const drones = state.projectiles.filter((p) => p.active && p.kind === 'drone');
+    expect(drones.length).toBeGreaterThanOrEqual(3);
+    expect(drones.every((p) => !p.homing)).toBe(true);
+    expect(new Set(drones.map((p) => p.z.toFixed(2))).size).toBeGreaterThan(1);
+  });
+
+  it('banks late-game repair at full integrity, with long life and a hard floor cap', () => {
+    const state = quietRun(2601, SURVIVOR.lateRepairStart + 1);
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    state.player.health = state.player.maxHealth;
+    for (let i = 0; i < 70 * 60; i += 1) {
+      state.spawnAcc = -1e9;
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }
+    const repairs = state.pickups.filter((p) => p.active && p.kind === 'repair' && !p.premium);
+    expect(repairs).toHaveLength(SURVIVOR.lateRepairActiveCap);
+    expect(repairs.every((p) => p.life <= SURVIVOR.lateRepairPickupLife && p.life > 0)).toBe(true);
+    expect(state.player.health).toBe(state.player.maxHealth);
   });
 });
 
@@ -1045,7 +1099,7 @@ describe('§11 boss phase transitions', () => {
 // ---------------------------------------------------------------- §22 balance version
 
 describe('§22 release metadata', () => {
-  it('stamps endless-2.5.0 after the calibrated midgame balance experiment', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.5.0');
+  it('stamps endless-2.6.0 after the content-completion experiment', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.0');
   });
 });

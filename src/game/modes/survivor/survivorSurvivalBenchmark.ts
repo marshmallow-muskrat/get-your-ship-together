@@ -241,10 +241,10 @@ function selectProtocol(state: SurvivorState, policy: SurvivalPolicyId): number 
     return i >= 0 ? i : 0;
   };
 
-  if (ids.includes('titan-protocol')) {
-    if (living >= 60) return choose('fleet-annihilation');
-    if (xpOrbs >= 20) return choose('singularity-event');
-    return choose('titan-protocol');
+  if (ids.includes('carrier-wing')) {
+    if (living >= 60) return choose('singularity-engine');
+    if (state.bosses.some((b) => b.active)) return choose('starbreaker-array');
+    return choose('carrier-wing');
   }
   if (policy === 'novice') return state.seed % Math.max(1, ids.length);
   if (hp < (policy === 'expert' ? 0.48 : 0.38)) return choose('aegis-barrier');

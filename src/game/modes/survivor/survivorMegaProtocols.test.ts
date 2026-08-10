@@ -44,6 +44,8 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     expect(state.player.invuln).toBeGreaterThanOrEqual(SURVIVOR.aegis.invulnOnSelect);
     expect(Math.hypot(enemy.kbX, enemy.kbZ)).toBeGreaterThan(0);
     expect(state.effects.some((e) => e.kind === 'repulsor' && e.radius === SURVIVOR.aegis.pulseRadius)).toBe(true);
+    expect(SURVIVOR.aegis.invulnOnSelect).toBe(3);
+    expect(state.player.shieldTime).toBe(SURVIVOR.shieldDuration);
   });
 
   it('Mega Cache offers exactly the three exclusive Mega Protocols', () => {
@@ -52,58 +54,58 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
     expect(state.phase).toBe('protocol');
     expect(state.protocolChoices.map((c) => c.protocolId)).toEqual([
-      'titan-protocol',
-      'fleet-annihilation',
-      'singularity-event',
+      'carrier-wing',
+      'starbreaker-array',
+      'singularity-engine',
     ]);
   });
 
-  it('Titan is temporary and does not reset the ordinary Mech cooldown', () => {
+  it('Starbreaker is a five-minute armament and leaves ordinary Mech untouched', () => {
     const state = quietState();
     state.player.mechCd = 30;
     state.player.mechCdMax = 45;
-    forceStartProtocol(state, 'titan-protocol', 1.5);
-    expect(state.player.form).toBe('mech');
+    forceStartProtocol(state, 'starbreaker-array', 1.5);
+    expect(state.player.form).toBe('astronaut');
     expect(state.player.mechCd).toBe(30);
-    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 1);
-    expect(state.player.mechCd).toBeCloseTo(29, 4);
-    expect(state.megaProtocol.titanActive).toBe(true);
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 0.1);
+    expect(state.player.mechCd).toBeCloseTo(29.9, 4);
+    expect(state.megaProtocol.remaining).toBeGreaterThan(299);
+    expect(state.effects.some((e) => e.kind === 'rail')).toBe(true);
   });
 
   it('Fleet Annihilation visibly schedules three passes and erases ordinary targets in a lane', () => {
     const state = quietState();
     const target = addEnemy(state, 0, 0);
-    forceStartProtocol(state, 'fleet-annihilation', 1.5);
+    forceStartProtocol(state, 'carrier-wing', 1.5);
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.megaProtocol.fleetWarn + 0.02);
     expect(state.effects.some((e) => e.kind === 'fleet-ship')).toBe(true);
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.megaProtocol.fleetTravel * 0.5 + 0.02);
     expect(target.alive).toBe(false);
-    expect(state.telemetry.bySource.get('mega-fleet')?.kills).toBeGreaterThanOrEqual(1);
+    expect(state.megaProtocol.remaining).toBeGreaterThan(298);
   });
 
-  it('Singularity conserves its Energy snapshot and excludes repair/later Energy', () => {
+  it('Singularity Engine is a non-upgradable five-minute damage armament, not an Energy recall', () => {
     const state = quietState();
     state.pickups.push(
       { id: 101, kind: 'xp', x: 8, z: 0, value: 17, active: true, magnetized: false, life: Infinity },
       { id: 102, kind: 'repair', x: 7, z: 0, value: 20, active: true, magnetized: false, life: 48 },
     );
-    forceStartProtocol(state, 'singularity-event', 1.5);
+    forceStartProtocol(state, 'singularity-engine', 1.5);
     state.pickups.push({ id: 103, kind: 'xp', x: 7, z: 0, value: 99, active: true, magnetized: false, life: Infinity });
     for (let i = 0; i < 360; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    expect(state.xp).toBe(17);
-    expect(state.pickups.find((p) => p.id === 101)?.active).toBe(false);
+    expect(state.xp).toBe(0);
+    expect(state.pickups.find((p) => p.id === 101)?.active).toBe(true);
     expect(state.pickups.find((p) => p.id === 102)?.active).toBe(true);
     expect(state.pickups.find((p) => p.id === 103)?.active).toBe(true);
   });
 
-  it('does not cover the active Singularity with an earned level-up modal', () => {
+  it('does not block ordinary level-up modals while a Titan armament is active', () => {
     const state = quietState();
     state.xpNext = 5;
     state.pickups.push({ id: 201, kind: 'xp', x: 1, z: 0, value: 20, active: true, magnetized: false, life: Infinity });
-    forceStartProtocol(state, 'singularity-event', 1.5);
+    forceStartProtocol(state, 'singularity-engine', 1.5);
     for (let i = 0; i < 120; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    expect(state.megaProtocol.id).toBe('singularity-event');
-    expect(state.pendingLevelUps).toBeGreaterThan(0);
-    expect(state.phase).toBe('playing');
+    expect(state.megaProtocol.id).toBe('singularity-engine');
+    expect(state.phase).toBe('levelup');
   });
 });

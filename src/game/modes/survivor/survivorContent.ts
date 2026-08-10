@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.5.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.6.0';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -126,6 +126,10 @@ export const SURVIVOR = {
   collapseStep: 120,
   /** Ordinary repair orbs expire so full-health players cannot fill the pool forever. */
   repairPickupLife: 48,
+  /** After the late-game transition, repairs become bankable map resources. */
+  lateRepairStart: 15 * 60,
+  lateRepairPickupLife: 65,
+  lateRepairActiveCap: 4,
   repairPickupWarnLife: 8,
   /** Keep XP from packing against perimeter walls. */
   pickupSafeInset: 2.75,
@@ -143,7 +147,7 @@ export const SURVIVOR = {
   /** Collection radius for Protocol Cache (world units). */
   cacheCollectRadius: 3.25,
   /** Normal Aegis duration (enhanced is longer). */
-  shieldDuration: 35,
+  shieldDuration: 30,
   shieldDurationEnhanced: 45,
   shieldEnhancedMul: 1.35,
   megaEvery: 5,
@@ -267,7 +271,7 @@ export const SURVIVOR = {
    * otherwise Gravitic Recall wins every ordinary Cache by default.
    */
   aegis: {
-    invulnOnSelect: 1.5,
+    invulnOnSelect: 3,
     pulseRadius: 14.5,
     pulseDamage: 12,
     pulsePush: 13.0,
@@ -275,7 +279,8 @@ export const SURVIVOR = {
     pulseMinibossPushMul: 0.2,
   },
   megaProtocol: {
-    titanDuration: 25,
+    /** Mega-Cache armaments persist for five minutes of active simulation time. */
+    titanDuration: 5 * 60,
     titanDamageMul: 1.35,
     titanAreaMul: 1.35,
     titanDamageTakenMul: 0.72,
@@ -373,6 +378,9 @@ export type WeaponId =
   | 'gravity'
   | 'rocket'
   | 'bioplasma'
+  | 'rotary'
+  | 'plasma-wake'
+  | 'pulsar'
   | 'arc'
   | 'orbital';
 
@@ -426,16 +434,14 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   microdrone: {
     id: 'microdrone',
     name: 'Microdrone Swarm',
-    description: 'Homing drones that hunt nearby threats.',
+    description: 'A broad formation of drones fired in one committed direction.',
     color: '#f5ae42',
     levels: [
-      // Reliability hero: measured against moving, off-axis targets so homing is
-      // credited for what it actually does rather than for standing still.
-      { level: 1, label: 'Microdrone I', damage: 55, cadence: 0.599, count: 3, speed: 14, life: 2.45, radius: 0.2 },
-      { level: 2, label: 'Microdrone II', damage: 61, cadence: 0.672, count: 4, speed: 14.5, life: 2.5, radius: 0.2 },
-      { level: 3, label: 'Swarm Cadre', damage: 68, cadence: 0.57, count: 4, speed: 15, life: 2.55, radius: 0.21 },
-      { level: 4, label: 'Hunter Net', damage: 76, cadence: 0.64, count: 5, speed: 15.5, life: 2.65, radius: 0.22 },
-      { level: 5, label: 'Hive Overdrive', damage: 85, cadence: 0.591, count: 6, speed: 16.5, life: 2.8, radius: 0.23 },
+      { level: 1, label: 'Drone Formation I', damage: 42, cadence: 0.72, count: 3, speed: 19, life: 1.35, radius: 0.22, width: 0.7 },
+      { level: 2, label: 'Drone Formation II', damage: 48, cadence: 0.64, count: 3, speed: 20, life: 1.4, radius: 0.23, width: 0.78 },
+      { level: 3, label: 'Swarm Cadre', damage: 54, cadence: 0.57, count: 3, speed: 21, life: 1.45, radius: 0.24, width: 0.86 },
+      { level: 4, label: 'Hunter Wing', damage: 70, cadence: 0.52, count: 3, speed: 22, life: 1.5, radius: 0.25, width: 0.9 },
+      { level: 5, label: 'Hive Overdrive', damage: 86, cadence: 0.67, count: 5, speed: 23, life: 1.55, radius: 0.26, width: 0.9 },
     ],
   },
   rail: {
@@ -469,7 +475,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   rocket: {
     id: 'rocket',
     name: 'Rocket Barrage',
-    description: 'Delayed area strikes on dense clusters.',
+    description: 'Visible mini-rockets launch from the hero and burst on impact.',
     color: '#ff8a4a',
     levels: [
       // Cluster specialist: salvo size doubles across the span, blast radius grows gently.
@@ -562,6 +568,46 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     ],
   },
 
+  rotary: {
+    id: 'rotary',
+    name: 'Rotary Cannon',
+    description: 'Rapid machine-gun fire for sustained priority-target damage.',
+    color: '#ffe28a',
+    levels: [
+      { level: 1, label: 'Rotary Cannon I', damage: 11, cadence: 0.16, count: 1, speed: 34, life: 1.05, radius: 0.16 },
+      { level: 2, label: 'Rotary Cannon II', damage: 13, cadence: 0.145, count: 1, speed: 35, life: 1.08, radius: 0.17 },
+      { level: 3, label: 'Accelerator Feed', damage: 15, cadence: 0.13, count: 1, speed: 36, life: 1.1, radius: 0.18 },
+      { level: 4, label: 'Heavy Rounds', damage: 18, cadence: 0.118, count: 1, speed: 37, life: 1.12, radius: 0.19 },
+      { level: 5, label: 'Twin Barrels', damage: 20, cadence: 0.19, count: 2, speed: 38, life: 1.15, radius: 0.2 },
+    ],
+  },
+  'plasma-wake': {
+    id: 'plasma-wake',
+    name: 'Plasma Wake',
+    description: 'Movement leaves a burning energy trail that punishes pursuit.',
+    color: '#ff6f4d',
+    levels: [
+      { level: 1, label: 'Plasma Wake I', damage: 54, cadence: 0.34, count: 1, radius: 1.15, life: 1.8 },
+      { level: 2, label: 'Plasma Wake II', damage: 66, cadence: 0.31, count: 1, radius: 1.22, life: 2.0 },
+      { level: 3, label: 'Hot Trail', damage: 78, cadence: 0.28, count: 1, radius: 1.3, life: 2.2 },
+      { level: 4, label: 'Fusion Footprint', damage: 90, cadence: 0.25, count: 1, radius: 1.4, life: 2.45 },
+      { level: 5, label: 'Twin Wake', damage: 99, cadence: 0.31, count: 2, radius: 1.5, life: 2.7 },
+    ],
+  },
+  pulsar: {
+    id: 'pulsar',
+    name: 'Pulsar Core',
+    description: 'A periodic radial discharge centered on the hero.',
+    color: '#b899ff',
+    levels: [
+      { level: 1, label: 'Pulsar Core I', damage: 42, cadence: 3.2, count: 1, radius: 8.0, life: 0.35 },
+      { level: 2, label: 'Pulsar Core II', damage: 54, cadence: 3.2, count: 1, radius: 8.0, life: 0.38 },
+      { level: 3, label: 'Charged Core', damage: 70, cadence: 3.2, count: 1, radius: 8.0, life: 0.42 },
+      { level: 4, label: 'Nova Shell', damage: 90, cadence: 3.2, count: 1, radius: 8.0, life: 0.46 },
+      { level: 5, label: 'Echo Pulsar', damage: 108, cadence: 3.2, count: 2, radius: 8.0, life: 0.5 },
+    ],
+  },
+
   arc: {
     id: 'arc',
     name: 'Arc Conductor',
@@ -590,11 +636,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // Orbital grows through strike power, not cadence: its identity is a small number
       // of heavy, telegraphed impacts, and a slow weapon measured over a fixed window is
       // dominated by shot quantisation if growth is pushed through cadence instead.
-      { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 1.6, life: 0.85 },
-      { level: 2, label: 'Orbital Lance II', damage: 168, cadence: 4.0, count: 1, radius: 1.68, life: 0.8 },
-      { level: 3, label: 'Orbital Lance III', damage: 205, cadence: 3.8, count: 1, radius: 1.76, life: 0.78 },
-      { level: 4, label: 'Sustained Lance', damage: 250, cadence: 3.6, count: 1, radius: 1.92, life: 0.72 },
-      { level: 5, label: 'Judgment Array', damage: 290, cadence: 5.9, count: 2, radius: 1.88, life: 0.68 },
+      { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 2.1, life: 0.85 },
+      { level: 2, label: 'Orbital Lance II', damage: 168, cadence: 4.0, count: 1, radius: 2.2, life: 0.8 },
+      { level: 3, label: 'Orbital Lance III', damage: 205, cadence: 3.8, count: 1, radius: 2.32, life: 0.78 },
+      { level: 4, label: 'Sustained Lance', damage: 250, cadence: 3.6, count: 1, radius: 2.45, life: 0.72 },
+      { level: 5, label: 'Judgment Array', damage: 290, cadence: 5.9, count: 2, radius: 2.6, life: 0.68 },
     ],
   },
 
@@ -959,6 +1005,18 @@ export function heroStarterWeapon(heroId: HeroId): WeaponId {
     case 'red-panda':
       return 'rocket';
   }
+}
+
+/** Hero identity weapons never enter another hero's shared arsenal. */
+export const SIGNATURE_WEAPONS: readonly WeaponId[] = [
+  'microdrone',
+  'rail',
+  'bioplasma',
+  'rocket',
+] as const;
+
+export function isSignatureWeapon(id: WeaponId): boolean {
+  return SIGNATURE_WEAPONS.includes(id);
 }
 
 /** Authored L1–L5 only (clamped). Prefer weaponStatsAtLevel for combat. */
@@ -1642,9 +1700,9 @@ export type ProtocolId =
   | 'aegis-barrier'
   | 'gunship-flyby'
   | 'gravitic-recall'
-  | 'titan-protocol'
-  | 'fleet-annihilation'
-  | 'singularity-event';
+  | 'carrier-wing'
+  | 'starbreaker-array'
+  | 'singularity-engine';
 
 export interface ProtocolDef {
   id: ProtocolId;
@@ -1658,7 +1716,7 @@ export const PROTOCOLS: ProtocolDef[] = [
     id: 'aegis-barrier',
     title: 'Aegis Barrier',
     body: 'Deploy a barrier that absorbs damage before integrity.',
-    duration: 35,
+    duration: 30,
   },
   {
     id: 'gunship-flyby',
@@ -1677,32 +1735,32 @@ export const PROTOCOLS: ProtocolDef[] = [
 /** Mega Caches are a separate reward tier and never reuse ordinary Cache choices. */
 export const MEGA_PROTOCOLS: ProtocolDef[] = [
   {
-    id: 'titan-protocol',
-    title: 'Titan Protocol',
-    body: 'Deploy an enhanced Mech for 25s without consuming or resetting Mech Overdrive.',
-    duration: 25,
+    id: 'carrier-wing',
+    title: 'Carrier Wing',
+    body: 'A fighter squadron strafes distributed threats for five minutes.',
+    duration: 5 * 60,
   },
   {
-    id: 'fleet-annihilation',
-    title: 'Fleet Annihilation',
-    body: 'Call three intersecting gunship passes that erase ordinary enemies and maul larger threats.',
-    duration: 7,
+    id: 'starbreaker-array',
+    title: 'Starbreaker Array',
+    body: 'Orbital satellites fire colossal piercing beams for five minutes.',
+    duration: 5 * 60,
   },
   {
-    id: 'singularity-event',
-    title: 'Singularity Event',
-    body: 'Create a crushing anomaly that recalls all current Energy and collapses the horde.',
-    duration: 5.5,
+    id: 'singularity-engine',
+    title: 'Singularity Engine',
+    body: 'Repeated anomalies pull and detonate the horde for five minutes.',
+    duration: 5 * 60,
   },
 ];
 
 /**
- * Shield points at acquisition: round(20 + 2*minutes + 0.08*maxHealth).
+ * Shield points at acquisition: round(32 + 3*minutes + 0.12*maxHealth).
  * Enhanced multiplies by SURVIVOR.shieldEnhancedMul after this base.
  */
 export function computeShieldPoints(elapsedSec: number, maxHealth: number): number {
   const m = Math.max(0, elapsedSec / 60);
-  return Math.round(20 + 2 * m + 0.08 * maxHealth);
+  return Math.round(32 + 3 * m + 0.12 * maxHealth);
 }
 
 export function computeShieldDuration(enhanced: boolean): number {
@@ -1723,6 +1781,11 @@ export function isPrototypeWeapon(id: WeaponId): boolean {
 
 export function ordinaryWeaponIds(): WeaponId[] {
   return (Object.keys(WEAPONS) as WeaponId[]).filter((id) => !WEAPONS[id]!.prototype);
+}
+
+/** Weapons any hero may discover in ordinary level-up cards. */
+export function sharedWeaponIds(): WeaponId[] {
+  return ordinaryWeaponIds().filter((id) => !isSignatureWeapon(id));
 }
 
 

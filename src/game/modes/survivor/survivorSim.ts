@@ -25,7 +25,7 @@ import {
   hullPlatingGainAtLevel,
   isPassiveAvailable,
   isPrototypeWeapon,
-  ordinaryWeaponIds,
+  sharedWeaponIds,
   playerPowerScale,
   PROTOCOLS,
   MEGA_PROTOCOLS,
@@ -567,7 +567,7 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
     state.miniboss.health = 0;
     dropPickup(state, e.x, e.z + 0.4, 'xp', 55, { premium: true });
     // Miniboss repair is guaranteed and larger; it never touches the ordinary budget.
-    dropPickup(state, e.x - 0.4, e.z, 'repair', SURVIVOR.repair.minibossValue);
+    dropPickup(state, e.x - 0.4, e.z, 'repair', SURVIVOR.repair.minibossValue, { premium: true });
   }
   tryOrdinaryRepairDrop(state, e.x + 0.2, e.z - 0.2);
 }
@@ -586,15 +586,30 @@ function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number): bool
   const cfg = SURVIVOR.repair;
   const p = state.player;
   const eco = state.repairEconomy;
-  if (p.health >= p.maxHealth) return false;
-  if (eco.sinceDrop < cfg.minInterval) return false;
+  const late = state.time >= SURVIVOR.lateRepairStart;
+  if (!late && p.health >= p.maxHealth) return false;
+  if (late && activeOrdinaryRepairs(state) >= SURVIVOR.lateRepairActiveCap) return false;
+  const minInterval = late ? lateRepairIntervals(state.time).min : cfg.minInterval;
+  const targetInterval = late ? lateRepairIntervals(state.time).target : cfg.targetInterval;
+  if (eco.sinceDrop < minInterval) return false;
   // Between min and target the chance ramps in, so the cadence averages inside the band
   // instead of snapping to exactly `targetInterval` every time.
-  const span = Math.max(0.001, cfg.targetInterval - cfg.minInterval);
-  const progress = Math.min(1, (eco.sinceDrop - cfg.minInterval) / span);
+  const span = Math.max(0.001, targetInterval - minInterval);
+  const progress = Math.min(1, (eco.sinceDrop - minInterval) / span);
   if (progress < 1 && rng(state) > progress * 0.5) return false;
   emitRepairOrb(state, x, z);
   return true;
+}
+
+function activeOrdinaryRepairs(state: SurvivorState): number {
+  return state.pickups.reduce((n, p) => n + (p.active && p.kind === 'repair' && !p.premium ? 1 : 0), 0);
+}
+
+function lateRepairIntervals(elapsed: number): { min: number; target: number; pity: number } {
+  const m = elapsed / 60;
+  if (m < 20) return { min: 9, target: 12, pity: 15 };
+  if (m < 25) return { min: 7.5, target: 10, pity: 12 };
+  return { min: 6, target: 8, pity: 10 };
 }
 
 /** Place one ordinary repair orb and reset the economy timers. */
@@ -618,6 +633,17 @@ function updateRepairEconomy(state: SurvivorState, dt: number): void {
   const p = state.player;
   const eco = state.repairEconomy;
   eco.sinceDrop += dt;
+  const late = state.time >= SURVIVOR.lateRepairStart;
+  if (late) {
+    // Late repairs are bankable resources, not hidden assistance for taking damage.
+    const intervals = lateRepairIntervals(state.time);
+    if (activeOrdinaryRepairs(state) >= SURVIVOR.lateRepairActiveCap) return;
+    if (eco.sinceDrop < intervals.target) return;
+    const ang = rng(state) * Math.PI * 2;
+    const r = 6 + rng(state) * 5;
+    emitRepairOrb(state, p.x + Math.cos(ang) * r, p.z + Math.sin(ang) * r);
+    return;
+  }
   const injured = p.health < p.maxHealth * cfg.injuredFraction;
   if (!injured) return;
   eco.injuredFor += dt;
@@ -762,7 +788,11 @@ function dropPickup(
   slot.value = value;
   slot.active = true;
   slot.magnetized = false;
-  slot.life = kind === 'repair' ? SURVIVOR.repairPickupLife : Infinity;
+  slot.life = kind === 'repair'
+    ? state.time >= SURVIVOR.lateRepairStart
+      ? SURVIVOR.lateRepairPickupLife
+      : SURVIVOR.repairPickupLife
+    : Infinity;
   slot.premium = !!opts?.premium;
 }
 
@@ -779,6 +809,7 @@ function projSrc(proj: SurvivorProjectile): string {
 /** Telemetry bucket id for a player-owned hazard. */
 function hazardSrc(h: SurvivorHazard): string {
   if (h.kind === 'wake') return 'ship-wake';
+  if (h.kind === 'plasma-wake') return weaponSrc('plasma-wake');
   if (h.kind === 'puddle') return weaponSrc('bioplasma');
   return 'hazard';
 }
@@ -1309,25 +1340,38 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       }
       pushEffect(state, 'muzzle', p.x, p.z, 0.08, state.accent, 0.8);
     } else if (slot.weaponId === 'microdrone') {
+      const aim = selectWeaponTarget(state, slot, p.x, p.z, 20);
+      const pos = targetPosition(aim);
+      if (!pos) {
+        slot.cooldown = 0.1;
+        continue;
+      }
+      const dx0 = pos.x - p.x;
+      const dz0 = pos.z - p.z;
+      const dl = Math.hypot(dx0, dz0) || 1;
+      const fx = dx0 / dl;
+      const fz = dz0 / dl;
+      const px = -fz;
+      const pz = fx;
       for (let i = 0; i < count; i += 1) {
-        const a = (i / count) * Math.PI * 2 + state.time;
         const proj = acquireProjectile(state);
         if (!proj) break;
-        const spd = def.speed ?? 12;
+        const spd = def.speed ?? 20;
+        const offset = (i - (count - 1) / 2) * (def.width ?? 0.75);
         resetProj(
           proj,
           state,
           'drone',
           'microdrone',
-          p.x + Math.cos(a) * 0.6,
-          p.z + Math.sin(a) * 0.6,
-          Math.cos(a) * spd,
-          Math.sin(a) * spd,
+          p.x + px * offset,
+          p.z + pz * offset,
+          fx * spd,
+          fz * spd,
           {
             damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
             radius: (def.radius ?? 0.18) * area,
-            life: (def.life ?? 2.2) * (mech ? 1.2 : 1),
-            homing: true,
+            life: (def.life ?? 1.4) * (mech ? 1.15 : 1),
+            homing: false,
             color: state.accent,
           },
         );
@@ -1465,6 +1509,66 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         }
       }
       pushEffect(state, 'muzzle', p.x, p.z, 0.1, WEAPONS.bioplasma.color, 0.9);
+    } else if (slot.weaponId === 'rotary') {
+      const aim = selectWeaponTarget(state, slot, p.x, p.z, 20, { forceBoss: state.time >= 600 });
+      const pos = targetPosition(aim);
+      if (!pos) {
+        slot.cooldown = 0.06;
+        continue;
+      }
+      const a = Math.atan2(pos.x - p.x, pos.z - p.z);
+      for (let i = 0; i < count; i += 1) {
+        const spread = (i - (count - 1) / 2) * 0.055;
+        const proj = acquireProjectile(state);
+        if (!proj) break;
+        const spd = def.speed ?? 35;
+        resetProj(proj, state, 'bolt', 'rotary', p.x, p.z, Math.sin(a + spread) * spd, Math.cos(a + spread) * spd, {
+          damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+          radius: (def.radius ?? 0.17) * area,
+          life: def.life ?? 1.1,
+          pierce: def.pierce ?? 0,
+          color: WEAPONS.rotary.color,
+        });
+      }
+      pushEffect(state, 'muzzle', p.x, p.z, 0.07, WEAPONS.rotary.color, 0.65);
+    } else if (slot.weaponId === 'plasma-wake') {
+      if (!p.isMoving) {
+        slot.cooldown = 0.1;
+        continue;
+      }
+      const side = count > 1 ? 0.75 : 0;
+      for (let i = 0; i < count; i += 1) {
+        const offset = count > 1 ? (i === 0 ? -side : side) : 0;
+        spawnHazard(
+          state,
+          'plasma-wake',
+          p.x - p.facingX * 0.8 - p.facingZ * offset,
+          p.z - p.facingZ * 0.8 + p.facingX * offset,
+          (def.radius ?? 1.2) * area,
+          def.life ?? 2,
+          def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+          WEAPONS['plasma-wake'].color,
+        );
+      }
+      pushEffect(state, 'wake', p.x, p.z, 0.35, WEAPONS['plasma-wake'].color, (def.radius ?? 1.2) * area, {
+        radius: (def.radius ?? 1.2) * area,
+      });
+    } else if (slot.weaponId === 'pulsar') {
+      const radius = (def.radius ?? 4) * area;
+      for (let pulse = 0; pulse < count; pulse += 1) {
+        const pulseDamage = def.damage * (pulse === 0 ? 1 : 0.45) * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+        const pulseRadius = radius * (pulse === 0 ? 1 : 0.82);
+        pushEffect(state, 'pulse', p.x, p.z, 0.55 + pulse * 0.12, WEAPONS.pulsar.color, pulseRadius, { radius: pulseRadius });
+        for (const e of state.enemies) {
+          if (!e.alive || (e.x - p.x) ** 2 + (e.z - p.z) ** 2 > (pulseRadius + e.radius) ** 2) continue;
+          damageEnemy(state, e, pulseDamage, { src: weaponSrc('pulsar') });
+        }
+        for (const b of livingBosses(state)) {
+          if ((b.x - p.x) ** 2 + (b.z - p.z) ** 2 <= (pulseRadius + b.colliderRadius) ** 2) {
+            damageBoss(state, pulseDamage * 0.65, { boss: b, src: weaponSrc('pulsar') });
+          }
+        }
+      }
     } else if (slot.weaponId === 'arc') {
       fireArcConductor(state, slot, def, area, mech);
     } else if (slot.weaponId === 'orbital') {
@@ -1564,36 +1668,34 @@ function fireOrbitalLance(
   state: SurvivorState,
   slot: SurvivorWeaponSlot,
   def: ReturnType<typeof wdef>,
-  _area: number,
+  area: number,
   mech: boolean,
 ): void {
   const p = state.player;
-  const aim = selectWeaponTarget(state, slot, p.x, p.z, 32, { forceBoss: true });
-  // Lead the aim by the strike delay so a walking target is still under the beam.
-  let pos = leadTargetPosition(aim, def.life ?? 0.8);
-  if (!pos) {
-    const dense = densestPoint(state, p.x, p.z);
-    pos = dense;
-  }
   const strikes = def.count;
   const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
   for (let i = 0; i < strikes; i += 1) {
-    const ox = (i - (strikes - 1) / 2) * 1.1;
-    const tx = pos.x + ox;
+    // Each lance acquires independently. Judgment Array no longer wastes its second
+    // strike on a fixed global-X offset unrelated to the encounter geometry.
+    const aim = selectWeaponTarget(state, slot, p.x, p.z, 32, { forceBoss: true });
+    let pos = leadTargetPosition(aim, (def.life ?? 0.8) + i * 0.12);
+    if (!pos) pos = densestPoint(state, p.x, p.z);
+    const tx = pos.x;
     const tz = pos.z;
     const arm = (def.life ?? 0.8) + i * 0.12;
-    pushEffect(state, 'orbital', tx, tz, arm, WEAPONS.orbital.color, 2.5, { radius: def.radius ?? 1.6 });
-    pushEffect(state, 'telegraph', tx, tz, arm, '#ffd46a', 1, { radius: def.radius ?? 1.6 });
+    const radius = (def.radius ?? 2.1) * area;
+    pushEffect(state, 'orbital', tx, tz, arm, WEAPONS.orbital.color, radius, { radius });
+    pushEffect(state, 'telegraph', tx, tz, arm, '#ffd46a', radius, { radius });
     // Delayed damage via armed rocket-like projectile
     const proj = acquireProjectile(state);
     if (!proj) continue;
     resetProj(proj, state, 'orbital-marker', 'orbital', tx, tz, 0, 0, {
       damage: dmg,
-      radius: (def.radius ?? 1.6) * 0.85,
+      radius: radius * 0.85,
       life: arm + 0.05,
       armTimer: arm,
       color: WEAPONS.orbital.color,
-      explodeRadius: def.radius ?? 1.6,
+      explodeRadius: radius,
     });
   }
 }
@@ -1840,6 +1942,7 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
     b.z,
     'repair',
     SURVIVOR.repair.bossValue + (b.isMega ? SURVIVOR.repair.megaBonus : 0),
+    { premium: true },
   );
   dropPickup(state, b.x - 0.5, b.z, 'xp', 70, { premium: true });
   state.telemetry.bossKills.push({
@@ -2622,7 +2725,6 @@ function openPendingLevelUp(state: SurvivorState): boolean {
   if (state.recall.active) return false;
   // Singularity is itself a short, cinematic Energy recall. Do not cover its anomaly
   // with an upgrade modal mid-collapse; owed choices open immediately after it ends.
-  if (state.megaProtocol.id === 'singularity-event') return false;
   state.pendingLevelUps -= 1;
   openLevelUp(state);
   return true;
@@ -2665,9 +2767,13 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     });
   }
 
-  const ordinaryCount = state.weapons.filter((w) => !w.prototype && !isPrototypeWeapon(w.weaponId)).length;
+  // The signature is exclusive, not a free extra slot. Counting it keeps the established
+  // five-weapon build ceiling and prevents a wider shared pool from starving upgrades.
+  const ordinaryCount = state.weapons.filter(
+    (w) => !w.prototype && !isPrototypeWeapon(w.weaponId),
+  ).length;
   if (ordinaryCount < SURVIVOR.maxWeaponSlots) {
-    for (const id of ordinaryWeaponIds()) {
+    for (const id of sharedWeaponIds()) {
       if (ownedWeaponLevel(state, id) > 0) continue;
       if (isPrototypeWeapon(id)) continue;
       const card = newWeaponCard(id);
@@ -3001,15 +3107,15 @@ function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): v
   } else if (id === 'gravitic-recall') {
     startGraviticRecall(state);
     trackProtocol(state, id, state.recall.duration, potency);
-  } else if (id === 'titan-protocol') {
-    startTitanProtocol(state);
+  } else if (id === 'starbreaker-array') {
+    startStarbreakerArray(state);
     trackProtocol(state, id, SURVIVOR.megaProtocol.titanDuration, potency);
-  } else if (id === 'fleet-annihilation') {
-    startFleetAnnihilation(state);
-    trackProtocol(state, id, 7, potency);
-  } else if (id === 'singularity-event') {
-    startSingularityEvent(state);
-    trackProtocol(state, id, SURVIVOR.megaProtocol.singularityDuration, potency);
+  } else if (id === 'carrier-wing') {
+    startCarrierWing(state);
+    trackProtocol(state, id, SURVIVOR.megaProtocol.titanDuration, potency);
+  } else if (id === 'singularity-engine') {
+    startSingularityEngine(state);
+    trackProtocol(state, id, SURVIVOR.megaProtocol.titanDuration, potency);
   }
 }
 
@@ -3030,18 +3136,15 @@ function resetMegaProtocol(state: SurvivorState): void {
   state.megaProtocol.hitIds = [];
 }
 
-function startTitanProtocol(state: SurvivorState): void {
+function startStarbreakerArray(state: SurvivorState): void {
   resetMegaProtocol(state);
   const m = state.megaProtocol;
-  m.id = 'titan-protocol';
+  m.id = 'starbreaker-array';
   m.remaining = SURVIVOR.megaProtocol.titanDuration;
-  m.titanActive = true;
-  if (state.player.form === 'ship') endShipForm(state);
-  state.player.form = 'mech';
-  state.player.mechDuration = m.remaining;
-  state.player.invuln = Math.max(state.player.invuln, 1.25);
-  pushEffect(state, 'titan-deploy', state.player.x, state.player.z, 1.35, '#fff1a8', 5.5, { radius: 5.5 });
-  pushEffect(state, 'transform', state.player.x, state.player.z, 1.1, '#77eaff', 4.2);
+  m.tickCd = 0;
+  pushEffect(state, 'titan-deploy', state.player.x, state.player.z, 1.6, '#fff1a8', 6.5, { radius: 6.5 });
+  pushEffect(state, 'orbital-strike', state.player.x - 2, state.player.z, 1.1, '#ffd46a', 2.8, { radius: 2.8 });
+  pushEffect(state, 'orbital-strike', state.player.x + 2, state.player.z, 1.1, '#ffd46a', 2.8, { radius: 2.8 });
 }
 
 function fleetLane(state: SurvivorState, pass: number): { x0: number; z0: number; x1: number; z1: number } {
@@ -3067,11 +3170,11 @@ function telegraphFleetPass(state: SurvivorState, pass: number): void {
     });
 }
 
-function startFleetAnnihilation(state: SurvivorState): void {
+function startCarrierWing(state: SurvivorState): void {
   resetMegaProtocol(state);
   const m = state.megaProtocol;
-  m.id = 'fleet-annihilation';
-  m.remaining = 7;
+  m.id = 'carrier-wing';
+  m.remaining = SURVIVOR.megaProtocol.titanDuration;
   m.fleetNextAt = SURVIVOR.megaProtocol.fleetWarn;
   telegraphFleetPass(state, 0);
   m.fleetTelegraphed = 1;
@@ -3103,29 +3206,25 @@ function damageFleetLane(state: SurvivorState, pass: number): void {
   for (const e of state.enemies) {
     if (!e.alive || distPointToSegment(e.x, e.z, lane.x0, lane.z0, lane.x1, lane.z1) > half + e.radius) continue;
     const dmg = e.isMiniboss ? e.maxHealth * SURVIVOR.megaProtocol.fleetMinibossFraction : e.maxHealth * 1.1;
-    damageEnemy(state, e, dmg, { kind: 'gunship', pop: 1, src: 'mega-fleet' });
+    damageEnemy(state, e, dmg, { kind: 'gunship', pop: 1, src: 'titan-carrier' });
     pushEffect(state, 'impact', e.x, e.z, 0.36, '#fff0a0', 2.1);
   }
   for (const b of livingBosses(state)) {
     if (distPointToSegment(b.x, b.z, lane.x0, lane.z0, lane.x1, lane.z1) > half + b.colliderRadius) continue;
     const frac = b.isMega ? SURVIVOR.megaProtocol.fleetMegaFraction : SURVIVOR.megaProtocol.fleetBossFraction;
-    damageBoss(state, b.maxHealth * frac, { kind: 'gunship', pop: 1, boss: b, src: 'mega-fleet' });
+    damageBoss(state, b.maxHealth * frac, { kind: 'gunship', pop: 1, boss: b, src: 'titan-carrier' });
   }
 }
 
-function startSingularityEvent(state: SurvivorState): void {
+function startSingularityEngine(state: SurvivorState): void {
   resetMegaProtocol(state);
   const m = state.megaProtocol;
-  m.id = 'singularity-event';
-  m.remaining = SURVIVOR.megaProtocol.singularityDuration;
+  m.id = 'singularity-engine';
+  m.remaining = SURVIVOR.megaProtocol.titanDuration;
   m.x = state.player.x;
   m.z = state.player.z;
-  m.orbIds = state.pickups.filter((p) => p.active && p.kind === 'xp').map((p) => p.id);
-  for (const id of m.orbIds) {
-    const p = state.pickups.find((x) => x.id === id);
-    if (p) p.magnetized = true;
-  }
-  pushEffect(state, 'singularity', m.x, m.z, m.remaining, '#9a7bff', SURVIVOR.megaProtocol.singularityRadius, {
+  m.tickCd = 0;
+  pushEffect(state, 'singularity', m.x, m.z, 1.8, '#9a7bff', SURVIVOR.megaProtocol.singularityRadius, {
     radius: SURVIVOR.megaProtocol.singularityRadius,
   });
 }
@@ -3200,105 +3299,109 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
   m.elapsed += dt;
   m.remaining = Math.max(0, m.remaining - dt);
 
-  if (m.id === 'titan-protocol') {
-    // The ordinary cooldown continues on its own; Titan only owns this temporary form.
-    if (m.remaining > 0) {
-      m.titanActive = true;
-      if (state.player.form !== 'mech') state.player.form = 'mech';
-      state.player.mechDuration = Math.max(state.player.mechDuration, m.remaining);
-    } else {
-      m.titanActive = false;
-      if (state.player.form === 'mech') {
-        state.player.form = 'astronaut';
-        state.player.mechDuration = 0;
-        pushEffect(state, 'transform', state.player.x, state.player.z, 0.65, '#ffd46a', 2.8);
-      }
-      resetMegaProtocol(state);
-    }
-    return;
-  }
-
-  if (m.id === 'fleet-annihilation') {
+  if (m.id === 'carrier-wing') {
     const cfg = SURVIVOR.megaProtocol;
-    if (m.fleetNextPass < cfg.fleetPasses && m.elapsed + 1e-6 >= m.fleetNextAt) {
-      launchFleetPass(state, m.fleetNextPass);
-      m.fleetNextPass += 1;
-      m.fleetNextAt += cfg.fleetTravel + cfg.fleetGap;
+    if (m.fleetTelegraphed <= m.fleetNextPass && m.elapsed + 1e-6 >= m.fleetNextAt - cfg.fleetWarn) {
+      telegraphFleetPass(state, m.fleetNextPass % cfg.fleetPasses);
+      m.fleetTelegraphed = m.fleetNextPass + 1;
     }
-    if (
-      m.fleetTelegraphed < cfg.fleetPasses &&
-      m.elapsed + 1e-6 >= m.fleetNextAt - cfg.fleetWarn
-    ) {
-      telegraphFleetPass(state, m.fleetTelegraphed);
-      m.fleetTelegraphed += 1;
+    if (m.elapsed + 1e-6 >= m.fleetNextAt) {
+      launchFleetPass(state, m.fleetNextPass % cfg.fleetPasses);
+      m.fleetNextPass += 1;
+      m.fleetNextAt += 4.0;
     }
     for (const due of [...m.fleetDamageDue]) {
       if (m.elapsed + 1e-6 < due.at) continue;
       damageFleetLane(state, due.pass);
       m.fleetDamageDue.splice(m.fleetDamageDue.indexOf(due), 1);
     }
-    if (m.remaining <= 0 || (m.fleetNextPass >= cfg.fleetPasses && m.fleetDamageDue.length === 0)) {
+    if (m.remaining <= 0 && m.fleetDamageDue.length === 0) {
       pushEffect(state, 'mega', state.player.x, state.player.z, 0.8, '#fff2a8', 5.5, { radius: 5.5 });
       resetMegaProtocol(state);
     }
     return;
   }
 
-  if (m.id === 'singularity-event') {
-    const cfg = SURVIVOR.megaProtocol;
-    const progress = 1 - m.remaining / cfg.singularityDuration;
-    const pullRadius = cfg.singularityRadius * (0.75 + progress * 0.25);
-    for (const id of m.orbIds) {
-      const pk = state.pickups.find((x) => x.id === id && x.active && x.kind === 'xp');
-      if (!pk) continue;
-      const dx = state.player.x - pk.x;
-      const dz = state.player.z - pk.z;
-      const d = Math.hypot(dx, dz) || 1;
-      const speed = 22 + progress * 50;
-      pk.x += (dx / d) * speed * dt;
-      pk.z += (dz / d) * speed * dt;
-      pk.magnetized = true;
-    }
-    for (const e of state.enemies) {
-      if (!e.alive) continue;
-      const dx = m.x - e.x;
-      const dz = m.z - e.z;
-      const d = Math.hypot(dx, dz) || 1;
-      if (d > pullRadius + e.radius) continue;
-      const resistance = e.isMiniboss ? 0.22 : e.isElite ? 0.48 : 1;
-      e.x += (dx / d) * (5 + progress * 6) * resistance * dt;
-      e.z += (dz / d) * (5 + progress * 6) * resistance * dt;
-    }
+  if (m.id === 'starbreaker-array') {
     m.tickCd -= dt;
     if (m.tickCd <= 0) {
-      m.tickCd += cfg.singularityTick;
+      m.tickCd += 2.7;
+      fireStarbreaker(state);
+    }
+    if (m.remaining <= 0) {
+      pushEffect(state, 'mega', state.player.x, state.player.z, 1.1, '#fff2a8', 6.5, { radius: 6.5 });
+      resetMegaProtocol(state);
+    }
+    return;
+  }
+
+  if (m.id === 'singularity-engine') {
+    const cfg = SURVIVOR.megaProtocol;
+    m.tickCd -= dt;
+    if (m.tickCd <= 0) {
+      m.tickCd += 5.5;
+      const dense = densestPoint(state, state.player.x, state.player.z);
+      m.x = dense.x;
+      m.z = dense.z;
+      const pullRadius = cfg.singularityRadius * 0.72;
+      pushEffect(state, 'singularity', m.x, m.z, 1.65, '#b18cff', pullRadius, { radius: pullRadius });
       for (const e of state.enemies) {
         if (!e.alive || (e.x - m.x) ** 2 + (e.z - m.z) ** 2 > pullRadius ** 2) continue;
-        damageEnemy(state, e, cfg.singularityDamage, { kind: 'ability', pop: 0.55, src: 'mega-singularity' });
+        const dx = m.x - e.x;
+        const dz = m.z - e.z;
+        const d = Math.hypot(dx, dz) || 1;
+        const resistance = e.isMiniboss ? 0.2 : e.isElite ? 0.45 : 1;
+        e.x += (dx / d) * 4.5 * resistance;
+        e.z += (dz / d) * 4.5 * resistance;
+        damageEnemy(state, e, cfg.singularityDamage * playerPowerScale(state), {
+          kind: 'ability', pop: 0.75, src: 'titan-singularity',
+        });
+      }
+      for (const b of livingBosses(state)) {
+        if ((b.x - m.x) ** 2 + (b.z - m.z) ** 2 <= (pullRadius + b.colliderRadius) ** 2) {
+          damageBoss(state, b.maxHealth * 0.018, { kind: 'ability', pop: 0.9, boss: b, src: 'titan-singularity' });
+        }
       }
     }
     if (m.remaining <= 0) {
-      // Snapshot Energy is conserved exactly once; health and later Energy are untouched.
-      for (const id of m.orbIds) {
-        const pk = state.pickups.find((x) => x.id === id && x.active && x.kind === 'xp');
-        if (!pk) continue;
-        pk.active = false;
-        gainXp(state, pk.value);
-      }
-      for (const e of state.enemies) {
-        if (!e.alive || (e.x - m.x) ** 2 + (e.z - m.z) ** 2 > cfg.singularityRadius ** 2) continue;
-        const dmg = e.isMiniboss ? e.maxHealth * 0.72 : e.isElite ? e.maxHealth * 0.82 : e.maxHealth * 1.1;
-        damageEnemy(state, e, dmg, { kind: 'ability', pop: 1, src: 'mega-singularity' });
-      }
-      for (const b of livingBosses(state)) {
-        if ((b.x - m.x) ** 2 + (b.z - m.z) ** 2 <= cfg.singularityRadius ** 2) {
-          damageBoss(state, b.maxHealth * cfg.singularityBossFraction, {
-            kind: 'ability', pop: 1, boss: b, src: 'mega-singularity',
-          });
-        }
-      }
       pushEffect(state, 'mega', m.x, m.z, 1.1, '#d8c0ff', cfg.singularityRadius, { radius: cfg.singularityRadius });
       resetMegaProtocol(state);
+    }
+  }
+}
+
+function fireStarbreaker(state: SurvivorState): void {
+  const p = state.player;
+  const boss = nearestAliveBoss(state, p.x, p.z);
+  const target = boss ?? densestPoint(state, p.x, p.z);
+  const tx = target.x;
+  const tz = target.z;
+  const dx = tx - p.x;
+  const dz = tz - p.z;
+  const len0 = Math.hypot(dx, dz) || 1;
+  const fx = dx / len0;
+  const fz = dz / len0;
+  const px = -fz;
+  const pz = fx;
+  const length = 34;
+  const damage = 72 * playerPowerScale(state);
+  for (const side of [-1.7, 1.7]) {
+    const x0 = p.x + px * side;
+    const z0 = p.z + pz * side;
+    const x1 = x0 + fx * length;
+    const z1 = z0 + fz * length;
+    pushEffect(state, 'rail', x0, z0, 0.48, '#ffe28a', length, {
+      facingX: fx, facingZ: fz, length, width: 1.05,
+    });
+    pushEffect(state, 'orbital-strike', x0, z0, 0.55, '#fff4c8', 1.8, { radius: 1.8 });
+    for (const e of state.enemies) {
+      if (!e.alive || !segmentHit(x0, z0, x1, z1, e.x, e.z, e.radius + 0.55)) continue;
+      damageEnemy(state, e, damage, { kind: 'ability', pop: 0.9, src: 'titan-starbreaker' });
+    }
+    for (const b of livingBosses(state)) {
+      if (segmentHit(x0, z0, x1, z1, b.x, b.z, b.colliderRadius + 0.55)) {
+        damageBoss(state, damage * 1.25, { kind: 'ability', pop: 1, boss: b, src: 'titan-starbreaker' });
+      }
     }
   }
 }
@@ -4262,7 +4365,7 @@ function openProtocolCache(state: SurvivorState): void {
   state.protocolChoices = offered.map((p) => {
     let body = p.body;
     if (p.id === 'aegis-barrier') {
-      body = `Repel the nearby horde, gain 1.5s invulnerability, then absorb ~${shieldPts} damage for ${Math.round(shieldDur)}s.${enhanced ? ' Enhanced.' : ''}`;
+      body = `<mark class="sv-protocol-highlight">3 SECONDS INVULNERABLE</mark> Repel the nearby horde, then absorb ~${shieldPts} damage for ${Math.round(shieldDur)}s.${enhanced ? ' Enhanced.' : ''}`;
     } else if (p.id === 'gunship-flyby') {
       body = `Wide corridor strike. Deletes ordinary enemies, dents bosses, then suppresses reinforcements for ${Math.round(SURVIVOR.gunship.spawnSuppressDuration)}s.${enhanced ? ' Enhanced lane.' : ''}`;
     } else if (p.id === 'gravitic-recall') {
@@ -4270,12 +4373,12 @@ function openProtocolCache(state: SurvivorState): void {
         energyOrbs > 0
           ? `Recall ${energyXp} energy from ${energyOrbs} orbs.`
           : 'No energy currently on the field.';
-    } else if (p.id === 'titan-protocol') {
-      body = 'Deploy a 25s Titan Mech with +35% offense, +35% area and reinforced armor. Normal Mech cooldown is untouched.';
-    } else if (p.id === 'fleet-annihilation') {
-      body = 'Three intersecting gunship lanes erase ordinary enemies, devastate minibosses and deal capped boss damage.';
-    } else if (p.id === 'singularity-event') {
-      body = `Collapse the horde and recall ${energyXp} Energy from ${energyOrbs} current orbs. Health and later drops are excluded.`;
+    } else if (p.id === 'carrier-wing') {
+      body = 'For 5:00, a fighter squadron repeatedly strafes distributed threats. Dedicated Titan slot; cannot be upgraded.';
+    } else if (p.id === 'starbreaker-array') {
+      body = 'For 5:00, twin orbital satellites fire colossal piercing beams. Dedicated Titan slot; cannot be upgraded.';
+    } else if (p.id === 'singularity-engine') {
+      body = 'For 5:00, repeated anomalies pull and detonate the horde. Dedicated Titan slot; cannot be upgraded.';
     }
     return {
       kind: 'protocol' as const,

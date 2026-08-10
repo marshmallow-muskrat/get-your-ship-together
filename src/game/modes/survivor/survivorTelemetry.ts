@@ -149,6 +149,9 @@ export type DamageSourceId =
   | 'mega-titan'
   | 'mega-fleet'
   | 'mega-singularity'
+  | 'titan-carrier'
+  | 'titan-starbreaker'
+  | 'titan-singularity'
   | 'aegis-pulse';
 
 export interface SourceStats {
@@ -378,6 +381,12 @@ export function sourceLabel(id: string, weaponName: (id: string) => string): str
       return 'Fleet Annihilation';
     case 'mega-singularity':
       return 'Singularity Event';
+    case 'titan-carrier':
+      return 'Carrier Wing';
+    case 'titan-starbreaker':
+      return 'Starbreaker Array';
+    case 'titan-singularity':
+      return 'Singularity Engine';
     case 'aegis-pulse':
       return 'Aegis Pulse';
     default:

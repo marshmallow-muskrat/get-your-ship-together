@@ -1896,16 +1896,15 @@ button {
 }
 .survivor-hud .sv-cache-arrow {
   position: absolute;
-  left: 50%;
-  top: 20%;
-  transform: translateX(-50%);
+  left: max(1rem, env(safe-area-inset-left));
+  top: clamp(4.6rem, 9vh, 6.8rem);
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0;
   color: #ffd46a;
   pointer-events: none;
   z-index: 6;
-  padding: 0.45rem 0.75rem 0.45rem 0.55rem;
+  padding: 0.55rem 0.85rem;
   border-radius: 0.2rem;
   background: linear-gradient(135deg, rgba(18, 14, 8, 0.88), rgba(40, 28, 8, 0.78));
   border: 1px solid rgba(255, 212, 106, 0.55);
@@ -1914,6 +1913,12 @@ button {
     0 0 22px rgba(255, 180, 40, 0.28),
     inset 0 0 18px rgba(255, 200, 80, 0.08);
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  max-width: min(24rem, calc(100vw - 2rem));
+  animation: sv-cache-arrival 0.55s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes sv-cache-arrival {
+  from { opacity: 0; transform: translateX(-1.2rem) scale(0.92); filter: brightness(2); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: brightness(1); }
 }
 .survivor-hud .sv-cache-icon {
   display: inline-flex;
@@ -1967,6 +1972,32 @@ button {
   pointer-events: none;
   z-index: 5;
   min-width: 8.5rem;
+  width: min(15rem, calc(100vw - 2rem));
+  box-sizing: border-box;
+}
+.survivor-hud .sv-protocol-highlight {
+  display: block;
+  margin-bottom: 0.45rem;
+  padding: 0.32rem 0.5rem;
+  border: 1px solid rgba(120, 235, 255, 0.75);
+  border-radius: 0.25rem;
+  background: linear-gradient(90deg, rgba(40, 170, 220, 0.25), rgba(120, 245, 255, 0.08));
+  color: #bff8ff;
+  font-family: 'Audiowide', sans-serif;
+  font-size: 0.88rem;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 14px rgba(90, 225, 255, 0.9);
+  box-shadow: inset 0 0 16px rgba(70, 205, 255, 0.12), 0 0 14px rgba(70, 205, 255, 0.12);
+}
+.survivor-hud .sv-build-item.signature {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--wep) 15%, transparent), transparent 78%);
+  box-shadow: inset 3px 0 0 var(--wep), inset 0 0 18px color-mix(in srgb, var(--wep) 8%, transparent);
+}
+.survivor-hud .sv-build-item.titan-armament {
+  color: #fff0ad;
+  border-color: rgba(255, 212, 106, 0.38);
+  background: linear-gradient(90deg, rgba(255, 184, 54, 0.2), rgba(80, 35, 110, 0.14));
+  box-shadow: inset 3px 0 0 #ffd46a, 0 0 16px rgba(255, 190, 70, 0.1);
 }
 .survivor-hud .sv-aegis-icon {
   color: #88e0ff;
@@ -2094,29 +2125,6 @@ button {
   color: #ffb066;
 }
 
-/* Compact pressure-director state chip. */
-.survivor-hud .sv-pressure {
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  font-size: 0.72rem;
-  padding: 0.12rem 0.45rem;
-  border-radius: 3px;
-  border: 1px solid currentColor;
-}
-.survivor-hud .sv-pressure-normal {
-  color: #8fb8c8;
-  opacity: 0.75;
-}
-.survivor-hud .sv-pressure-telegraph {
-  color: #ffb066;
-  animation: sv-pressure-pulse 0.7s ease-in-out infinite;
-}
-.survivor-hud .sv-pressure-surge {
-  color: #ff6688;
-}
-.survivor-hud .sv-pressure-recovery {
-  color: #7dff9a;
-}
 @keyframes sv-pressure-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
@@ -2143,24 +2151,6 @@ button {
   to { opacity: 1; transform: translateX(-50%) scale(1); }
 }
 
-/* Directional arrows: one per edge the wave actually arrives from. */
-.survivor-hud .sv-surge-arrows {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.survivor-hud .sv-surge-arrow {
-  position: absolute;
-  font-size: clamp(1.6rem, 3vw, 2.4rem);
-  color: #ff8866;
-  text-shadow: 0 0 16px rgba(255, 100, 70, 0.9);
-  animation: sv-pressure-pulse 0.6s ease-in-out infinite;
-}
-/* Edge indices: 0 = -Z (far), 1 = +Z (near), 2 = -X (left), 3 = +X (right). */
-.survivor-hud .sv-surge-edge-0 { top: 12%; left: 50%; transform: translateX(-50%) rotate(0deg); }
-.survivor-hud .sv-surge-edge-1 { bottom: 16%; left: 50%; transform: translateX(-50%) rotate(180deg); }
-.survivor-hud .sv-surge-edge-2 { left: 6%; top: 50%; transform: translateY(-50%) rotate(-90deg); }
-.survivor-hud .sv-surge-edge-3 { right: 6%; top: 50%; transform: translateY(-50%) rotate(90deg); }
 
 /* Red screen-edge vignette on damage: strong, brief, never opaque. */
 .survivor-hud .sv-hit-vignette {

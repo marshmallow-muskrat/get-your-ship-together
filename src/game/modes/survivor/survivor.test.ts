@@ -1559,8 +1559,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.5.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.5.0');
+  it('is endless-2.6.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.0');
   });
 });
 
@@ -1684,9 +1684,9 @@ describe('melee horde and endless-2.3.0 balance', () => {
     expect(state.pendingBossIndices).toEqual([4, 5, 6, 7]);
   });
 
-  it('aegis shield formula is reduced from 2.1.0 values', () => {
-    expect(computeShieldPoints(105, 100)).toBe(Math.round(20 + 2 * (105 / 60) + 0.08 * 100));
-    expect(computeShieldPoints(105, 100)).toBeLessThan(54);
+  it('aegis is an intentionally powerful emergency cache choice', () => {
+    expect(computeShieldPoints(105, 100)).toBe(Math.round(32 + 3 * (105 / 60) + 0.12 * 100));
+    expect(SURVIVOR.aegis.invulnOnSelect).toBe(3);
   });
 
   it('boss body damage exceeds projectile at same index', () => {

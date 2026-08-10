@@ -104,7 +104,7 @@ export interface SurvivorProjectile {
   splitDone: boolean;
 }
 
-export type HazardKind = 'wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
+export type HazardKind = 'wake' | 'plasma-wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
 
 export interface SurvivorHazard {
   id: number;
@@ -485,7 +485,7 @@ export interface SurvivorState {
   };
   /** Exclusive Mega-Cache effects. Ordinary Cache state remains separate. */
   megaProtocol: {
-    id: 'titan-protocol' | 'fleet-annihilation' | 'singularity-event' | null;
+    id: 'carrier-wing' | 'starbreaker-array' | 'singularity-engine' | null;
     remaining: number;
     elapsed: number;
     /** Titan leaves the ordinary Mech cooldown schedule untouched. */

@@ -35,7 +35,7 @@ export class SurvivorRenderer {
   private enemies = new Map<number, ActorVis>();
   private bosses = new Map<number, ActorVis>();
   private bossPose = new Map<number, { x: number; z: number }>();
-  private projectiles = new Map<number, THREE.Mesh>();
+  private projectiles = new Map<number, THREE.Object3D>();
   private pickups = new Map<number, THREE.Object3D>();
   private hazards = new Map<number, THREE.Object3D>();
   private effects = new Map<number, THREE.Object3D>();
@@ -169,6 +169,46 @@ export class SurvivorRenderer {
       this.mats.set(color, m);
     }
     return m;
+  }
+
+  /** Distinct readable silhouettes for signature projectiles. */
+  private createProjectileActor(kind: import('./survivorState').ProjectileKind, color: string): THREE.Object3D {
+    if (kind !== 'rocket' && kind !== 'drone') return new THREE.Mesh(this.boltGeo, this.mat(color));
+
+    const g = new THREE.Group();
+    const bodyMat = this.effectMat(kind === 'rocket' ? '#dbeeff' : color, 1, true);
+    const accentMat = this.effectMat(kind === 'rocket' ? '#ff6a32' : '#e8fbff', 0.95, true);
+    const glowMat = this.effectMat(kind === 'rocket' ? '#ffbf45' : color, 0.9, true);
+    if (kind === 'rocket') {
+      const body = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.62, 10), bodyMat));
+      body.rotation.x = Math.PI / 2;
+      const nose = this.ownMesh(new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 10), accentMat));
+      nose.rotation.x = Math.PI / 2;
+      nose.position.z = 0.44;
+      const finGeo = new THREE.BoxGeometry(0.38, 0.035, 0.2);
+      const fins = this.ownMesh(new THREE.Mesh(finGeo, accentMat.clone()));
+      (fins.material as THREE.Material).userData.owned = true;
+      fins.position.z = -0.22;
+      const exhaust = this.ownMesh(new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.62, 10, 1, true), glowMat));
+      exhaust.name = 'projectile-exhaust';
+      exhaust.rotation.x = -Math.PI / 2;
+      exhaust.position.z = -0.62;
+      g.add(body, nose, fins, exhaust);
+      g.scale.setScalar(1.35);
+    } else {
+      const core = this.ownMesh(new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), glowMat));
+      const hull = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), bodyMat));
+      hull.scale.set(1.5, 0.72, 1.15);
+      const wing = this.ownMesh(new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.045, 0.2), accentMat));
+      const tail = this.ownMesh(new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.42, 8, 1, true), glowMat.clone()));
+      (tail.material as THREE.Material).userData.owned = true;
+      tail.name = 'projectile-exhaust';
+      tail.rotation.x = -Math.PI / 2;
+      tail.position.z = -0.36;
+      g.add(core, hull, wing, tail);
+      g.scale.setScalar(1.22);
+    }
+    return g;
   }
 
   private makeFromUrl(
@@ -504,6 +544,7 @@ export class SurvivorRenderer {
     for (const [id, mesh] of this.projectiles) {
       if (!alive.has(id)) {
         this.root.remove(mesh);
+        if (mesh instanceof THREE.Group) this.disposeEffectObject(mesh);
         this.projectiles.delete(id);
       }
     }
@@ -511,15 +552,23 @@ export class SurvivorRenderer {
       if (!p.active) continue;
       let mesh = this.projectiles.get(p.id);
       if (!mesh) {
-        mesh = new THREE.Mesh(this.boltGeo, this.mat(p.color));
+        mesh = this.createProjectileActor(p.kind, p.color);
         this.projectiles.set(p.id, mesh);
         this.root.add(mesh);
       }
+      if (mesh instanceof THREE.Group) {
+        mesh.rotation.y = Math.atan2(p.vx, p.vz);
+        const exhaust = mesh.getObjectByName('projectile-exhaust');
+        if (exhaust) {
+          const flicker = 0.82 + Math.sin(performance.now() * 0.045 + p.id) * 0.2;
+          exhaust.scale.set(1, flicker, 1);
+        }
+      }
       const s =
         p.kind === 'drone'
-          ? 0.75
+          ? 1
           : p.kind === 'rocket'
-            ? 1.3
+            ? 1
             : p.kind === 'bioplasma'
               ? 1.45
               : p.kind === 'boss-orb'
@@ -527,7 +576,7 @@ export class SurvivorRenderer {
                 : p.kind === 'boss-fan'
                   ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5)
                   : 1;
-      mesh.scale.setScalar(s);
+      if (!(mesh instanceof THREE.Group)) mesh.scale.setScalar(s);
       mesh.position.set(
         p.x,
         p.kind === 'rocket' && p.armTimer > 0
@@ -539,16 +588,16 @@ export class SurvivorRenderer {
               : 1.0,
         p.z,
       );
-      if (mesh.material instanceof THREE.MeshStandardMaterial || mesh.material instanceof THREE.MeshBasicMaterial) {
+      if (mesh instanceof THREE.Mesh && (mesh.material instanceof THREE.MeshStandardMaterial || mesh.material instanceof THREE.MeshBasicMaterial)) {
         // hostile projectiles stay bright
         if (p.kind === 'boss-orb' || p.kind === 'boss-fan') {
           (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.4;
         }
       }
-      if (p.kind === 'rocket' && p.armTimer > 0) {
+      if (mesh instanceof THREE.Mesh && p.kind === 'rocket' && p.armTimer > 0) {
         mesh.scale.setScalar(p.explodeRadius * 1.4);
         (mesh.material as THREE.MeshStandardMaterial).opacity = 0.35;
-      } else {
+      } else if (mesh instanceof THREE.Mesh) {
         (mesh.material as THREE.MeshStandardMaterial).opacity = 0.95;
         (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = p.kind === 'bioplasma' ? 2.2 : 1.3;
       }
@@ -560,6 +609,7 @@ export class SurvivorRenderer {
     for (const [id, obj] of this.hazards) {
       if (!alive.has(id)) {
         this.root.remove(obj);
+        this.disposeEffectObject(obj);
         this.hazards.delete(id);
       }
     }
@@ -567,27 +617,50 @@ export class SurvivorRenderer {
       if (!h.active) continue;
       let obj = this.hazards.get(h.id);
       if (!obj) {
-        const ring = new THREE.Mesh(
-          new THREE.CircleGeometry(1, 20),
-          new THREE.MeshBasicMaterial({
-            color: h.color,
-            transparent: true,
-            opacity: h.kind === 'wake' ? 0.45 : 0.4,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-          }),
-        );
-        ring.rotation.x = -Math.PI / 2;
-        obj = ring;
+        if (h.kind === 'plasma-wake') {
+          const group = new THREE.Group();
+          const core = this.ownMesh(new THREE.Mesh(
+            new THREE.CircleGeometry(1, 32),
+            this.effectMat('#ff6f3d', 0.5, true),
+          ));
+          core.rotation.x = -Math.PI / 2;
+          core.userData.baseOpacity = 0.5;
+          const corona = this.ownMesh(new THREE.Mesh(
+            new THREE.RingGeometry(0.52, 1.08, 40),
+            this.effectMat('#ffd36a', 0.72, true),
+          ));
+          corona.rotation.x = -Math.PI / 2;
+          corona.position.y = 0.035;
+          corona.userData.baseOpacity = 0.72;
+          const hot = this.ownMesh(new THREE.Mesh(
+            new THREE.RingGeometry(0.12, 0.42, 28),
+            this.effectMat('#fff4c8', 0.86, true),
+          ));
+          hot.rotation.x = -Math.PI / 2;
+          hot.position.y = 0.055;
+          hot.userData.baseOpacity = 0.86;
+          group.add(core, corona, hot);
+          obj = group;
+        } else {
+          const ring = this.ownMesh(new THREE.Mesh(
+            new THREE.CircleGeometry(1, 20),
+            this.effectMat(h.color, h.kind === 'wake' ? 0.45 : 0.4),
+          ));
+          ring.rotation.x = -Math.PI / 2;
+          ring.userData.baseOpacity = h.kind === 'wake' ? 0.45 : 0.4;
+          obj = ring;
+        }
         this.hazards.set(h.id, obj);
         this.root.add(obj);
       }
       const t = h.life / h.maxLife;
-      obj.position.set(h.x, h.kind === 'wake' ? 0.06 : 0.04, h.z);
+      obj.position.set(h.x, h.kind === 'wake' || h.kind === 'plasma-wake' ? 0.06 : 0.04, h.z);
       obj.scale.setScalar(h.radius * (0.85 + (1 - t) * 0.2));
+      if (h.kind === 'plasma-wake') obj.rotation.y += 0.025;
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
-          c.material.opacity = Math.max(0.08, t * (h.kind === 'wake' ? 0.5 : 0.42));
+          const base = (c.userData.baseOpacity as number | undefined) ?? (h.kind === 'wake' ? 0.5 : 0.42);
+          c.material.opacity = Math.max(0.08, t * base);
         }
       });
     }
@@ -816,10 +889,10 @@ export class SurvivorRenderer {
     ringB.name = 'cache-ring-b';
     // Vertical light beam
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.35, 8, 12, 1, true),
-      this.effectMat('#ffe8a0', 0.4, true),
+      new THREE.CylinderGeometry(0.16, 0.48, 16, 16, 1, true),
+      this.effectMat('#ffe8a0', 0.46, true),
     );
-    beam.position.y = 4;
+    beam.position.y = 8;
     beam.name = 'cache-beam';
     // Ground marker
     const ground = new THREE.Mesh(
@@ -835,6 +908,17 @@ export class SurvivorRenderer {
     );
     pulse.name = 'cache-pulse';
     g.add(ground, shell, core, ringA, ringB, beam, pulse);
+    // Four floating signal fins make the Cache readable through a full late-game horde.
+    for (let i = 0; i < 4; i += 1) {
+      const fin = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.24, 0),
+        this.effectMat(i % 2 === 0 ? '#ffd46a' : '#66e8ff', 0.82, true),
+      );
+      const a = (i / 4) * Math.PI * 2;
+      fin.position.set(Math.cos(a) * 1.75, 1.2 + (i % 2) * 0.45, Math.sin(a) * 1.75);
+      fin.name = `cache-fin-${i}`;
+      g.add(fin);
+    }
     g.visible = false;
     this.root.add(g);
     this.cacheActor = g;
@@ -871,6 +955,15 @@ export class SurvivorRenderer {
     }
     if (beam) {
       beam.scale.y = 1 + Math.sin(t * 2.4) * 0.08;
+    }
+    for (let i = 0; i < 4; i += 1) {
+      const fin = g.getObjectByName(`cache-fin-${i}`);
+      if (!fin) continue;
+      const a = t * (i % 2 === 0 ? 0.75 : -0.62) + (i / 4) * Math.PI * 2;
+      fin.position.x = Math.cos(a) * 1.75;
+      fin.position.z = Math.sin(a) * 1.75;
+      fin.position.y = 1.25 + Math.sin(t * 2.8 + i) * 0.35;
+      fin.rotation.y = -a;
     }
     // Proximity feedback: slight lift + brighter scale
     g.scale.setScalar(near ? 1.18 : 1);

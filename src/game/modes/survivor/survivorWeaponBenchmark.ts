@@ -62,6 +62,9 @@ export const INTENDED_SCENARIO: Record<WeaponId, BenchmarkScenario | 'general'> 
   gravity: 'dense',
   rocket: 'clustered',
   bioplasma: 'clustered',
+  rotary: 'single-boss',
+  'plasma-wake': 'mobile-offaxis',
+  pulsar: 'dense',
   arc: 'mixed-elite',
   orbital: 'single-boss',
 };
@@ -443,6 +446,9 @@ export const BREAKPOINT_LEVEL: Record<WeaponId, number> = {
   gravity: 5, // Event Horizon — second well
   rocket: 5, // Carpet Fire — six-rocket salvo
   bioplasma: 5, // Virulent Cascade — bounce + split
+  rotary: 5, // Twin Barrels
+  'plasma-wake': 5, // Twin Wake
+  pulsar: 5, // Echo Pulsar
   arc: 5, // Arc Storm — fourth chain plus discharge
   orbital: 5, // Judgment Array — second lance
 };

@@ -16,6 +16,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.4.0-boss-and-horde-curve | competent | 96 | 8:22 | 4:56 | 19:20 | 24:16 | 2.9 | 15.5% | 27.6 |
 | endless-2.5.0-full-balance-candidate | competent | 96 | 8:54 | 5:02 | 19:59 | 25:01 | 3.0 | 15.7% | 25.6 |
 | endless-2.5.0-midgame-durability-candidate | competent | 96 | 10:25 | 6:08 | 23:08 | 29:16 | 3.1 | 15.4% | 26.4 |
+| endless-2.6.0-content-completion-final | competent | 96 | 5:30 | 3:07 | 12:17 | 15:24 | 2.3 | 15.5% | 31.3 |
 
 ## Per-hero medians
 
@@ -32,6 +33,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.4.0-boss-and-horde-curve (competent) | 10:55 | 6:26 | 6:35 | 9:42 |
 | endless-2.5.0-full-balance-candidate (competent) | 11:01 | 7:10 | 7:28 | 8:20 |
 | endless-2.5.0-midgame-durability-candidate (competent) | 16:14 | 6:25 | 6:51 | 7:15 |
+| endless-2.6.0-content-completion-final (competent) | 8:37 | 4:50 | 6:15 | 3:58 |
 
 ## Interpretation guardrail
 

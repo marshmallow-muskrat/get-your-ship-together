@@ -66,9 +66,9 @@ function runStress(
     if (i % 900 === 0) forceStartProtocol(state, 'gravitic-recall', 1);
     if (i % 1500 === 700) forceStartProtocol(state, 'gunship-flyby', 1);
     if (i % 1800 === 1200) forceStartProtocol(state, 'aegis-barrier', 1);
-    if (i % 2100 === 1500) forceStartProtocol(state, 'titan-protocol', 1.5);
-    if (i % 2400 === 1800) forceStartProtocol(state, 'fleet-annihilation', 1.5);
-    if (i % 2700 === 2100) forceStartProtocol(state, 'singularity-event', 1.5);
+    if (i % 2100 === 1500) forceStartProtocol(state, 'starbreaker-array', 1.5);
+    if (i % 2400 === 1800) forceStartProtocol(state, 'carrier-wing', 1.5);
+    if (i % 2700 === 2100) forceStartProtocol(state, 'singularity-engine', 1.5);
     if (i > 0 && i % sampleEvery === 0) {
       const c = countResources(renderer);
       samples.push(c);

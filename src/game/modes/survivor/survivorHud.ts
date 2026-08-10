@@ -5,6 +5,7 @@ import {
   SURVIVOR_BALANCE_VERSION,
   WEAPONS,
   formatOverclockLabel,
+  isSignatureWeapon,
   overclockLevel,
 } from './survivorContent';
 import type { SurvivorState } from './survivorState';
@@ -15,7 +16,6 @@ import {
   type ActionId,
   type KeybindMap,
 } from './survivorKeybinds';
-import { SURGE_LABEL } from './survivorSim';
 import {
   DEATH_LOG_WINDOW,
   damageTakenLabel,
@@ -120,7 +120,6 @@ export class SurvivorHud {
           <div id="sv-bosses-queued" class="sv-bosses-active hidden"></div>
         </div>
         <div class="sv-meta">
-          <span id="sv-pressure" class="sv-pressure sv-pressure-normal">NORMAL</span>
           <span>LVL <strong id="sv-level">1</strong></span>
           <span>KILLS <strong id="sv-kills">0</strong></span>
           <span>BOSSES <strong id="sv-bosses">0</strong></span>
@@ -176,7 +175,6 @@ export class SurvivorHud {
         </div>
       </div>
       <div id="sv-surge-banner" class="sv-surge-banner hidden">SURGE INCOMING</div>
-      <div id="sv-surge-arrows" class="sv-surge-arrows hidden"></div>
       <div id="sv-build" class="sv-build"></div>
       <div id="sv-mech-toast" class="sv-mech-toast hidden">MECH CORE READY</div>
 
@@ -228,13 +226,8 @@ export class SurvivorHud {
       <div id="sv-banner-orbital" class="sv-unlock-banner hidden">PROTOTYPE UNLOCKED · ORBITAL LANCE</div>
       <div id="sv-banner-mega" class="sv-unlock-banner mega hidden">MEGA BREACH</div>
       <div id="sv-cache-arrow" class="sv-cache-arrow hidden">
-        <span class="sv-cache-icon" aria-hidden="true">
-          <svg viewBox="0 0 32 32" width="28" height="28" focusable="false">
-            <path d="M16 2 L28 16 L20 16 L20 30 L12 30 L12 16 L4 16 Z" fill="currentColor"/>
-          </svg>
-        </span>
         <div class="sv-cache-text">
-          <span class="sv-cache-label">CACHE</span>
+          <span class="sv-cache-label">CACHE SIGNAL · HUNT ACTIVE</span>
           <span class="sv-cache-meta">—</span>
         </div>
       </div>
@@ -633,57 +626,16 @@ export class SurvivorHud {
     }
   }
 
-  /** Compact pressure-director indicator: NORMAL / SURGE INCOMING / SURGE / RECOVERY. */
+  /** Player-facing director warning. Internal surge types and recovery state stay hidden. */
   private publishPressure(state: SurvivorState): void {
-    const chip = this.root.querySelector('#sv-pressure');
     const banner = this.root.querySelector('#sv-surge-banner');
-    const arrows = this.root.querySelector('#sv-surge-arrows');
     const s = state.surge;
-    if (chip) {
-      const label =
-        s.phase === 'telegraph'
-          ? 'INCOMING'
-          : s.phase === 'surge'
-            ? 'SURGE'
-            : s.phase === 'recovery'
-              ? 'RECOVERY'
-              : 'NORMAL';
-      chip.textContent = label;
-      chip.className = `sv-pressure sv-pressure-${s.phase}`;
-    }
     if (banner) {
       const show = s.phase === 'telegraph' && state.phase === 'playing';
       banner.classList.toggle('hidden', !show);
-      if (show) {
-        banner.textContent = SURGE_LABEL[s.kind] ?? 'SURGE INCOMING';
-      }
-    }
-    if (arrows instanceof HTMLElement) {
-      const show =
-        (s.phase === 'telegraph' || s.phase === 'surge') &&
-        state.phase === 'playing' &&
-        s.activeEdges.length > 0;
-      arrows.classList.toggle('hidden', !show);
-      if (show) {
-        // One arrow per edge the wave will actually arrive from.
-        const key = `${s.phase}:${s.activeEdges.join(',')}`;
-        if (key !== this.lastSurgeArrowKey) {
-          this.lastSurgeArrowKey = key;
-          arrows.replaceChildren();
-          for (const edge of s.activeEdges) {
-            const el = document.createElement('span');
-            el.className = `sv-surge-arrow sv-surge-edge-${edge}`;
-            el.textContent = '▲';
-            arrows.appendChild(el);
-          }
-        }
-      } else {
-        this.lastSurgeArrowKey = '';
-      }
+      if (show) banner.textContent = 'SURGE INCOMING';
     }
   }
-
-  private lastSurgeArrowKey = '';
 
   private setCooldownOverlay(el: Element | null | undefined, remaining: number, max: number): void {
     if (!(el instanceof HTMLElement)) return;
@@ -729,31 +681,16 @@ export class SurvivorHud {
       const show = state.cache.active && state.phase === 'playing';
       arrow.classList.toggle('hidden', !show);
       if (show) {
-        const dx = state.cache.x - state.player.x;
-        const dz = state.cache.z - state.player.z;
-        const dist = Math.hypot(dx, dz);
-        // Screen-basis: world +Z is "up-right" on isometric; use atan2 for edge marker.
-        const ang = Math.atan2(dx, -dz);
-        // Keep label horizontal — rotate only the icon.
-        (arrow as HTMLElement).style.transform = 'translateX(-50%)';
-        const icon = arrow.querySelector('.sv-cache-icon') as HTMLElement | null;
-        if (icon) icon.style.transform = `rotate(${(ang * 180) / Math.PI}deg)`;
         const label = arrow.querySelector('.sv-cache-label');
-        if (label) label.textContent = 'CACHE';
+        if (label) label.textContent = state.cache.mega ? 'TITAN CACHE · CLAIM ARMAMENT' : 'CACHE SIGNAL · HUNT ACTIVE';
         const meta = arrow.querySelector('.sv-cache-meta');
         if (meta) {
           const lifeBit =
             state.cache.mega || state.cache.life > 100
               ? '∞'
               : `${Math.max(0, Math.ceil(state.cache.life))}s`;
-          meta.textContent = `— ${lifeBit} · ${dist.toFixed(0)}m`;
+          meta.textContent = state.cache.mega ? 'PERSISTENT' : `SIGNAL LOST IN ${lifeBit}`;
         }
-        // Edge-clamped offset toward cache direction without covering center combat HUD.
-        const el = arrow as HTMLElement;
-        const ox = Math.sin(ang) * 42;
-        const oy = -Math.cos(ang) * 18;
-        el.style.marginLeft = `${ox}px`;
-        el.style.marginTop = `${oy}px`;
       }
     }
   }
@@ -844,7 +781,8 @@ export class SurvivorHud {
             ? `<small class="sv-build-oc">${formatOverclockLabel(oc)} · Dmg +${Math.round(oc * 8)}%</small>`
             : '';
         const proto = w.prototype || fam.prototype ? ' · PROTO' : '';
-        return `<div class="sv-build-item" style="--wep:${fam.color}"><span>${fam.name}${proto}${ocBit}</span><strong>L${w.level}</strong></div>`;
+        const signature = isSignatureWeapon(w.weaponId) ? ' · SIGNATURE' : '';
+        return `<div class="sv-build-item${signature ? ' signature' : ''}" style="--wep:${fam.color}"><span>${fam.name}${signature}${proto}${ocBit}</span><strong>L${w.level}</strong></div>`;
       })
       .join('');
     const pass = Object.entries(state.passives)
@@ -856,7 +794,16 @@ export class SurvivorHud {
         return `<div class="sv-build-item passive"><span>${def?.name ?? id}</span><strong>L${lv}${capped}</strong></div>`;
       })
       .join('');
+    const titanIds = new Set(['carrier-wing', 'starbreaker-array', 'singularity-engine']);
+    const titan = state.protocolActive
+      .filter((t) => titanIds.has(t.id))
+      .map(
+        (t) =>
+          `<div class="sv-build-item temp titan-armament"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.floor(t.remaining / 60)}:${String(Math.ceil(t.remaining % 60)).padStart(2, '0')}</strong></div>`,
+      )
+      .join('');
     const protos = state.protocolActive
+      .filter((t) => !titanIds.has(t.id))
       .map(
         (t) =>
           `<div class="sv-build-item temp protocol-fx"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.ceil(t.remaining)}s</strong></div>`,
@@ -873,8 +820,8 @@ export class SurvivorHud {
       )
       .join('');
     const tempSection =
-      protos || shield || temps
-        ? `<div class="sv-build-section">TEMP / PROTOCOL</div>${protos}${shield}${temps}`
+      titan || protos || shield || temps
+        ? `${titan ? `<div class="sv-build-section">TITAN ARMAMENT</div>${titan}` : ''}<div class="sv-build-section">TEMP / PROTOCOL</div>${protos}${shield}${temps}`
         : '';
     build.innerHTML = `<div class="eyebrow">BUILD</div><div class="sv-build-scroll"><div class="sv-build-section">WEAPONS</div>${weps || '<div class="sv-build-item"><span>None</span></div>'}<div class="sv-build-section">PASSIVES</div>${pass || '<div class="sv-build-item passive"><span>None</span></div>'}${tempSection}</div>`;
   }

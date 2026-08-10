@@ -1,6 +1,6 @@
 # Weapon Benchmark
 
-Balance version: `endless-2.5.0`
+Balance version: `endless-2.6.0`
 
 **This file is generated.** Every number below is produced by
 `src/game/modes/survivor/survivorWeaponBenchmark.ts` and printed by
@@ -47,11 +47,14 @@ Do not hand-edit the tables.
 | Weapon | Intended scenario | L1 | L2 | L3 | L4 | L5 | L5/L1 | L2 | L3 | L4 | L5 | Breakpoint |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | Pulse Blaster | `general` | 1917 | 2574 | 3280 | 4558 | 6320 | 3.30 | 34% | 27% | 39% | 39% | L5 |
-| Microdrone Swarm | `mobile-offaxis` | 8415 | 11407 | 15300 | 19000 | 28305 | 3.36 | 36% | 34% | 24% | 49% | L5 |
+| Microdrone Swarm | `mobile-offaxis` | 6552 | 8400 | 9720 | 13510 | 19694 | 3.01 | 28% | 16% | 39% | 46% | L5 |
 | Rail Lance | `lined-up` | 6160 | 8540 | 10965 | 13904 | 20566 | 3.34 | 39% | 28% | 27% | 48% | L5 |
 | Gravity Pulse | `dense` | 4444 | 5733 | 7992 | 10080 | 13662 | 3.07 | 29% | 39% | 26% | 36% | L5 |
 | Rocket Barrage | `clustered` | 9786 | 12789 | 17420 | 24070 | 32147 | 3.28 | 31% | 36% | 38% | 34% | L5 |
 | Bio-Plasma Glob | `clustered` | 6608 | 8844 | 11521 | 15167 | 22692 | 3.43 | 34% | 30% | 32% | 50% | L5 |
+| Rotary Cannon | `single-boss` | 2937 | 3848 | 4995 | 5994 | 8880 | 3.02 | 31% | 30% | 20% | 48% | L5 |
+| Plasma Wake | `mobile-offaxis` | 1512 | 2046 | 2574 | 3420 | 5148 | 3.40 | 35% | 26% | 33% | 51% | L5 |
+| Pulsar Core | `dense` | 6048 | 7776 | 10080 | 12960 | 18176 | 3.01 | 29% | 30% | 29% | 40% | L5 |
 | Arc Conductor | `mixed-elite` | 6525 | 8778 | 11280 | 14976 | 22360 | 3.43 | 35% | 29% | 33% | 49% | L5 |
 | Orbital Lance | `single-boss` | 4760 | 6048 | 7790 | 10000 | 14500 | 3.05 | 27% | 29% | 28% | 45% | L5 |
 
@@ -59,25 +62,28 @@ Do not hand-edit the tables.
 
 | Hero | Starter | Weighted output | vs mean |
 | --- | --- | ---: | ---: |
-| bee | microdrone | 1790 | 114.1% |
-| flamingo | rail | 1505 | 95.9% |
-| frog | bioplasma | 1404 | 89.5% |
-| red-panda | rocket | 1575 | 100.4% |
+| bee | microdrone | 1751 | 112.3% |
+| flamingo | rail | 1505 | 96.5% |
+| frog | bioplasma | 1404 | 90.1% |
+| red-panda | rocket | 1575 | 101.0% |
 
-Mean weighted output: 1568.
+Mean weighted output: 1559.
 
 ## Per-scenario output (L1 → L5)
 
 | Weapon | single-boss | sparse | dense | mixed-elite | mobile-offaxis | lined-up | clustered |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Pulse Blaster | 294 → 968 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 378 → 1188 | 336 → 1056 |
-| Microdrone Swarm | 990 → 3315 | 2530 → 8415 | 2915 → 9265 | 2695 → 8840 | 2585 → 8585 | 1595 → 5100 | 1430 → 4505 |
+| Microdrone Swarm | 1722 → 2752 | 2058 → 5332 | 2310 → 8342 | 2184 → 6708 | 2016 → 5590 | 1932 → 5676 | 2058 → 6880 |
 | Rail Lance | 550 → 1456 | 1540 → 4004 | 3520 → 13104 | 1650 → 7098 | 1540 → 4004 | 1760 → 6552 | 1650 → 5096 |
 | Gravity Pulse | 176 → 414 | 528 → 1656 | 1100 → 4278 | 968 → 2484 | 660 → 1932 | 704 → 1794 | 836 → 2622 |
 | Rocket Barrage | 756 → 2013 | 1050 → 3050 | 4242 → 14396 | 2184 → 7747 | 1260 → 3172 | 1890 → 6649 | 3024 → 9150 |
 | Bio-Plasma Glob | 816 → 3219 | 1639 → 6510 | 2559 → 9122 | 2056 → 7198 | 1733 → 6409 | 1712 → 5936 | 1612 → 5763 |
+| Rotary Cannon | 693 → 2080 | 913 → 2760 | 924 → 2800 | 924 → 2800 | 913 → 2800 | 913 → 2760 | 924 → 2800 |
+| Plasma Wake | 0 → 0 | 648 → 2475 | 4374 → 24057 | 2376 → 12177 | 1512 → 5148 | 1998 → 8019 | 2268 → 7920 |
+| Pulsar Core | 42 → 157 | 210 → 637 | 1764 → 5605 | 378 → 1118 | 126 → 373 | 336 → 1010 | 378 → 1215 |
 | Arc Conductor | 400 → 800 | 1400 → 4440 | 2113 → 6780 | 1963 → 6840 | 1775 → 4800 | 1625 → 5320 | 1463 → 4560 |
-| Orbital Lance | 560 → 1740 | 560 → 1450 | 980 → 3190 | 420 → 1740 | 420 → 2030 | 560 → 3190 | 700 → 4930 |
+| Orbital Lance | 560 → 1740 | 840 → 2030 | 1260 → 5220 | 560 → 2610 | 420 → 2900 | 840 → 4060 | 1120 → 6960 |
 
 ## Endless progression beyond L5
 

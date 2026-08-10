@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.5.0`
+**Current balance line:** `endless-2.6.0` (Test Center candidate)
 
 ## Purpose
 
@@ -100,6 +100,20 @@ Normal level-ups are **permanent only** (weapons, Overclocks, passives). Tempora
 - Full-health players do not magnetize or consume repair orbs.
 - Ship form health magnet is at least 9.0.
 - Healing feedback shows actual integrity restored.
+- From 15:00 onward, ordinary repair generation no longer depends on missing health. Floor repairs
+  arrive about every 12s (15–20m), 10s (20–25m), then 8s; up to four may be banked, each lasts 65s,
+  and collection still waits until integrity is actually missing. Guaranteed boss/miniboss repairs
+  remain separate premium rewards.
+
+## Weapon identity and shared arsenal
+
+Each hero owns one exclusive signature weapon: Boswell's directional Drone Formation,
+Fitzwilliam's Rail Lance, Fortunato's Bio-Plasma Glob, and Rutherford's miniature Rocket Barrage.
+Signatures count toward the five ordinary weapon slots but cannot be offered to another hero.
+
+Every hero can roll the shared Pulse Blaster, Gravity Pulse, Rotary Cannon, Plasma Wake, and Pulsar
+Core families. Arc Conductor and Orbital Lance remain prototype slots. The deterministic benchmark
+requires every authored family to grow 3–4.2× in its intended scenario from L1 to L5.
 
 ## Time-gated prototypes
 
@@ -130,20 +144,22 @@ Every 120s (≈15s before each boss window): corner beacon. Choices:
 
 | Protocol | Role |
 |---|---|
-| **Aegis Barrier** | Absorb damage before integrity: `round(20 + 2m + 0.08×maxHP)`, 35s (45s enhanced). Replace/refresh, never stack. |
+| **Aegis Barrier** | Immediate 3s invulnerability, repulsion pulse, then `round(32 + 3m + 0.12×maxHP)` barrier for 30s. Replace/refresh, never stack. |
 | **Gunship Flyby** | Once-per-target corridor strike from the player. Searches candidate lanes for the highest-value horde corridor, deletes ordinary enemies and elites it crosses, devastates minibosses, deals 10% regular / 5% Mega max-health damage, and nearly halts replacements for 6.5s after the pass. |
 | **Gravitic Recall** | Pull all active energy orbs to the player over ~1.25s with exact XP conservation (health orbs excluded). |
 
-Ordinary Aegis also repels the nearby horde and grants 1.5s invulnerability so it works as an
-emergency choice rather than delayed HP alone.
+The Cache HUD is a hunt signal: it shows the remaining lifetime but deliberately provides no arrow
+or distance. The persistent animated world beacon is the navigation target.
 
 Mega-Boss death leaves a non-expiring cache with exactly three exclusive choices:
 
 | Mega Protocol | Role |
 |---|---|
-| **Titan Protocol** | Enhanced 25s Mech; ordinary Mech cooldown continues untouched. |
-| **Fleet Annihilation** | Three intersecting ship passes; ordinary kills and bounded boss damage. |
-| **Singularity Event** | Pulls the horde and current Energy snapshot, then collapses. |
+| **Carrier Wing** | Repeated fighter strafes across distributed threats for five minutes. |
+| **Starbreaker Array** | Twin colossal orbital beams fire every 2.7s for five minutes. |
+| **Singularity Engine** | Repeated anomalies pull and detonate dense horde clusters for five minutes. |
+
+Titan Armaments occupy one dedicated, non-upgradable slot and expose their remaining time in Build.
 
 The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Caches.
 

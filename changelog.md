@@ -8,6 +8,38 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### Hero identity and content completion (`endless-2.6.0` Test Center candidate)
+
+- Made each hero's starting weapon an exclusive signature: Boswell's drones now fire as a visible
+  directional formation, Fitzwilliam retains Rail Lance, Fortunato retains Bio-Plasma Glob, and
+  Rutherford launches readable miniature rockets with area explosions. Other heroes can no longer
+  roll these signature weapons.
+- Added three shared weapon families available to every hero: the rapid Rotary Cannon, movement-fed
+  Plasma Wake, and periodic radial Pulsar Core. Each has five authored levels and benchmarked 3–4.2×
+  intended-scenario growth from L1 to L5.
+- Replaced temporary Mega Cache transformations with three exclusive, non-upgradable five-minute
+  Titan Armaments: Carrier Wing, Starbreaker Array, and Singularity Engine. Their remaining duration
+  is visible in a dedicated Build section.
+- Re-authored Aegis as an intentionally powerful emergency choice: three seconds of highlighted
+  invulnerability, a stronger scalable barrier, a 30-second duration, and a properly anchored HUD chip.
+- Rebuilt the normal Cache tracker as a signal hunt. It keeps the warning and countdown but removes
+  the directional arrow and distance readout; an intensified animated world beacon rewards searching.
+- Simplified pressure communication: removed the permanent NORMAL/RECOVERY director strip and edge
+  arrows, and replaced named surge types with one clear `SURGE INCOMING` warning.
+- Increased Orbital Lance's impact radius, made Area upgrades affect it, improved target selection,
+  and made multi-strikes acquire independent high-value targets rather than using a fixed offset.
+- Added a late-game repair economy from 15 minutes onward that is independent of current health:
+  ordinary repair orbs arrive on a tightening 12s/10s/8s schedule, remain for 65 seconds, cap at four
+  banked floor drops, and are not consumed while the player is already at full integrity.
+- Added dedicated emissive drone, mini-rocket, Plasma Wake, Cache beacon, and Titan presentation.
+  New combat effects must be visually legible under full horde density, not merely functional.
+- Production remains unchanged while this candidate is simulation-tested and human-tested through
+  an isolated Test Center deployment.
+- The final 96-run competent simulation reports a 5:30 overall median (Boswell 8:37,
+  Fitzwilliam 4:50, Fortunato 6:15, Rutherford 3:58), below the provisional 12-minute Standard
+  target. This is retained as an honest Test Center baseline; enemy health/damage were not secretly
+  weakened to make a new-content release appear balanced.
+
 ### Calibrated midgame survival (`endless-2.5.0` candidate)
 
 - Calibrated the deterministic simulator against two experienced human testers: both founders
