@@ -1154,7 +1154,11 @@ export function tryRepulsor(state: SurvivorState): boolean {
   const cfg = SURVIVOR.repulsor;
   const mech = p.form === 'mech';
   const radius = cfg.radius * (mech ? cfg.mechRadiusMul : 1);
-  const dmg = cfg.damage * (mech ? cfg.mechDamageMul : 1);
+  const progressionMul = Math.min(
+    cfg.maxDamageMul,
+    1 + Math.max(0, state.level - 1) * cfg.damagePerPlayerLevel,
+  );
+  const dmg = cfg.damage * progressionMul * (mech ? cfg.mechDamageMul : 1);
   const push = cfg.push * (mech ? cfg.mechPushMul : 1);
 
   p.repulsorCd = cfg.cooldown;
@@ -3876,7 +3880,7 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   }
   if (state.gunship.spawnSuppress > 0) {
     state.gunship.spawnSuppress = Math.max(0, state.gunship.spawnSuppress - dt);
-    rate *= 0.15;
+    rate *= SURVIVOR.gunship.spawnSuppressRateMul;
   }
   // Director phase multipliers
   if (s.phase === 'surge') {
@@ -4195,14 +4199,17 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
           pushEffect(state, 'impact', b.x, b.z, 0.35, '#ffd46a', 2.2);
         }
       }
-      if (g.hitIds.length > 0 && g.spawnSuppress <= 0) {
-        g.spawnSuppress = 1.2;
+      if (g.hitIds.length > 0) {
+        g.spawnSuppress = Math.max(
+          g.spawnSuppress,
+          cfg.spawnSuppressDuration + Math.max(0, g.duration - g.t),
+        );
       }
     }
     if (g.t >= g.duration) {
       g.active = false;
       g.firing = false;
-      g.spawnSuppress = Math.max(g.spawnSuppress, 1.0);
+      g.spawnSuppress = Math.max(g.spawnSuppress, cfg.spawnSuppressDuration);
     }
   }
 }
@@ -4257,7 +4264,7 @@ function openProtocolCache(state: SurvivorState): void {
     if (p.id === 'aegis-barrier') {
       body = `Repel the nearby horde, gain 1.5s invulnerability, then absorb ~${shieldPts} damage for ${Math.round(shieldDur)}s.${enhanced ? ' Enhanced.' : ''}`;
     } else if (p.id === 'gunship-flyby') {
-      body = `Once-per-target corridor strike. Deletes ordinary enemies; dents bosses.${enhanced ? ' Enhanced lane.' : ''}`;
+      body = `Wide corridor strike. Deletes ordinary enemies, dents bosses, then suppresses reinforcements for ${Math.round(SURVIVOR.gunship.spawnSuppressDuration)}s.${enhanced ? ' Enhanced lane.' : ''}`;
     } else if (p.id === 'gravitic-recall') {
       body =
         energyOrbs > 0

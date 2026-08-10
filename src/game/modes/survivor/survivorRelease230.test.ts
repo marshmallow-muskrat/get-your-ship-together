@@ -1045,7 +1045,7 @@ describe('§11 boss phase transitions', () => {
 // ---------------------------------------------------------------- §22 balance version
 
 describe('§22 release metadata', () => {
-  it('stamps endless-2.4.0 after the measured elite/Mech/Gunship experiment', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.4.0');
+  it('stamps endless-2.5.0 after the calibrated midgame balance experiment', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.5.0');
   });
 });

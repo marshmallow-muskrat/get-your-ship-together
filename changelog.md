@@ -8,6 +8,28 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### Calibrated midgame survival (`endless-2.5.0` candidate)
+
+- Calibrated the deterministic simulator against two experienced human testers: both founders
+  consistently reported 6–7-minute runs, matching the 2.4.0 simulated median of 6:26.
+- Reduced opening boss base health from 4,700 to 3,000 and replaced the early boss anchors so a
+  regular boss can be resolved before later scheduled bosses create an accidental backlog.
+- Moved quadratic ordinary-enemy durability from 5m to 10m and flattened the midgame curve to
+  1.40× HP at 5m, 1.80× at 10m and 2.5125× at 15m. Density, movement, contact damage and the
+  post-30-minute endless tail are unchanged.
+- Increased Arc Conductor's authored L1–L5 damage so the five-minute prototype enters as a premium
+  weapon; L1 now clears the 130-DPS mixed-horde acceptance threshold.
+- Repulsor damage now follows player level at +5% of base per level, hard-capped at 2.5× before its
+  Mech multiplier. Radius, knockback and cooldown are unchanged.
+- Widened Gunship's lethal corridor and added 6.5 seconds of near-total replacement suppression,
+  turning the pass into earned breathing room rather than a population cleared and immediately refilled.
+- Audited repair-orb generation and left it unchanged: an injured player already receives roughly
+  66 potential HP/minute, rising to roughly 110 HP/minute below critical integrity, before guaranteed
+  miniboss/boss drops and Nanite Bleed bonuses.
+- Preserved separate seeded snapshots for boss-only, boss+horde, full-agency and final durability
+  experiments. The final competent result is a 10:25 median, P90 20:19, P95 20:39 and 22:24 max.
+  This is deliberately left for human Test Center calibration rather than force-tuned to exactly 12:00.
+
 ### Measured balance/Test Center foundation (`endless-2.4.0` candidate)
 
 - Added a deterministic headless full-run simulator with novice, competent and expert policies,

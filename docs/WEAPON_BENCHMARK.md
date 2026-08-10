@@ -1,6 +1,6 @@
 # Weapon Benchmark
 
-Balance version: `endless-2.3.0`
+Balance version: `endless-2.5.0`
 
 **This file is generated.** Every number below is produced by
 `src/game/modes/survivor/survivorWeaponBenchmark.ts` and printed by
@@ -52,8 +52,8 @@ Do not hand-edit the tables.
 | Gravity Pulse | `dense` | 4444 | 5733 | 7992 | 10080 | 13662 | 3.07 | 29% | 39% | 26% | 36% | L5 |
 | Rocket Barrage | `clustered` | 9786 | 12789 | 17420 | 24070 | 32147 | 3.28 | 31% | 36% | 38% | 34% | L5 |
 | Bio-Plasma Glob | `clustered` | 6608 | 8844 | 11521 | 15167 | 22692 | 3.43 | 34% | 30% | 32% | 50% | L5 |
-| Arc Conductor | `mixed-elite` | 4157 | 5681 | 7413 | 9541 | 13715 | 3.30 | 37% | 30% | 29% | 44% | L5 |
-| Orbital Lance | `single-boss` | 2240 | 2856 | 3485 | 4750 | 6960 | 3.11 | 27% | 22% | 36% | 47% | L5 |
+| Arc Conductor | `mixed-elite` | 6525 | 8778 | 11280 | 14976 | 22360 | 3.43 | 35% | 29% | 33% | 49% | L5 |
+| Orbital Lance | `single-boss` | 4760 | 6048 | 7790 | 10000 | 14500 | 3.05 | 27% | 29% | 28% | 45% | L5 |
 
 ## Hero starter parity (L1, weighted)
 
@@ -76,7 +76,7 @@ Mean weighted output: 1568.
 | Gravity Pulse | 176 → 414 | 528 → 1656 | 1100 → 4278 | 968 → 2484 | 660 → 1932 | 704 → 1794 | 836 → 2622 |
 | Rocket Barrage | 756 → 2013 | 1050 → 3050 | 4242 → 14396 | 2184 → 7747 | 1260 → 3172 | 1890 → 6649 | 3024 → 9150 |
 | Bio-Plasma Glob | 816 → 3219 | 1639 → 6510 | 2559 → 9122 | 2056 → 7198 | 1733 → 6409 | 1712 → 5936 | 1612 → 5763 |
-| Arc Conductor | 272 → 520 | 952 → 2886 | 1437 → 4407 | 1335 → 4446 | 1207 → 3120 | 1105 → 3458 | 995 → 2964 |
+| Arc Conductor | 400 → 800 | 1400 → 4440 | 2113 → 6780 | 1963 → 6840 | 1775 → 4800 | 1625 → 5320 | 1463 → 4560 |
 | Orbital Lance | 560 → 1740 | 560 → 1450 | 980 → 3190 | 420 → 1740 | 420 → 2030 | 560 → 3190 | 700 → 4930 |
 
 ## Endless progression beyond L5

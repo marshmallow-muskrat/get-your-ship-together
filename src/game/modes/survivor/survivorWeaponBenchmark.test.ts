@@ -111,6 +111,11 @@ describe('weapon combat benchmark', () => {
     }
   });
 
+  it('Arc Conductor enters at five minutes as a premium mixed-horde reward', () => {
+    const arc = runWeaponBenchmark('arc', 1, 'mixed-elite', 24);
+    expect(arc.damageDealt / arc.windowSec).toBeGreaterThanOrEqual(130);
+  });
+
   it('per-level effective gains stay inside the documented bounds', () => {
     for (const id of allBenchmarkedWeapons()) {
       const gains = levelGains(id);
@@ -332,6 +337,10 @@ describe('endless-2.3.0 systems', () => {
     expect(state.gunship.hitIds).toContain(miniboss.id);
     expect(state.gunship.hitIds).not.toContain(offLane.id);
     expect(new Set(state.gunship.hitIds).size).toBe(state.gunship.hitIds.length);
+    expect(state.gunship.spawnSuppress).toBeGreaterThanOrEqual(
+      SURVIVOR.gunship.spawnSuppressDuration - SURVIVOR.fixedDt,
+    );
+    expect(SURVIVOR.gunship.spawnSuppressRateMul).toBeLessThanOrEqual(0.05);
 
     // Ordinary and elite die; miniboss loses ~80% of max HP; off-lane untouched.
     expect(ordinary.alive).toBe(false);

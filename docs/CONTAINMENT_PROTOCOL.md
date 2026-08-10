@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.4.0`
+**Current balance line:** `endless-2.5.0`
 
 ## Purpose
 
@@ -96,9 +96,9 @@ Normal level-ups are **permanent only** (weapons, Overclocks, passives). Tempora
 
 ## Repair / health pickups
 
-- Distinct magnet radii: energy base 3.2 (+0.35/Magnet Field level); health base 4.25 (+0.60/level).
+- Distinct magnet radii: energy base 3.2 (+0.35/Magnet Field level); health base 6.0 (+0.88/level).
 - Full-health players do not magnetize or consume repair orbs.
-- Ship form health magnet ≈ 6.5+.
+- Ship form health magnet is at least 9.0.
 - Healing feedback shows actual integrity restored.
 
 ## Time-gated prototypes
@@ -108,16 +108,19 @@ Normal level-ups are **permanent only** (weapons, Overclocks, passives). Tempora
 | Arc Conductor | 5:00 | Prototype (does not consume ordinary slots) |
 | Orbital Lance | 15:00 | Prototype |
 
+Arc Conductor is intentionally premium at acquisition rather than a weak weapon that asks for
+several later upgrades before paying off. Its L1 mixed-horde benchmark target is at least 130 DPS.
+
 ## Boss targeting
 
 Weapons use deterministic focus-debt so late runs spend a rising share of fire on living bosses (8% → 55% base, +modifiers, hard-capped 70%).
 
 ## Boss health
 
-Regular base: `5,600 HP`, multiplied by authored boss-index anchors (1.0× at boss 1, 2.5× at
-boss 3, 4.1× at boss 5, 6.5× at boss 10, 9.2× at boss 15, 12.5× at boss 20), then an
+Regular base: `3,000 HP`, multiplied by authored boss-index anchors (1.0× at boss 1, 1.8× at
+boss 3, 3.2× at boss 5, 5.2× at boss 10, 7.5× at boss 15, 10.5× at boss 20), then an
 accelerating post-20 curve.
-Enemy HP: `1 + 0.18m + 0.035×max(0,m−5)²`.  
+Enemy HP: `1 + 0.08m + 0.0125×max(0,m−10)²`, plus the post-30-minute Collapse tail.
 Every 5th boss is a **Mega-Boss** (1.5× visual scale, 1.6× HP of the regular at that index).
 Persistent red floor auras are removed.
 
@@ -128,7 +131,7 @@ Every 120s (≈15s before each boss window): corner beacon. Choices:
 | Protocol | Role |
 |---|---|
 | **Aegis Barrier** | Absorb damage before integrity: `round(20 + 2m + 0.08×maxHP)`, 35s (45s enhanced). Replace/refresh, never stack. |
-| **Gunship Flyby** | Once-per-target corridor strike from the player. Searches candidate lanes for the highest-value horde corridor, deletes ordinary enemies and elites it crosses, devastates minibosses, and deals 10% regular / 5% Mega max-health damage. |
+| **Gunship Flyby** | Once-per-target corridor strike from the player. Searches candidate lanes for the highest-value horde corridor, deletes ordinary enemies and elites it crosses, devastates minibosses, deals 10% regular / 5% Mega max-health damage, and nearly halts replacements for 6.5s after the pass. |
 | **Gravitic Recall** | Pull all active energy orbs to the player over ~1.25s with exact XP conservation (health orbs excluded). |
 
 Ordinary Aegis also repels the nearby horde and grants 1.5s invulnerability so it works as an
@@ -171,6 +174,17 @@ Endless difficulty comes instead from enemy durability eventually outpacing play
 increasing density, increasing contact damage, more specialists, more dangerous and durable bosses,
 boss backlog pressure, more frequent late-game surges and shorter recovery — with raw-speed
 inevitability only very late.
+
+The 2.5.0 durability curve deliberately keeps 5–15-minute enemies out of the former sponge regime:
+1.40× HP at 5m, 1.80× at 10m and 2.5125× at 15m. Quadratic health acceleration begins at 10m,
+with the Collapse tail preserving an ultimately impossible endless run.
+
+## Repulsor Burst scaling (endless-2.5.0)
+
+Repulsor retains its 30-second cooldown, 17.955 radius and authored knockback. Damage starts at 20
+and gains 5% of that base per player level, capped at 2.5× base damage before the bounded Mech
+multiplier. Scaling follows earned player progression rather than elapsed time, so the active remains
+meaningful without silently becoming stronger just because the clock advanced.
 
 ## Pressure curves (endless-2.3.0)
 

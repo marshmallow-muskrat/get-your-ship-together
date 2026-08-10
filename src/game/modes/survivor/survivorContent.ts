@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.4.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.5.0';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -59,11 +59,11 @@ export const SURVIVOR = {
   /**
    * First regular boss base health.
    *
-   * Chosen against the deterministic boss benchmark (see `bossTimeToKill`) so the
-   * 2:00 boss survives ~18–25s for a representative astronaut build and ~10–15s
-   * with Mech, instead of the ~2s deletion the 2,200 value produced.
+   * The isolated boss benchmark understated real-run time-to-kill because it omitted
+   * horde target competition. Calibrated full runs showed fewer than one boss killed
+   * by 5–7 minutes, so 2.5.0 lowers the opening value to prevent accidental backlog.
    */
-  firstBossBaseHealth: 4700,
+  firstBossBaseHealth: 3000,
   arenaHalf: 32, // 64×64 playable
   cameraHalf: 12,
   actorScale: {
@@ -193,7 +193,7 @@ export const SURVIVOR = {
     /** Active strafing duration after warning. */
     strafeDuration: 4.6,
     fireInterval: 0.16,
-    laneHalfWidth: 4.6,
+    laneHalfWidth: 6.2,
     enemyDamage: 38,
     bossDamage: 95,
     impactRadius: 3.8,
@@ -201,6 +201,9 @@ export const SURVIVOR = {
     /** Percentage damage scales with every boss health curve automatically. */
     bossHealthFraction: 0.1,
     megaHealthFraction: 0.05,
+    /** Earned breathing room after the pass; replacement pressure nearly stops. */
+    spawnSuppressDuration: 6.5,
+    spawnSuppressRateMul: 0.05,
   },
   dodge: {
     cooldown: 10,
@@ -295,6 +298,9 @@ export const SURVIVOR = {
     cooldown: 30,
     radius: 17.955,
     damage: 20,
+    /** Player progression keeps the 30-second active relevant without clock scaling. */
+    damagePerPlayerLevel: 0.05,
+    maxDamageMul: 2.5,
     push: 15.96,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
@@ -565,11 +571,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     unlockTime: 300,
     levels: [
       // Chain count doubles across the span; L5 adds the splash breakpoint.
-      { level: 1, label: 'Arc Conductor I', damage: 34, cadence: 1.15, count: 1, radius: 3.2, pierce: 2 },
-      { level: 2, label: 'Arc Conductor II', damage: 38, cadence: 0.974, count: 1, radius: 3.5, pierce: 2 },
-      { level: 3, label: 'Arc Conductor III', damage: 42, cadence: 1.051, count: 1, radius: 3.8, pierce: 3 },
-      { level: 4, label: 'Arc Conductor IV', damage: 47, cadence: 0.931, count: 1, radius: 4.1, pierce: 3 },
-      { level: 5, label: 'Arc Storm', damage: 52, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
+      { level: 1, label: 'Arc Conductor I', damage: 50, cadence: 1.15, count: 1, radius: 3.2, pierce: 2 },
+      { level: 2, label: 'Arc Conductor II', damage: 57, cadence: 0.974, count: 1, radius: 3.5, pierce: 2 },
+      { level: 3, label: 'Arc Conductor III', damage: 64, cadence: 1.051, count: 1, radius: 3.8, pierce: 3 },
+      { level: 4, label: 'Arc Conductor IV', damage: 72, cadence: 0.931, count: 1, radius: 4.1, pierce: 3 },
+      { level: 5, label: 'Arc Storm', damage: 80, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
     ],
   },
   orbital: {
@@ -1430,11 +1436,11 @@ export function collapseStepsAt(timeSec: number): number {
 export function endlessDifficultyAt(timeSec: number): EndlessDifficulty {
   const t = Math.max(0, timeSec);
   const m = t / 60;
-  const late = Math.max(0, m - 5);
+  const late = Math.max(0, m - 10);
   const collapseSteps = collapseStepsAt(t);
 
   // Durability is the primary long-run pressure: it eventually outpaces player growth.
-  const healthMul = 1 + 0.12 * m + 0.02 * late * late + collapseSteps * 0.09;
+  const healthMul = 1 + 0.08 * m + 0.0125 * late * late + collapseSteps * 0.09;
   const damageMul = contactDamageMulAt(t);
   const speedMul = enemySpeedMulAt(t);
   const attackRateMul = Math.min(2.1, 1 + 0.03 * m + collapseSteps * 0.045);
@@ -1481,19 +1487,18 @@ export interface BossDifficulty {
 /**
  * Authored boss-health anchors, followed by an accelerating endless tail.
  *
- * One quadratic could not keep the opening boss relevant, boss 5 inside its Mega band,
- * and boss 10 below a 90-second slog after the final weapon retune. These measured anchors
- * satisfy those distinct beats; the post-20 acceleration still guarantees eventual defeat.
+ * Early anchors are calibrated against full runs with horde target competition, not an
+ * isolated target dummy. The post-20 acceleration still guarantees eventual defeat.
  */
 export function bossHealthMulFor(index: number): number {
   const n = Math.max(1, Math.floor(index));
   const anchors: ReadonlyArray<readonly [number, number]> = [
     [1, 1],
-    [3, 2.5],
-    [5, 4.1],
-    [10, 6.5],
-    [15, 9.2],
-    [20, 12.5],
+    [3, 1.8],
+    [5, 3.2],
+    [10, 5.2],
+    [15, 7.5],
+    [20, 10.5],
   ];
   for (let i = 0; i < anchors.length - 1; i += 1) {
     const [x0, y0] = anchors[i]!;
@@ -1502,7 +1507,7 @@ export function bossHealthMulFor(index: number): number {
   }
   // Beyond forty minutes the curve accelerates so additive Overclocks cannot win forever.
   const k = n - 20;
-  return 12.5 + 0.76 * k + 0.035 * k * k;
+  return 10.5 + 0.72 * k + 0.04 * k * k;
 }
 
 export function isMegaBossIndex(index: number): boolean {

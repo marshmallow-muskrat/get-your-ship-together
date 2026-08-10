@@ -1,7 +1,7 @@
 # Survival Benchmark
 
-Balance version: `endless-2.4.0`
-Experiment: `endless-2.4.0-combined-candidate`
+Balance version: `endless-2.5.0`
+Experiment: `endless-2.5.0-midgame-durability-candidate`
 Policy: `competent`
 Sample: 24 seeded runs per hero; 96 total runs; 30-minute censor limit.
 
@@ -14,10 +14,10 @@ The simulation is a regression instrument, not a substitute for human playtestin
 
 | Hero | Runs | Mean ± SD | 95% CI | Median | P10 | P25 | P75 | P90 | Censored |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Boswell | 24 | 7:51 ± 2:21 | 6:54–8:47 | 7:10 | 4:58 | 6:21 | 10:03 | 11:07 | 0 |
-| Fitzwilliam | 24 | 5:57 ± 2:48 | 4:50–7:04 | 5:19 | 3:17 | 4:34 | 6:47 | 10:34 | 0 |
-| Fortunato | 24 | 6:46 ± 2:26 | 5:48–7:44 | 6:28 | 3:53 | 5:15 | 7:11 | 10:49 | 0 |
-| Rutherford | 24 | 5:59 ± 3:05 | 4:44–7:13 | 5:47 | 2:33 | 3:47 | 7:14 | 10:17 | 0 |
+| Boswell | 24 | 15:46 ± 4:22 | 14:01–17:31 | 16:14 | 10:17 | 11:21 | 18:40 | 20:58 | 0 |
+| Fitzwilliam | 24 | 8:07 ± 5:32 | 5:54–10:20 | 6:25 | 3:21 | 4:34 | 10:35 | 16:27 | 0 |
+| Fortunato | 24 | 10:26 ± 6:24 | 7:52–13:00 | 6:51 | 4:14 | 5:12 | 16:19 | 20:21 | 0 |
+| Rutherford | 24 | 9:05 ± 5:21 | 6:56–11:13 | 7:15 | 3:02 | 5:16 | 14:51 | 16:19 | 0 |
 
 Standard deviation describes spread around the mean. Median and percentiles are
 included because endless-run survival is usually skewed rather than normally distributed.
@@ -30,26 +30,26 @@ are calibrated against human playtests. It is a decision aid, not an automatic t
 
 | Measure | Target | Observed |
 | --- | ---: | ---: |
-| Competent median | ≈12:00 | 6:26 |
-| Standard deviation | 3:30–4:00 | 2:45 |
-| Mean + 2σ | 18:00–20:00 | 12:08 |
-| Mean + 3σ | 22:00–24:00 | 14:53 |
+| Competent median | ≈12:00 | 10:25 |
+| Standard deviation | 3:30–4:00 | 6:08 |
+| Mean + 2σ | 18:00–20:00 | 23:08 |
+| Mean + 3σ | 22:00–24:00 | 29:16 |
 
 ## Pressure and agency diagnostics
 
 | Hero | Kills | Elite kills | Mean elites alive | Peak elites alive | Bosses | Mech uptime | Gunship uses | Gunship damage | Kills/use |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Boswell | 1578 | 18.8 | 0.5 | 2.4 | 2.1 | 15.8% | 0.54 | 3261 | 23.5 |
-| Fitzwilliam | 1007 | 12.7 | 0.6 | 2.0 | 1.0 | 15.5% | 0.25 | 1399 | 23.0 |
-| Fortunato | 1203 | 14.5 | 0.6 | 2.3 | 1.1 | 15.4% | 0.38 | 3422 | 31.9 |
-| Rutherford | 1019 | 12.8 | 0.5 | 1.7 | 1.2 | 16.0% | 0.38 | 1994 | 23.3 |
+| Boswell | 4458 | 49.8 | 0.7 | 4.3 | 6.5 | 15.9% | 2.79 | 15529 | 26.6 |
+| Fitzwilliam | 1758 | 20.7 | 0.6 | 2.5 | 2.4 | 14.8% | 0.96 | 5433 | 27.7 |
+| Fortunato | 2501 | 29.6 | 0.7 | 3.0 | 3.6 | 15.5% | 1.71 | 10986 | 27.4 |
+| Rutherford | 2091 | 24.0 | 0.5 | 2.5 | 3.0 | 15.4% | 1.21 | 5546 | 23.7 |
 
 ## Leading death sources
 
-- **Boswell:** boss-puddle 9, horde-contact 7, boss-radial 3
-- **Fitzwilliam:** horde-contact 8, boss-puddle 6, boss-radial 3
-- **Fortunato:** horde-contact 10, boss-puddle 6, boss-charge 5
-- **Rutherford:** horde-contact 15, boss-puddle 4, boss-charge 3
+- **Boswell:** horde-contact 10, boss-radial 5, boss-charge 4
+- **Fitzwilliam:** horde-contact 13, boss-charge 4, boss-radial 3
+- **Fortunato:** horde-contact 9, boss-puddle 4, boss-projectile 4
+- **Rutherford:** horde-contact 12, boss-body 4, boss-projectile 3
 
 ## Methodology
 
@@ -60,4 +60,4 @@ are calibrated against human playtests. It is a decision aid, not an automatic t
 - The competent policy kites local threats, pursues reachable objectives, and uses abilities reactively with a bounded reaction interval.
 - Human playtesting remains authoritative for readability, satisfaction, fairness and fun.
 
-Generated: 2026-08-10T02:29:12.502Z
+Generated: 2026-08-10T03:38:45.577Z

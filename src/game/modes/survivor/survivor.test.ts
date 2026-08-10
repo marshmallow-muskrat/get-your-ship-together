@@ -154,6 +154,13 @@ describe('survivor content', () => {
     expect(spawnPressure(400)).toBeGreaterThan(spawnPressure(60));
   });
 
+  it('holds midgame durability below the old sponge curve while preserving the endless tail', () => {
+    expect(endlessDifficultyAt(5 * 60).healthMul).toBeCloseTo(1.4, 6);
+    expect(endlessDifficultyAt(10 * 60).healthMul).toBeCloseTo(1.8, 6);
+    expect(endlessDifficultyAt(15 * 60).healthMul).toBeCloseTo(2.5125, 6);
+    expect(endlessDifficultyAt(30 * 60).healthMul).toBeGreaterThan(8);
+  });
+
   it('boss schedule is every two minutes', () => {
     expect(bossTimeForIndex(1)).toBe(120);
     expect(bossTimeForIndex(2)).toBe(240);
@@ -163,6 +170,12 @@ describe('survivor content', () => {
     const a = bossDifficultyFor(1);
     const b = bossDifficultyFor(3);
     expect(b.healthMul).toBeGreaterThan(a.healthMul);
+  });
+
+  it('prevents opening boss backlog with authored early durability', () => {
+    expect(SURVIVOR.firstBossBaseHealth).toBe(3000);
+    expect(bossHealthMulFor(3)).toBeCloseTo(1.8, 6);
+    expect(bossHealthMulFor(5)).toBeCloseTo(3.2, 6);
   });
 
   it('frog starts with bioplasma', () => {
@@ -405,6 +418,21 @@ describe('dodge and repulsor', () => {
     state.effects = [];
     expect(tryRepulsor(state)).toBe(true);
     expect(state.effects.some((e) => e.kind === 'repulsor')).toBe(true);
+  });
+
+  it('repulsor damage scales with player progression and remains hard-capped', () => {
+    const hitAtLevel = (level: number): number => {
+      const state = createSurvivorState('bee', null, 6060 + level);
+      state.level = level;
+      surroundPlayer(state, 1, 4);
+      const enemy = state.enemies.find((e) => e.alive)!;
+      enemy.maxHealth = 1000;
+      enemy.health = 1000;
+      expect(tryRepulsor(state)).toBe(true);
+      return 1000 - enemy.health;
+    };
+    expect(hitAtLevel(20)).toBeGreaterThan(hitAtLevel(1));
+    expect(hitAtLevel(200)).toBeCloseTo(SURVIVOR.repulsor.damage * SURVIVOR.repulsor.maxDamageMul, 5);
   });
 });
 
@@ -1531,8 +1559,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.4.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.4.0');
+  it('is endless-2.5.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.5.0');
   });
 });
 
