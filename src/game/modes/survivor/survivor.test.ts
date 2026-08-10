@@ -15,7 +15,11 @@ const TEST_BOSS_SOURCE: DamageSource = {
   bossIndex: 1,
   isMega: false,
 };
-import { focusLossTransition, shouldHandleVisibility } from './survivorFocus';
+import {
+  focusLossTransition,
+  shouldCloseRunReport,
+  shouldHandleVisibility,
+} from './survivorFocus';
 import type { ActionId } from './survivorKeybinds';
 import {
   createSurvivorState,
@@ -1527,8 +1531,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.3.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.3.0');
+  it('is endless-2.4.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.4.0');
   });
 });
 
@@ -2095,6 +2099,14 @@ describe('lost focus handling', () => {
     expect(next.phase).toBeNull();
     expect(next.choiceIndex).toBeNull();
   });
+
+  it('gives an open Run Report priority over pause without leaking the key', () => {
+    expect(shouldCloseRunReport(true, 'Escape', 'Escape')).toBe(true);
+    expect(shouldCloseRunReport(true, 'KeyP', 'KeyP')).toBe(true);
+    expect(shouldCloseRunReport(true, 'Escape', 'KeyP')).toBe(true);
+    expect(shouldCloseRunReport(false, 'Escape', 'Escape')).toBe(false);
+    expect(shouldCloseRunReport(true, 'KeyR', 'Escape')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2391,7 +2403,11 @@ describe('pressure director surge composition', () => {
   it('an elite surge actually produces elites after the elite gate', () => {
     const r = runSurge('elite', 7204, 200, 10);
     expect(r.defs).toContain('elite');
-    expect(fractionOf(r.defs, (d) => d === 'elite')).toBeGreaterThan(0.15);
+    const elites = r.defs.filter((d) => d === 'elite').length;
+    // Explicit event budget: noticeable, but never the old 55%-of-wave flood.
+    expect(elites).toBeGreaterThanOrEqual(2);
+    expect(elites).toBeLessThanOrEqual(SURVIVOR.elite.surgeBonusCap + 1);
+    expect(fractionOf(r.defs, (d) => d === 'elite')).toBeLessThan(0.15);
   });
 
   it('a flood surge is fodder-heavy and denser than baseline', () => {

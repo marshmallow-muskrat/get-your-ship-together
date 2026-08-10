@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
-    "bench:doc": "vite-node scripts/genBenchDoc.ts"
+    "bench:doc": "vite-node scripts/genBenchDoc.ts",
+    "bench:survival": "vite-node scripts/genSurvivalBenchDoc.ts"
   },
   "dependencies": {
     "three": "0.180.0"

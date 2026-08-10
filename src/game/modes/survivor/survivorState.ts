@@ -405,6 +405,8 @@ export interface SurvivorState {
     recoveryTarget: number;
     /** Banner presentation timer (seconds remaining). */
     banner: number;
+    /** Extra elites authored by the current Elite Surge (ordinary budget excluded). */
+    eliteBonusSpawned: number;
   };
   /**
    * Bounded repair economy (see SURVIVOR.repair).
@@ -768,6 +770,7 @@ export function createSurvivorState(
       activeEdges: [],
       recoveryTarget: 0,
       banner: 0,
+      eliteBonusSpawned: 0,
     },
     repairEconomy: { sinceDrop: 0, injuredFor: 0, drops: 0 },
     pendingBossIndices: [],

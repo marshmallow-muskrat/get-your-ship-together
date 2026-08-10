@@ -11,6 +11,8 @@ import {
   bossPhaseFromHealth,
   bossTimeForIndex,
   compositionAt,
+  elitePopulationBudgetAt,
+  eliteSpawnIntervalAt,
   endlessDifficultyAt,
   isEnemyEligibleAt,
   mechCooldownReduction,
@@ -62,7 +64,6 @@ import {
   emptyBoss,
   emptyEnemy,
   nextEntityId,
-  primaryBoss,
   syncPrimaryBossMirror,
   type DamageEvent,
   type SurvivorBoss,
@@ -503,6 +504,11 @@ function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): 
   slot.maxHealth = slot.health;
   slot.radius = v.colliderRadius * (isMb ? MINIBOSS.radiusMul : def.isElite ? 1.45 : 1.25);
   slot.role = def.role;
+  if (def.isElite && !def.isMiniboss) {
+    // One authoritative arrival gate. Boss and surge elites also reset it, preventing
+    // an ordinary replacement from stacking onto the same instant.
+    state.eliteTimer = eliteSpawnIntervalAt(state.time);
+  }
   slot.hitFlash = 0;
   slot.attackCd = (0.4 + rng(state) * 0.6) / Math.max(0.6, isMb ? 1 : diff.attackRateMul);
   slot.alive = true;
@@ -3306,61 +3312,59 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
   const half = SURVIVOR.arenaHalf * 0.95;
   const ox = state.player.x;
   const oz = state.player.z;
-  let tx = ox + state.player.facingX * 12;
-  let tz = oz + state.player.facingZ * 12;
-  const boss = primaryBoss(state);
-  if (boss && boss.active && boss.state !== 'dead') {
-    tx = boss.x;
-    tz = boss.z;
-  } else {
-    let bestN = 0;
-    let bestX = tx;
-    let bestZ = tz;
-    for (let gx = -3; gx <= 3; gx += 1) {
-      for (let gz = -3; gz <= 3; gz += 1) {
-        const sx = gx * (half / 3.5);
-        const sz = gz * (half / 3.5);
-        let n = 0;
-        for (const e of state.enemies) {
-          if (!e.alive) continue;
-          const d2 = (e.x - sx) ** 2 + (e.z - sz) ** 2;
-          if (d2 < 64) n += e.isElite || e.isMiniboss ? 3 : 1;
-        }
-        if (n > bestN) {
-          bestN = n;
-          bestX = sx;
-          bestZ = sz;
-        }
+  const directions: Array<{ x: number; z: number }> = [];
+  for (let i = 0; i < 32; i += 1) {
+    const angle = (i / 32) * Math.PI * 2;
+    directions.push({ x: Math.cos(angle), z: Math.sin(angle) });
+  }
+  // Exact boss bearings participate, but do not override a dramatically better
+  // horde corridor. A Flyover is first a screen-clearing Cache reward.
+  for (const boss of livingBosses(state)) {
+    const dx = boss.x - ox;
+    const dz = boss.z - oz;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.1) directions.push({ x: dx / len, z: dz / len });
+  }
+
+  const exitAlong = (dx: number, dz: number): { x: number; z: number } => {
+    let t = Infinity;
+    if (dx > 1e-6) t = Math.min(t, (half - ox) / dx);
+    else if (dx < -1e-6) t = Math.min(t, (-half - ox) / dx);
+    if (dz > 1e-6) t = Math.min(t, (half - oz) / dz);
+    else if (dz < -1e-6) t = Math.min(t, (-half - oz) / dz);
+    if (!Number.isFinite(t) || t < 1) t = half * 2;
+    return { x: ox + dx * t, z: oz + dz * t };
+  };
+
+  const facingLen = Math.hypot(state.player.facingX, state.player.facingZ) || 1;
+  let best = {
+    x: state.player.facingX / facingLen,
+    z: state.player.facingZ / facingLen,
+  };
+  let bestScore = -Infinity;
+  for (const dir of directions) {
+    const exit = exitAlong(dir.x, dir.z);
+    let score = 0;
+    for (const e of state.enemies) {
+      if (!e.alive) continue;
+      if (distPointToSegment(e.x, e.z, ox, oz, exit.x, exit.z) > SURVIVOR.gunship.laneHalfWidth + e.radius) continue;
+      score += e.isMiniboss ? 5 : e.isElite ? 2.5 : 1;
+    }
+    for (const boss of livingBosses(state)) {
+      if (distPointToSegment(boss.x, boss.z, ox, oz, exit.x, exit.z) <= SURVIVOR.gunship.laneHalfWidth + boss.colliderRadius) {
+        score += boss.isMega ? 5 : 6;
       }
     }
-    if (bestN > 0) {
-      tx = bestX;
-      tz = bestZ;
+    if (score > bestScore) {
+      bestScore = score;
+      best = dir;
     }
   }
-  let dx = tx - ox;
-  let dz = tz - oz;
-  let len = Math.hypot(dx, dz);
-  if (len < 2) {
-    dx = state.player.facingX;
-    dz = state.player.facingZ;
-    len = Math.hypot(dx, dz) || 1;
-  }
-  dx /= len;
-  dz /= len;
-  // Exit beyond the target at the arena rim in the fly direction.
-  let exitX = ox + dx * half * 2.2;
-  let exitZ = oz + dz * half * 2.2;
-  const m = Math.max(Math.abs(exitX), Math.abs(exitZ), 1e-6);
-  if (m > half) {
-    const s = half / m;
-    exitX *= s;
-    exitZ *= s;
-  }
+  const exit = exitAlong(best.x, best.z);
   // Start slightly behind the player so thrusters read on launch.
-  const x0 = ox - dx * 1.2;
-  const z0 = oz - dz * 1.2;
-  return { x0, z0, x1: exitX, z1: exitZ };
+  const x0 = ox - best.x * 1.2;
+  const z0 = oz - best.z * 1.2;
+  return { x0, z0, x1: exit.x, z1: exit.z };
 }
 
 function startGunship(state: SurvivorState, potency: number): void {
@@ -3735,6 +3739,7 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
     // pair: XOR 1. The previous +2 wrap produced a perpendicular edge, not a pincer.
     s.edgeB = s.edgeA ^ 1;
     s.edgeCursor = 0;
+    s.eliteBonusSpawned = 0;
     s.activeEdges = surgeEdgesFor(kind, s.edgeA, s.edgeB);
     s.banner = SURVIVOR.surgeTelegraph;
     // Illuminate the exact edges the wave will arrive from, for the full telegraph.
@@ -3842,7 +3847,6 @@ function surgeCompositionBias(state: SurvivorState, baseId: string): string {
     return baseId;
   }
   if (k === 'elite') {
-    if (rng(state) < 0.55) return bias('elite') ?? baseId;
     if (rng(state) < 0.4) return bias('bruiser') ?? baseId;
     return baseId;
   }
@@ -3896,18 +3900,46 @@ function updateSpawns(state: SurvivorState, dt: number): void {
 
   state.spawnAcc += dt * rate;
   let spawnedThisFrame = 0;
+  let livingElites = state.enemies.reduce(
+    (n, e) => n + (e.alive && e.isElite && !e.isMiniboss ? 1 : 0),
+    0,
+  );
+  const ordinaryEliteBudget = elitePopulationBudgetAt(state.time);
+  const surgeEliteBudget = s.phase === 'surge' && s.kind === 'elite'
+    ? Math.min(SURVIVOR.elite.surgeBonusCap, Math.max(2, Math.ceil(ordinaryEliteBudget * 0.6)))
+    : 0;
   const surging = s.phase === 'surge';
   while (state.spawnAcc >= 1 && alive + spawnedThisFrame < state.enemyCap && spawnedThisFrame < 4) {
     state.spawnAcc -= 1;
     const pos = edgeSpawnWeighted(state, surging ? s.kind : '');
     let defId = surgeCompositionBias(state, pickComposition(state));
-    // Forced elites route through the same eligibility check as everything else.
-    if (s.phase !== 'recovery' && rng(state) < diff.eliteChance && canSpawnEnemyNow(state, 'elite')) {
+    let surgeElite = false;
+    if (
+      s.phase === 'surge' &&
+      s.kind === 'elite' &&
+      s.eliteBonusSpawned < surgeEliteBudget &&
+      rng(state) < 0.38 &&
+      canSpawnEnemyNow(state, 'elite')
+    ) {
+      defId = 'elite';
+      surgeElite = true;
+    } else if (
+      s.phase !== 'recovery' &&
+      state.eliteTimer <= 0 &&
+      livingElites < ordinaryEliteBudget &&
+      rng(state) < diff.eliteChance &&
+      canSpawnEnemyNow(state, 'elite')
+    ) {
+      // The published chance and living budget are now the sole ordinary source.
       defId = 'elite';
     }
     const spawned = spawnEnemy(state, defId, pos.x, pos.z);
     if (spawned) {
       spawnedThisFrame += 1;
+      if (spawned.isElite && !spawned.isMiniboss) {
+        livingElites += 1;
+        if (surgeElite) s.eliteBonusSpawned += 1;
+      }
       /*
        * A surge wave hits harder than the standing horde, but the bonus rides on the
        * individual enemies the surge produced. It is deliberately not a global speed
@@ -3919,10 +3951,14 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   }
 
   state.eliteTimer -= dt;
-  if (state.eliteTimer <= 0 && canSpawnEnemyNow(state, 'elite') && s.phase !== 'recovery') {
-    // Elites are events. The floor rises with the revised elite curve rather than
-    // collapsing to a near-constant stream the way the 8s floor did.
-    state.eliteTimer = Math.max(14, 34 - state.time / 45) + rng(state) * 12;
+  if (
+    state.eliteTimer <= -SURVIVOR.elite.droughtGrace &&
+    livingElites < ordinaryEliteBudget &&
+    canSpawnEnemyNow(state, 'elite') &&
+    s.phase !== 'recovery'
+  ) {
+    // Drought protection only fills a missing ordinary-budget slot. It is never an
+    // additive timer spawn and therefore cannot push the population over budget.
     const pos = edgeSpawnWeighted(state, s.kind || '');
     spawnEnemy(state, 'elite', pos.x, pos.z);
   }
@@ -4151,7 +4187,9 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
         const br = b.colliderRadius;
         if (d <= halfW + br * 0.5 && along <= cfg.impactRadius + br) {
           g.hitIds.push(b.id);
-          const frac = b.isMega ? 0.035 * pot : 0.07 * pot;
+          const frac = b.isMega
+            ? cfg.megaHealthFraction * pot
+            : cfg.bossHealthFraction * pot;
           const dmg = b.maxHealth * frac;
           damageBoss(state, dmg, { kind: 'gunship', pop: 1, boss: b, x: b.x, z: b.z, src: 'gunship' });
           pushEffect(state, 'impact', b.x, b.z, 0.35, '#ffd46a', 2.2);

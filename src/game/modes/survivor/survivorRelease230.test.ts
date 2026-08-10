@@ -436,8 +436,9 @@ describe('§9 fixed-cooldown Mech', () => {
     expect(state.player.mechCd).toBeLessThan(expectedRemaining + 1);
   });
 
-  it('leaves about 31 seconds of astronaut time after a transformation', () => {
-    expect(SURVIVOR.mech.cooldown - SURVIVOR.mech.duration).toBeCloseTo(31, 5);
+  it('uses the approved 30/6 cadence: 20% base uptime and 24 seconds astronaut time', () => {
+    expect(SURVIVOR.mech.duration / SURVIVOR.mech.cooldown).toBeCloseTo(0.2, 6);
+    expect(SURVIVOR.mech.cooldown - SURVIVOR.mech.duration).toBeCloseTo(24, 5);
   });
 
   it('is never refilled by kills, elites, minibosses or bosses', () => {
@@ -468,8 +469,8 @@ describe('§9 fixed-cooldown Mech', () => {
 
   it('caps maximum achievable uptime well short of permanent', () => {
     const uptime = maxMechUptimeFraction();
-    expect(uptime).toBeGreaterThan(0.4);
-    expect(uptime).toBeLessThan(0.47);
+    expect(uptime).toBeGreaterThan(0.28);
+    expect(uptime).toBeLessThan(0.3);
   });
 
   it('applies both passives to the live cooldown and duration', () => {
@@ -1044,7 +1045,7 @@ describe('§11 boss phase transitions', () => {
 // ---------------------------------------------------------------- §22 balance version
 
 describe('§22 release metadata', () => {
-  it('stamps endless-2.3.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.3.0');
+  it('stamps endless-2.4.0 after the measured elite/Mech/Gunship experiment', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.4.0');
   });
 });

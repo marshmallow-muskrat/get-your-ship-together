@@ -2217,6 +2217,18 @@ button {
 .survivor-hud .sv-death-left { opacity: 0.7; text-align: right; }
 
 /* Recount-style run report. */
+.survivor-hud .sv-stats {
+  /* A true top-level surface: underlying pause/death copy must never compete with
+     telemetry rows. The arena remains a faint contextual backdrop only. */
+  z-index: 20;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(15, 29, 55, 0.985), rgba(3, 7, 16, 0.995));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.survivor-hud.stats-open > :not(.sv-stats) {
+  pointer-events: none !important;
+}
 .survivor-hud .sv-stats-body {
   width: min(940px, 94vw);
   max-height: 56vh;

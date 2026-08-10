@@ -15,6 +15,7 @@ npm run dev
 npm test
 npm run typecheck
 npm run build
+npm run bench:survival
 ```
 
 ## The game
@@ -70,6 +71,9 @@ Energy is run XP. The timer pauses during level-up choices, pause, and Settings.
 
 - [`GAME_CONCEPT.md`](GAME_CONCEPT.md) — authoritative product direction
 - [`docs/CONTAINMENT_PROTOCOL.md`](docs/CONTAINMENT_PROTOCOL.md) — gameplay, architecture, balance, and fixtures
+- [`docs/SURVIVAL_BENCHMARK.md`](docs/SURVIVAL_BENCHMARK.md) — generated full-run distribution and standard-deviation chart
+- [`docs/SURVIVAL_EXPERIMENTS.md`](docs/SURVIVAL_EXPERIMENTS.md) — preserved baseline/candidate simulation history
+- [`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md) — immutable releases and disposable Test Center experiments
 - [`AGENTS.md`](AGENTS.md) — implementation guardrails
 
 ## Stack

@@ -27,7 +27,11 @@ import {
   type ActionId,
   type KeybindMap,
 } from './survivorKeybinds';
-import { focusLossTransition, shouldHandleVisibility } from './survivorFocus';
+import {
+  focusLossTransition,
+  shouldCloseRunReport,
+  shouldHandleVisibility,
+} from './survivorFocus';
 
 export type SurvivorHandlers = {
   onReturnToCrew: () => void;
@@ -130,6 +134,17 @@ export class SurvivorMode {
       this.rebindingAction = null;
       this.hud?.setRebinding(null);
       this.hud?.refreshKeybindLabels(this.keybinds);
+      return;
+    }
+
+    // A top-level report owns Escape before the pause action. Closing it reveals
+    // the same paused/defeat screen beneath it and consumes this key press so the
+    // simulation can never resume behind an open report.
+    if (shouldCloseRunReport(this.hud?.isStatsOpen() ?? false, code, this.keybinds.pause)) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.hud?.setStatsOpen(false);
+      this.codesDown.delete(code);
       return;
     }
 

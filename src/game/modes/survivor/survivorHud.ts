@@ -1037,8 +1037,15 @@ export class SurvivorHud {
 
   setStatsOpen(open: boolean): void {
     this.statsOpen = open;
-    this.root.querySelector('#sv-stats-modal')?.classList.toggle('hidden', !open);
+    this.root.classList.toggle('stats-open', open);
+    const modal = this.root.querySelector('#sv-stats-modal');
+    modal?.classList.toggle('hidden', !open);
+    modal?.setAttribute('aria-hidden', String(!open));
     if (open && this.statsState) this.renderStats(this.statsState);
+  }
+
+  isStatsOpen(): boolean {
+    return this.statsOpen;
   }
 
   /** Small helper: a labelled row in the run report. */

@@ -360,7 +360,7 @@ describe('endless-2.3.0 systems', () => {
     );
   });
 
-  it('gunship strikes a regular boss for ~7% max HP with one damage number', () => {
+  it('gunship strikes a regular boss for its scalable max-HP fraction with one damage number', () => {
     const state = gunshipFixture(4406);
     const boss = placeBoss(state, { index: 4, mega: false, x: 0, z: 13 });
     const max = boss.maxHealth;
@@ -374,13 +374,13 @@ describe('endless-2.3.0 systems', () => {
     }
 
     expect(state.gunship.hitIds).toContain(boss.id);
-    expect(1 - boss.health / max).toBeCloseTo(0.07, 3);
+    expect(1 - boss.health / max).toBeCloseTo(SURVIVOR.gunship.bossHealthFraction, 3);
     expect(collector.countFor(`boss:${boss.id}`)).toBe(1);
     expect(collector.kindFor(`boss:${boss.id}`)).toBe('gunship');
     expect(collector.total()).toBe(1);
   });
 
-  it('gunship strikes a Mega boss for ~3.5% max HP with one damage number', () => {
+  it('gunship strikes a Mega boss for its bounded scalable fraction with one damage number', () => {
     const state = gunshipFixture(4407);
     const boss = placeBoss(state, { index: 5, mega: true, x: 0, z: 13 });
     const max = boss.maxHealth;
@@ -395,7 +395,7 @@ describe('endless-2.3.0 systems', () => {
 
     expect(boss.isMega).toBe(true);
     expect(state.gunship.hitIds).toContain(boss.id);
-    expect(1 - boss.health / max).toBeCloseTo(0.035, 3);
+    expect(1 - boss.health / max).toBeCloseTo(SURVIVOR.gunship.megaHealthFraction, 3);
     expect(collector.countFor(`boss:${boss.id}`)).toBe(1);
   });
 

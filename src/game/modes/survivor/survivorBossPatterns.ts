@@ -16,6 +16,7 @@ import {
   assertNever,
   bossDefForIndex,
   bossPhaseFromHealth,
+  elitePopulationBudgetAt,
   isMegaOnlyPattern,
   type BossPatternId,
 } from './survivorContent';
@@ -727,12 +728,31 @@ function updateActive(
         const phase = bossPhaseFromHealth(b.health, b.maxHealth);
         const mod = SURVIVOR_BOSS.phaseMods[phase];
         const n = Math.min(mod.summonCount + b.summonAdd, phase >= 3 ? 8 : 5);
+        const livingElites = state.enemies.reduce(
+          (sum, e) => sum + (e.alive && e.isElite && !e.isMiniboss ? 1 : 0),
+          0,
+        );
+        const desiredEliteSummons = phase >= 3 && b.index >= 5 ? (b.isMega ? 2 : 1) : 0;
+        const eliteAllowance = Math.max(
+          0,
+          elitePopulationBudgetAt(state.time) + desiredEliteSummons - livingElites,
+        );
+        const eliteSummons = Math.min(desiredEliteSummons, eliteAllowance);
         for (let i = 0; i < n; i += 1) {
           const marker = attacks[i % Math.max(1, attacks.length)];
           const ang = api.rng(state) * Math.PI * 2;
           const sx = marker && marker.shape.kind === 'circle' ? marker.shape.x : b.x + Math.cos(ang) * 3.5;
           const sz = marker && marker.shape.kind === 'circle' ? marker.shape.z : b.z + Math.sin(ang) * 3.5;
-          api.spawnEnemy(state, phase >= 3 ? 'elite' : phase >= 2 ? 'spiky' : 'basic', sx, sz);
+          // Early bosses never summon elites. Later bosses add at most one, while a
+          // Mega may add two; the rest remain readable mixed reinforcements.
+          const summonId = i < eliteSummons
+            ? 'elite'
+            : phase >= 3
+              ? (i % 2 === 0 ? 'bruiser' : 'spiky')
+              : phase >= 2
+                ? 'spiky'
+                : 'basic';
+          api.spawnEnemy(state, summonId, sx, sz);
           api.pushEffect(state, 'transform', sx, sz, 0.35, '#ff9944', 1.2);
         }
       }

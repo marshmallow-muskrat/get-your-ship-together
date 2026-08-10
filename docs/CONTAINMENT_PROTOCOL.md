@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.3.0`
+**Current balance line:** `endless-2.4.0`
 
 ## Purpose
 
@@ -114,7 +114,7 @@ Weapons use deterministic focus-debt so late runs spend a rising share of fire o
 
 ## Boss health
 
-Regular base: `4,700 HP`, multiplied by authored boss-index anchors (1.0× at boss 1, 2.5× at
+Regular base: `5,600 HP`, multiplied by authored boss-index anchors (1.0× at boss 1, 2.5× at
 boss 3, 4.1× at boss 5, 6.5× at boss 10, 9.2× at boss 15, 12.5× at boss 20), then an
 accelerating post-20 curve.
 Enemy HP: `1 + 0.18m + 0.035×max(0,m−5)²`.  
@@ -128,7 +128,7 @@ Every 120s (≈15s before each boss window): corner beacon. Choices:
 | Protocol | Role |
 |---|---|
 | **Aegis Barrier** | Absorb damage before integrity: `round(20 + 2m + 0.08×maxHP)`, 35s (45s enhanced). Replace/refresh, never stack. |
-| **Gunship Flyby** | Once-per-target corridor strike from the player. Deletes ordinary enemies; dents bosses (never auto-deletes a real boss). |
+| **Gunship Flyby** | Once-per-target corridor strike from the player. Searches candidate lanes for the highest-value horde corridor, deletes ordinary enemies and elites it crosses, devastates minibosses, and deals 10% regular / 5% Mega max-health damage. |
 | **Gravitic Recall** | Pull all active energy orbs to the player over ~1.25s with exact XP conservation (health orbs excluded). |
 
 Ordinary Aegis also repels the nearby horde and grants 1.5s invulnerability so it works as an
@@ -202,18 +202,18 @@ elite 24, miniboss 28.
 Past 45m the same slope continues (the Collapse-era scaling), hard-capped at `6.0×`. The post-hit
 invulnerability window is preserved so simultaneous overlaps cannot instantly delete the player.
 
-## Mech Overdrive (endless-2.3.0)
+## Mech Overdrive (endless-2.4.0)
 
 Mech is a **fixed-cooldown ultimate**. Nothing in the run refills it.
 
 | Property | Value |
 |---|---|
-| Duration | 14s (Reactor Hold +5%/level, hard cap +25%) |
-| Cooldown | 45s activation-to-activation (Core Cycling −3%/level, hard cap −15%) |
+| Duration | 6s (Reactor Hold +5%/level, hard cap +25%) |
+| Cooldown | 30s activation-to-activation (Core Cycling −3%/level, hard cap −15%) |
 | Cooldown timing | Set on activation, counts down **during** Mech |
-| Astronaut time after a transformation | ≈31s |
+| Astronaut time after a transformation | 24s |
 | Run start | Unavailable; first readiness one full cooldown in |
-| Maximum invested uptime | 45.8% (17.5s of 38.25s) |
+| Base / maximum invested uptime | 20% / 29.4% (7.5s of 25.5s) |
 
 Kills, elites, minibosses and bosses have **no** effect on the cooldown. The HUD meter shows
 readiness, not kill charge.
@@ -258,6 +258,18 @@ being dropped, so early pressure is preserved.
 
 Before 60s at most **one** specialist may be alive at a time, and specialist-heavy surge kinds are
 rolled forward to `flood` so an early surge applies fodder pressure instead of a sprinter wave.
+
+### Authoritative elite budget (endless-2.4.0)
+
+The pressure curve's elite percentage now determines one living ordinary-elite budget. Elites are
+removed from the ordinary weighted composition, and ordinary replacement may create an elite only
+when the living count is below that budget and the bounded elite arrival interval has elapsed.
+The drought timer may fill a missing budget slot; it can never add an elite above the budget.
+
+Elite Surges receive a separate explicit bonus capped at five. Boss summon formations are mixed:
+bosses 1–4 summon no elites, later regular bosses at most one, and a Mega-Boss at most two, always
+subject to a global living allowance. This replaces the former additive composition + chance +
+timer + 55%-surge + all-elite phase-three summon paths.
 
 ## Pressure director
 
@@ -413,6 +425,15 @@ npm run lint
 npm run build
 npm audit
 ```
+
+Full-run balance reports are generated from the real headless fixed-step simulation:
+
+```bash
+npm run bench:survival -- --runs=24 --max-minutes=30 --policy=competent --label=current
+```
+
+See [`SURVIVAL_BENCHMARK.md`](SURVIVAL_BENCHMARK.md) for the current distribution and
+[`SURVIVAL_EXPERIMENTS.md`](SURVIVAL_EXPERIMENTS.md) for preserved baseline/candidate deltas.
 
 Lint must end with **zero errors and zero warnings**; the configuration is not to be weakened.
 

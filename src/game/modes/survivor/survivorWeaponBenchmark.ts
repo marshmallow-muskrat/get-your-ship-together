@@ -238,8 +238,12 @@ export function runWeaponBenchmark(
   const steps = Math.floor(windowSec / SURVIVOR.fixedDt);
   const input = { ...EMPTY_SURVIVOR_INPUT };
   for (let i = 0; i < steps; i += 1) {
-    // Keep spawn frozen for the whole window.
+    // Keep every spawn source frozen for the whole window. `spawnAcc` stops the
+    // ordinary stream; the elite drought clock is separate and must also be held.
+    // Otherwise horde tuning silently changes weapon ratios by introducing
+    // unmeasured targets that steal aim from the seeded scenario.
     state.spawnAcc = -1e9;
+    state.eliteTimer = 1e9;
     const ang = i * SURVIVOR.fixedDt * KITE_RATE;
     input.moveX = Math.cos(ang);
     input.moveY = Math.sin(ang);

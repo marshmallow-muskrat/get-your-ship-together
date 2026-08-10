@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.3.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.4.0';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -193,11 +193,14 @@ export const SURVIVOR = {
     /** Active strafing duration after warning. */
     strafeDuration: 4.6,
     fireInterval: 0.16,
-    laneHalfWidth: 3.4,
+    laneHalfWidth: 4.6,
     enemyDamage: 38,
     bossDamage: 95,
     impactRadius: 3.8,
     flyHeight: 6.5,
+    /** Percentage damage scales with every boss health curve automatically. */
+    bossHealthFraction: 0.1,
+    megaHealthFraction: 0.05,
   },
   dodge: {
     cooldown: 10,
@@ -213,14 +216,14 @@ export const SURVIVOR = {
    * 25%/boss, plus Core Siphon). At the kill rates this game actually reaches that
    * was near-permanent uptime — the defect was availability, not power. Nothing
    * refills the cooldown now; it is wall-clock only, and it runs *while* Mech is
-   * active so a transformation costs 45s of schedule, not 45s of astronaut time.
+   * active so a transformation costs 30s of schedule, not 30s of astronaut time.
    */
   mech: {
-    duration: 14,
-    /** Activation-to-activation. Counts down during Mech, so ~31s of non-Mech time. */
-    cooldown: 45,
+    duration: 6,
+    /** Activation-to-activation. Counts down during Mech, so 24s of non-Mech time. */
+    cooldown: 30,
     /** The run opens with Mech unavailable; first readiness is one full cooldown in. */
-    initialCooldown: 45,
+    initialCooldown: 30,
     damageTakenMul: 0.65,
     weaponDamageMul: 1.35,
     weaponCadenceMul: 1.15,
@@ -245,6 +248,16 @@ export const SURVIVOR = {
     barVisibleRange: 16,
     /** Concurrent elite bars, nearest first, so the screen never fills with bars. */
     maxVisibleBars: 4,
+    /**
+     * Ordinary elites are events, not an additive percentage on every high-churn
+     * replacement. This is the minimum gap between ordinary elite arrivals.
+     */
+    spawnIntervalEarly: 18,
+    spawnIntervalLate: 10,
+    /** If chance has not produced one after this additional gap, drought protection may. */
+    droughtGrace: 9,
+    /** An Elite Surge may temporarily exceed the ordinary population budget by this cap. */
+    surgeBonusCap: 5,
   },
   /**
    * Aegis must be a real emergency button, not just a slab of delayed HP —
@@ -1388,6 +1401,19 @@ export const ELITE_CHANCE_ANCHORS: ReadonlyArray<readonly [number, number]> = [
 
 export const ELITE_CHANCE_CAP = 0.4;
 
+/** Intended living ordinary elites. Every ordinary spawn path shares this budget. */
+export function elitePopulationBudgetAt(timeSec: number): number {
+  if (!isEnemyEligibleAt('elite', timeSec)) return 0;
+  const diff = endlessDifficultyAt(timeSec);
+  return Math.max(1, Math.round(diff.targetActive * diff.eliteChance));
+}
+
+/** Minimum seconds between ordinary elite arrivals; approaches the late floor smoothly. */
+export function eliteSpawnIntervalAt(timeSec: number): number {
+  const progress = Math.min(1, Math.max(0, (timeSec - 90) / (30 * 60)));
+  return SURVIVOR.elite.spawnIntervalEarly * (1 - progress) + SURVIVOR.elite.spawnIntervalLate * progress;
+}
+
 /** Containment Collapse steps elapsed at a survival time (0 before 30:00). */
 export function collapseStepsAt(timeSec: number): number {
   const t = Math.max(0, timeSec);
@@ -1544,7 +1570,6 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
       { id: 'flyer', weight: 2 },
       { id: 'ghost', weight: 1 },
       { id: 'bruiser', weight: 2 },
-      { id: 'elite', weight: 0.4 },
     ];
   if (t < 480)
     return [
@@ -1555,7 +1580,6 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
       { id: 'ghost', weight: 2 },
       { id: 'bee', weight: 2 },
       { id: 'bruiser', weight: 3 },
-      { id: 'elite', weight: 1.4 },
     ];
   return [
     { id: 'basic', weight: 1 },
@@ -1565,7 +1589,6 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
     { id: 'ghost', weight: 3 },
     { id: 'bee', weight: 2 },
     { id: 'bruiser', weight: 3 },
-    { id: 'elite', weight: 3.2 },
   ];
 }
 

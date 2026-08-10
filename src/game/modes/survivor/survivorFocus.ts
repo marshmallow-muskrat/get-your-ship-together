@@ -45,3 +45,18 @@ export function focusLossTransition(s: FocusState): FocusState {
     inputBlocked: s.settingsOpen,
   };
 }
+
+/**
+ * Top-level overlays consume the pause/Escape key before gameplay sees it.
+ *
+ * The Run Report can be opened from either a paused live run or the defeat screen.
+ * Closing it must reveal that exact underlying state; it must never toggle the
+ * simulation phase as a side effect.
+ */
+export function shouldCloseRunReport(
+  statsOpen: boolean,
+  code: string,
+  pauseCode: string,
+): boolean {
+  return statsOpen && (code === 'Escape' || code === pauseCode);
+}

@@ -8,6 +8,30 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### Measured balance/Test Center foundation (`endless-2.4.0` candidate)
+
+- Added a deterministic headless full-run simulator with novice, competent and expert policies,
+  identical cross-hero seeds, upgrade/Protocol decisions, action use, elite concurrency, boss,
+  death-source, form-uptime and Gunship telemetry.
+- Added generated `SURVIVAL_BENCHMARK.md`, a mean ± standard-deviation SVG, preserved raw experiment
+  snapshots, and `SURVIVAL_EXPERIMENTS.md` baseline/candidate history.
+- Recorded the known-bad additive-elite baseline before changing balance. Its 24-seed competent
+  medians ranged from 3:40 to 6:29, with average peak living elites around 9–17.
+- Replaced five additive elite sources with one ordinary population/arrival budget, explicit Elite
+  Surge allowance and capped mixed boss summons. The measured candidate reduced average peak living
+  elites to roughly 2–3 and elite kills to 12–28.
+- Mech now uses the approved 30-second activation cadence and 6-second duration: 20% base uptime
+  and 29.4% maximum invested uptime. The visual transform does not impose a gameplay action lock.
+- Gunship chooses the highest-value candidate corridor instead of blindly prioritising a boss,
+  widens its lethal lane, and scales at 10% regular / 5% Mega boss health. Measured kills per use
+  increased from roughly 15–19 to 23–32.
+- Run Report is now an isolated top-level surface. Escape closes and consumes the report first,
+  preserving the paused or terminal state beneath it.
+- Added the immutable-release/disposable-Test-Center workflow and provisional Standard target.
+- Honest current result: the combined competent simulation remains below the provisional 12-minute
+  median target. No unrelated values were changed to manufacture a pass; human/policy calibration
+  is the next balance gate.
+
 ### Remaining follow-up
 
 - Bundle code splitting (main chunk is ~830 kB before gzip).

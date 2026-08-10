@@ -61,6 +61,12 @@ Do not add without explicit owner direction:
 
 Compilation is not completion. Exercise the game in a real browser, inspect the console, and verify the relevant fixtures before claiming work is done.
 
+For balance work, preserve a seeded benchmark snapshot before changing production
+values, run the same seeds and policy after each coherent experiment, and record the
+delta in `docs/SURVIVAL_EXPERIMENTS.md`. The simulator is a regression instrument;
+human Test Center playtests remain authoritative for feel. Do not tune blindly until
+the current simulated policies have been calibrated against real runs.
+
 Minimum verification:
 
 ```bash
