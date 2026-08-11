@@ -219,8 +219,17 @@ export const SURVIVOR = {
       /** Probability model: hard guarantee, so no drought can run forever. */
       guaranteeAt: 140,
     },
-    /** Ordinary orb value. */
-    value: 22,
+    /**
+     * Ordinary orb value.
+     *
+     * Lowered from 22 in endless-2.8.0. The kill-driven economy roughly doubles
+     * how many ordinary orbs reach the player, so holding face value constant
+     * raised healing per active minute by ~60% in the dense-late window. Value
+     * is the lever rather than supply: keeping drops frequent and making each
+     * one smaller preserves the route-planning choices the redesign exists to
+     * create, where thinning supply would remove them again.
+     */
+    value: 16,
     /** Miniboss guaranteed reward. */
     minibossValue: 45,
     /** Boss guaranteed reward. */
