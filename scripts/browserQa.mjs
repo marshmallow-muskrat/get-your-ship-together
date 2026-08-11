@@ -45,15 +45,31 @@ const THIRD_PARTY = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
 const isThirdParty = (url) => THIRD_PARTY.some((h) => url.includes(h));
 
+// Some sandboxes reach the network only through an intercepting HTTPS proxy.
+// curl picks that up from the environment, but Chromium does not, so a remote
+// URL fails with ERR_CONNECTION_RESET while the same URL works from the shell.
+// Pass the proxy through explicitly, bypassing loopback so a local static
+// server is still reached directly.
+const proxyServer = process.env.HTTPS_PROXY || process.env.https_proxy || '';
+const useProxy = proxyServer && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(baseUrl);
+
 const browser = await chromium.launch({
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
+  ...(useProxy
+    ? { proxy: { server: proxyServer, bypass: 'localhost,127.0.0.1,::1' } }
+    : {}),
 });
 
 const report = { checks: [], hardErrors: [], thirdPartyBlocked: [] };
 let failed = false;
 
 for (const vp of VIEWPORTS) {
-  const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
+  // An intercepting proxy re-signs TLS with its own CA, which Chromium does not
+  // trust by default; without this a proxied run fails on certificate errors.
+  const page = await browser.newPage({
+    viewport: { width: vp.width, height: vp.height },
+    ignoreHTTPSErrors: true,
+  });
   const errors = [];
 
   page.on('console', (m) => {
