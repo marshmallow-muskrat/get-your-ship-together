@@ -1560,8 +1560,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.6.1', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.6.1');
+  it('is endless-2.7.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.7.0');
   });
 });
 

@@ -9,7 +9,9 @@ import { createSurvivorState, type SurvivorState } from './survivorState';
 import {
   EMPTY_SURVIVOR_INPUT,
   clearShipHazards,
+  forceStartProtocol,
   stepSurvivor,
+  tryShip,
   surroundPlayer,
   type SurvivorInput,
 } from './survivorSim';
@@ -236,6 +238,9 @@ export class SurvivorMode {
     await Promise.all([
       this.assets.preloadHero(this.heroId),
       this.assets.preloadCombat(),
+      // Cleanup Crew can arrive from any Mega Cache, and the renderer clones its
+      // models synchronously, so the other three heroes must already be cached.
+      this.assets.preloadCleanupCrew(this.heroId),
       this.assets.loadUrl(shipUrl, 1.4),
       ...BOSS_DEFS.map((b) => this.assets.loadUrl(b.url, b.targetHeight)),
       this.arena.build().then((g) => this.scene?.add(g)),
@@ -369,6 +374,62 @@ export class SurvivorMode {
       surroundPlayer(state, 12, 3.8);
     } else if (this.fixture === 'survivor-mech') {
       state.player.mechCd = 0;
+    } else if (
+      this.fixture === 'survivor-cleanup-arrival' ||
+      this.fixture === 'survivor-cleanup-combat' ||
+      this.fixture === 'survivor-cleanup-departure'
+    ) {
+      /*
+       * Activate through the real protocol path so the fixture shows the production
+       * lifecycle, not a hand-assembled squad. Combat and departure fast-forward past
+       * the arrival choreography; departure additionally drives the timer to zero so
+       * the fly-out plays immediately.
+       */
+      forceStartProtocol(state, 'cleanup-crew', 1);
+      if (this.fixture !== 'survivor-cleanup-arrival') {
+        const cfg = SURVIVOR.megaProtocol.cleanup;
+        const settle = cfg.arriveDuration + cfg.arriveStagger * 3 + 0.4;
+        const steps = Math.round(settle / SURVIVOR.fixedDt);
+        for (let i = 0; i < steps; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      }
+      if (this.fixture === 'survivor-cleanup-departure') state.megaProtocol.remaining = 0;
+    } else if (this.fixture === 'survivor-orbital') {
+      /*
+       * Advance to just past a detonation so the two-zone strike — core impact,
+       * expanding shockwave and floor scorch — is on screen in the first frame. The
+       * lance is a slow, telegraphed weapon, so a freshly-built fixture otherwise shows
+       * nothing but the telegraph.
+       */
+      // The first lance fires immediately and arms for `life` (~0.7s), so stopping just
+      // past that lands inside the detonation's effect window.
+      const steps = Math.round(0.95 / SURVIVOR.fixedDt);
+      for (let i = 0; i < steps; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    } else if (this.fixture === 'survivor-plasma-l1' || this.fixture === 'survivor-plasma-ship') {
+      /*
+       * Fast-forward a curved run so the trail already exists on the first frame.
+       *
+       * Plasma Wake only forms while moving, so a freshly-constructed fixture shows an
+       * empty floor and nothing to inspect. Driving a real arc through the production
+       * step makes the fixture statically reviewable — which also matters because a
+       * hidden browser tab suspends the animation loop entirely.
+       */
+      if (this.fixture === 'survivor-plasma-ship') {
+        state.player.shipCd = 0;
+        tryShip(state);
+      }
+      const ship = this.fixture === 'survivor-plasma-ship';
+      const input = { ...EMPTY_SURVIVOR_INPUT };
+      // Ship form travels 2.6x faster, so it needs a tighter arc and a shorter run to
+      // stay framed near the arena centre instead of reaching the wall.
+      const seconds = ship ? 1.7 : 2.2;
+      const rate = ship ? 2.7 : 1.15;
+      const steps = Math.round(seconds / SURVIVOR.fixedDt);
+      for (let i = 0; i < steps; i += 1) {
+        const a = i * SURVIVOR.fixedDt * rate;
+        input.moveX = Math.cos(a);
+        input.moveY = Math.sin(a);
+        stepSurvivor(state, input, SURVIVOR.fixedDt);
+      }
     }
   }
 

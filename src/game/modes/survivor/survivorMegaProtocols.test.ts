@@ -55,22 +55,22 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     expect(state.phase).toBe('protocol');
     expect(state.protocolChoices.map((c) => c.protocolId)).toEqual([
       'carrier-wing',
-      'starbreaker-array',
+      'cleanup-crew',
       'singularity-engine',
     ]);
   });
 
-  it('Starbreaker is a five-minute armament and leaves ordinary Mech untouched', () => {
+  it('Cleanup Crew is a five-minute armament and leaves ordinary Mech untouched', () => {
     const state = quietState();
     state.player.mechCd = 30;
     state.player.mechCdMax = 45;
-    forceStartProtocol(state, 'starbreaker-array', 1.5);
+    forceStartProtocol(state, 'cleanup-crew', 1.5);
     expect(state.player.form).toBe('astronaut');
     expect(state.player.mechCd).toBe(30);
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 0.1);
     expect(state.player.mechCd).toBeCloseTo(29.9, 4);
     expect(state.megaProtocol.remaining).toBeGreaterThan(299);
-    expect(state.effects.some((e) => e.kind === 'rail')).toBe(true);
+    expect(state.allies).toHaveLength(3);
   });
 
   it('Fleet Annihilation visibly schedules three passes and erases ordinary targets in a lane', () => {

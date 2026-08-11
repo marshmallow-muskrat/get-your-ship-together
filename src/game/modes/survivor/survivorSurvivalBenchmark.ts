@@ -17,6 +17,7 @@ import {
   type SurvivorState,
   type UpgradeChoice,
 } from './survivorState';
+import { totalOutgoing } from './survivorTelemetry';
 
 export const SURVIVAL_BENCH_HEROES: readonly HeroId[] = [
   'bee',
@@ -90,6 +91,17 @@ export interface SurvivalRunResult {
   gunshipDamage: number;
   gunshipKills: number;
   deathSource: string;
+  /**
+   * Outgoing damage by telemetry source for this run.
+   *
+   * Required to attribute a distribution shift to a specific mechanic instead of
+   * guessing: a change to the upper tail is only actionable if you can see which source
+   * grew in the runs that produced it.
+   */
+  sourceDamage: Record<string, number>;
+  totalDamage: number;
+  /** Damage by player form, for form-uptime attribution. */
+  formDamage: Record<string, number>;
 }
 
 export interface DistributionSummary {
@@ -201,8 +213,9 @@ function upgradeScore(state: SurvivorState, choice: UpgradeChoice): number {
       case 'regen': return hp < 0.8 ? 130 : 98;
       case 'weapon-haste': return 124;
       case 'area': return 116;
-      case 'mech-cycle': return 108;
-      case 'mech-duration': return 105;
+      // One consolidated Mech passive replaces the two former weak ones. Weighted a
+      // little above their individual weights because it now moves three properties.
+      case 'overdrive-systems': return 118;
       case 'move-speed': return 102;
       case 'pickup-radius': return 94;
       case 'breach-shielding': return state.bosses.some((b) => b.active) ? 122 : 96;
@@ -243,7 +256,7 @@ function selectProtocol(state: SurvivorState, policy: SurvivalPolicyId): number 
 
   if (ids.includes('carrier-wing')) {
     if (living >= 60) return choose('singularity-engine');
-    if (state.bosses.some((b) => b.active)) return choose('starbreaker-array');
+    if (state.bosses.some((b) => b.active)) return choose('cleanup-crew');
     return choose('carrier-wing');
   }
   if (policy === 'novice') return state.seed % Math.max(1, ids.length);
@@ -465,6 +478,15 @@ export function runSurvivalSimulation(opts: {
     gunshipDamage: gunship?.damage ?? 0,
     gunshipKills: gunship?.kills ?? 0,
     deathSource: state.telemetry.killingBlow?.source.kind ?? (state.player.alive ? 'censored' : 'unknown'),
+    sourceDamage: Object.fromEntries(
+      [...state.telemetry.bySource.entries()].map(([id, st]) => [id, st.damage]),
+    ),
+    totalDamage: totalOutgoing(state.telemetry),
+    formDamage: {
+      astronaut: state.telemetry.byForm.astronaut.damage,
+      mech: state.telemetry.byForm.mech.damage,
+      ship: state.telemetry.byForm.ship.damage,
+    },
   };
 }
 

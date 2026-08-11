@@ -1,11 +1,13 @@
 import { screenToWorldMove } from './screenBasis';
 import { SpatialHash } from './spatialHash';
+import { HEROES, type HeroId } from '../../content/heroes';
 import {
   HORDE,
   MINIBOSS,
   PASSIVES,
   SURVIVOR,
   WEAPONS,
+  heroStarterWeapon,
   bossDefForIndex,
   bossDifficultyFor,
   bossPhaseFromHealth,
@@ -15,8 +17,9 @@ import {
   eliteSpawnIntervalAt,
   endlessDifficultyAt,
   isEnemyEligibleAt,
-  mechCooldownReduction,
-  mechDurationBonus,
+  mechCooldownAtLevel,
+  mechDurationAtLevel,
+  mechSpeedBonusAtLevel,
   moveSpeedBonus,
   repairOrbBonusAtLevel,
   isFodderEnemy,
@@ -60,12 +63,14 @@ import {
   type BossSimApi,
 } from './survivorBossPatterns';
 import {
+  PLASMA_TRAIL_SAMPLES,
   aliveBossCount,
   emptyBoss,
   emptyEnemy,
   nextEntityId,
   syncPrimaryBossMirror,
   type DamageEvent,
+  type SurvivorAlly,
   type SurvivorBoss,
   type SurvivorEnemy,
   type SurvivorHazard,
@@ -343,17 +348,26 @@ function areaMul(state: SurvivorState): number {
 /**
  * Mech cooldown for the current build.
  *
- * Nothing in the run shortens this except Core Cycling, which is hard-capped at 15%.
- * Kills, elites, minibosses and bosses deliberately have no effect — that model is
- * what produced near-permanent Mech uptime and it is gone.
+ * Nothing in the run shortens this except Overdrive Systems, whose authored table is
+ * hard-capped at L5 (28.0s). Kills, elites, minibosses and bosses deliberately have no
+ * effect — that model is what produced near-permanent Mech uptime and it is gone.
  */
 export function mechCooldownFor(state: SurvivorState): number {
-  return SURVIVOR.mech.cooldown * (1 - mechCooldownReduction(passiveLevel(state, 'mech-cycle')));
+  return mechCooldownAtLevel(passiveLevel(state, 'overdrive-systems'));
 }
 
-/** Mech duration for the current build (Reactor Hold, hard-capped at +25%). */
+/** Mech duration for the current build (Overdrive Systems, hard-capped at 7.0s). */
 export function mechDurationFor(state: SurvivorState): number {
-  return SURVIVOR.mech.duration * (1 + mechDurationBonus(passiveLevel(state, 'mech-duration')));
+  return mechDurationAtLevel(passiveLevel(state, 'overdrive-systems'));
+}
+
+/**
+ * Mech-only movement multiplier from Overdrive Systems.
+ *
+ * Multiplicative *after* Thruster Boost, so max/max is `1.30 × 1.15 = 1.495`.
+ */
+function mechSpeedMul(state: SurvivorState): number {
+  return 1 + mechSpeedBonusAtLevel(passiveLevel(state, 'overdrive-systems'));
 }
 
 /** Mech readiness 0–1 for the HUD meter. 1 means ready now. */
@@ -805,6 +819,7 @@ function weaponSrc(id: WeaponId): string {
 
 /** Telemetry bucket id for a player projectile. */
 function projSrc(proj: SurvivorProjectile): string {
+  if (proj.srcOverride) return proj.srcOverride;
   return proj.weaponId ? weaponSrc(proj.weaponId) : 'weapon:unknown';
 }
 
@@ -1006,6 +1021,7 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     hitPlayer: false,
     splitDone: false,
     fuseDelay: 0,
+    srcOverride: null,
   };
   state.projectiles.push(p);
   return p;
@@ -1028,6 +1044,9 @@ function acquireHazard(state: SurvivorState): SurvivorHazard | null {
     kind: 'wake',
     x: 0,
     z: 0,
+    x1: 0,
+    z1: 0,
+    capsule: false,
     radius: 1,
     life: 0,
     maxLife: 1,
@@ -1056,14 +1075,23 @@ function spawnHazard(
   life: number,
   damage: number,
   color: string,
-  opts?: Partial<Pick<SurvivorHazard, 'owner' | 'armTimer' | 'tickCd' | 'sourceBossId' | 'scaleX' | 'scaleZ' | 'facingX' | 'facingZ'>>,
-): void {
+  opts?: Partial<
+    Pick<
+      SurvivorHazard,
+      'owner' | 'armTimer' | 'tickCd' | 'sourceBossId' | 'scaleX' | 'scaleZ' | 'facingX' | 'facingZ' | 'x1' | 'z1' | 'capsule'
+    >
+  >,
+): SurvivorHazard | null {
   const h = acquireHazard(state);
-  if (!h) return;
+  if (!h) return null;
   h.id = nextEntityId(state);
   h.kind = kind;
   h.x = x;
   h.z = z;
+  // Point hazards degenerate to a zero-length capsule at their own position.
+  h.capsule = opts?.capsule ?? false;
+  h.x1 = opts?.x1 ?? x;
+  h.z1 = opts?.z1 ?? z;
   h.radius = radius;
   h.life = life;
   h.maxLife = life;
@@ -1078,6 +1106,7 @@ function spawnHazard(
   h.scaleZ = opts?.scaleZ ?? 1;
   h.facingX = opts?.facingX ?? 0;
   h.facingZ = opts?.facingZ ?? 1;
+  return h;
 }
 
 function nearestEnemy(state: SurvivorState, x: number, z: number, maxR: number): SurvivorEnemy | null {
@@ -1390,17 +1419,14 @@ function fireWeapons(state: SurvivorState, dt: number): void {
   const haste = hasteMul(state);
   const area = areaMul(state);
   if (p.form === 'ship') {
-    // Plasma Wake is the one authored ship synergy. Other weapons remain offline.
+    /*
+     * Plasma Wake remains the one authored ship synergy, but it is no longer fired from
+     * this loop at all: `updatePlasmaTrails` owns its emission every frame so the trail
+     * stays continuous at ship speed. Everything else stays offline.
+     */
     for (const slot of state.weapons) {
-      if (slot.weaponId !== 'plasma-wake') {
-        slot.cooldown = Math.max(0, slot.cooldown - dt * 0.35);
-        continue;
-      }
-      slot.cooldown = Math.max(0, slot.cooldown - dt);
-      if (slot.cooldown > 0 || !p.isMoving) continue;
-      const def = wdef(slot.weaponId, slot.level);
-      slot.cooldown = def.cadence / haste;
-      firePlasmaWake(state, def, area, false, true);
+      if (slot.weaponId === 'plasma-wake') continue;
+      slot.cooldown = Math.max(0, slot.cooldown - dt * 0.35);
     }
     return;
   }
@@ -1408,6 +1434,8 @@ function fireWeapons(state: SurvivorState, dt: number): void {
   const mech = p.form === 'mech';
 
   for (const slot of state.weapons) {
+    // Trail emission is distance-driven and handled by `updatePlasmaTrails`.
+    if (slot.weaponId === 'plasma-wake') continue;
     slot.cooldown = Math.max(0, slot.cooldown - dt);
     if (slot.cooldown > 0) continue;
     const def = wdef(slot.weaponId, slot.level);
@@ -1634,12 +1662,6 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         });
         pushEffect(state, 'muzzle', sx, sz, 0.1, '#fff0a8', 0.9);
       }
-    } else if (slot.weaponId === 'plasma-wake') {
-      if (!p.isMoving) {
-        slot.cooldown = 0.1;
-        continue;
-      }
-      firePlasmaWake(state, def, area, mech, false);
     } else if (slot.weaponId === 'pulsar') {
       const radius = (def.radius ?? 4) * area;
       for (let pulse = 0; pulse < count; pulse += 1) {
@@ -1664,43 +1686,177 @@ function fireWeapons(state: SurvivorState, dt: number): void {
   }
 }
 
-function firePlasmaWake(
-  state: SurvivorState,
-  def: ReturnType<typeof wdef>,
-  area: number,
-  mech: boolean,
-  ship: boolean,
-): void {
+/**
+ * Ember falloff for a hazard, as a fraction of its authored damage.
+ *
+ * Only trail capsules burn down; every other hazard is flat. A segment holds full
+ * strength for the first `emberStart` of its life and then decays linearly to
+ * `emberFloor`, which is simultaneously the visible dissipating tail and the mechanism
+ * that keeps a 3.6–4.5s lifetime from multiplying late-game output.
+ */
+function hazardPotency(h: SurvivorHazard): number {
+  if (h.kind !== 'plasma-wake' || h.maxLife <= 0) return 1;
+  const cfg = SURVIVOR.plasmaTrail;
+  const age = 1 - Math.max(0, Math.min(1, h.life / h.maxLife));
+  if (age <= cfg.emberStart) return 1;
+  const k = (age - cfg.emberStart) / Math.max(1e-6, 1 - cfg.emberStart);
+  return 1 + k * (cfg.emberFloor - 1);
+}
+
+/** Per-level integrated-damage normalization for the trail. */
+function plasmaDamageNorm(level: number): number {
+  const table = SURVIVOR.plasmaTrail.damageNorm;
+  const i = Math.max(0, Math.min(table.length - 1, Math.floor(level) - 1));
+  return table[i] ?? 1;
+}
+
+/** Record where the player is now, for the delayed trail origin. */
+function pushTrailSample(state: SurvivorState): void {
+  const tr = state.plasmaTrail;
+  tr.head = (tr.head + 1) % PLASMA_TRAIL_SAMPLES;
+  tr.sx[tr.head] = state.player.x;
+  tr.sz[tr.head] = state.player.z;
+  tr.st[tr.head] = state.time;
+  if (tr.count < PLASMA_TRAIL_SAMPLES) tr.count += 1;
+}
+
+/**
+ * Where the player was `delay` seconds ago, linearly interpolated between samples.
+ *
+ * Returns the oldest known position when the ring has not filled yet, so a trail that
+ * starts at run begin simply begins at the hero rather than snapping in later.
+ */
+function delayedTrailPoint(state: SurvivorState, delay: number): { x: number; z: number } {
+  const tr = state.plasmaTrail;
+  const want = state.time - delay;
+  let newer = -1;
+  for (let i = 0; i < tr.count; i += 1) {
+    const idx = (tr.head - i + PLASMA_TRAIL_SAMPLES * 2) % PLASMA_TRAIL_SAMPLES;
+    if (tr.st[idx]! <= want) {
+      const older = idx;
+      if (newer < 0) return { x: tr.sx[older]!, z: tr.sz[older]! };
+      const t0 = tr.st[older]!;
+      const t1 = tr.st[newer]!;
+      const f = t1 > t0 ? (want - t0) / (t1 - t0) : 0;
+      return {
+        x: tr.sx[older]! + (tr.sx[newer]! - tr.sx[older]!) * f,
+        z: tr.sz[older]! + (tr.sz[newer]! - tr.sz[older]!) * f,
+      };
+    }
+    newer = idx;
+  }
+  const oldest = (tr.head - Math.max(0, tr.count - 1) + PLASMA_TRAIL_SAMPLES * 2) % PLASMA_TRAIL_SAMPLES;
+  return { x: tr.sx[oldest] ?? state.player.x, z: tr.sz[oldest] ?? state.player.z };
+}
+
+/** Reset trail anchors so a later emission cannot bridge a discontinuity. */
+function resetPlasmaAnchors(state: SurvivorState): void {
+  const tr = state.plasmaTrail;
+  tr.anchorSet[0] = false;
+  tr.anchorSet[1] = false;
+  tr.pathAcc[0] = 0;
+  tr.pathAcc[1] = 0;
+  tr.prevSet = false;
+}
+
+/**
+ * Lay down the Plasma Wake trail.
+ *
+ * Runs every frame instead of on the weapon cooldown, because emission is driven by
+ * *distance travelled along the delayed path*, not by a timer. Each segment starts
+ * exactly where the previous one ended, so the trail is continuous by construction at
+ * astronaut, Mech and ship speeds alike — the ship simply produces longer segments
+ * rather than gaps.
+ */
+export function updatePlasmaTrails(state: SurvivorState, dt: number): void {
   const p = state.player;
-  const count = def.count;
-  const radius = (def.radius ?? 1.2) * area * (ship ? 1.18 : 1);
-  const sideScale = ship ? 2.15 : 1.72;
-  const forwardScale = ship ? 0.52 : 0.48;
-  for (let i = 0; i < count; i += 1) {
-    const offset = count > 1 ? (i - (count - 1) / 2) * radius * 0.9 : 0;
-    const x = p.x - p.facingX * (ship ? 1.3 : 0.75) - p.facingZ * offset;
-    const z = p.z - p.facingZ * (ship ? 1.3 : 0.75) + p.facingX * offset;
-    spawnHazard(
-      state,
-      'plasma-wake',
-      x,
-      z,
-      radius,
-      def.life ?? 2,
-      def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
-      WEAPONS['plasma-wake'].color,
-      {
-        scaleX: sideScale,
-        scaleZ: forwardScale,
-        facingX: p.facingX,
-        facingZ: p.facingZ,
-      },
-    );
-    pushEffect(state, 'plasma-flare', x, z, 0.38, '#ffb34a', radius * sideScale, {
-      radius: radius * sideScale,
-      facingX: p.facingX,
-      facingZ: p.facingZ,
+  const tr = state.plasmaTrail;
+  pushTrailSample(state);
+
+  const slot = state.weapons.find((w) => w.weaponId === 'plasma-wake');
+  if (!slot || !p.alive) {
+    resetPlasmaAnchors(state);
+    return;
+  }
+
+  const cfg = SURVIVOR.plasmaTrail;
+  const def = wdef('plasma-wake', slot.level);
+  const ship = p.form === 'ship';
+  const mech = p.form === 'mech';
+
+  // Emitter throttle: a floor on how often a piece may be added, independent of frame rate.
+  slot.cooldown = Math.max(0, slot.cooldown - dt);
+
+  const head = delayedTrailPoint(state, cfg.delay);
+  if (!tr.prevSet) {
+    tr.prevX = head.x;
+    tr.prevZ = head.z;
+    tr.prevSet = true;
+  }
+  const stepLen = Math.hypot(head.x - tr.prevX, head.z - tr.prevZ);
+  tr.prevX = head.x;
+  tr.prevZ = head.z;
+
+  // Trail only forms while actually travelling — the 2.6.1 identity is preserved.
+  if (!p.isMoving) return;
+
+  const area = areaMul(state);
+  const ribbonCount = Math.max(1, def.count);
+  const halfWidth =
+    (def.radius ?? 1.2) *
+    cfg.widthMul *
+    area *
+    (ship ? cfg.shipWidthMul : 1) *
+    (ribbonCount > 1 ? cfg.twinWidthMul : 1);
+  const life = def.life ?? 3.6;
+  const damage =
+    def.damage *
+    plasmaDamageNorm(slot.level) *
+    (mech ? SURVIVOR.mech.weaponDamageMul : 1) *
+    p.damageMul;
+  const spacing = Math.max(cfg.minSegmentLength, ship ? cfg.shipSegmentLength : cfg.segmentLength);
+  const ribbons = ribbonCount;
+
+  for (let i = 0; i < ribbons; i += 1) {
+    tr.pathAcc[i] = (tr.pathAcc[i] ?? 0) + stepLen;
+    // Lateral offset for Twin Wake, perpendicular to current heading.
+    const off = ribbons > 1 ? (i - (ribbons - 1) / 2) * halfWidth * cfg.twinOffsetMul : 0;
+    const ex = head.x - p.facingZ * off;
+    const ez = head.z + p.facingX * off;
+
+    if (!tr.anchorSet[i]) {
+      tr.anchorX[i] = ex;
+      tr.anchorZ[i] = ez;
+      tr.anchorSet[i] = true;
+      tr.pathAcc[i] = 0;
+      continue;
+    }
+    if (tr.pathAcc[i]! < spacing) continue;
+    if (slot.cooldown > 0) continue;
+
+    const ax = tr.anchorX[i]!;
+    const az = tr.anchorZ[i]!;
+    const seg = spawnHazard(state, 'plasma-wake', ax, az, halfWidth, life, damage, WEAPONS['plasma-wake'].color, {
+      capsule: true,
+      x1: ex,
+      z1: ez,
+      facingX: ex - ax,
+      facingZ: ez - az,
     });
+    // Continuity is structural: the next segment begins where this one ended, whether
+    // or not the pool could satisfy this request.
+    tr.anchorX[i] = ex;
+    tr.anchorZ[i] = ez;
+    tr.pathAcc[i] = 0;
+    if (seg && i === ribbons - 1) {
+      slot.cooldown = Math.max(cfg.minInterval, 0);
+      // Sparks at the burning head of the trail.
+      pushEffect(state, 'plasma-flare', ex, ez, 0.34, '#ffb34a', halfWidth, {
+        radius: halfWidth,
+        facingX: ex - ax,
+        facingZ: ez - az,
+      });
+    }
   }
 }
 
@@ -1823,6 +1979,9 @@ function fireOrbitalLance(
       armTimer: arm,
       color: WEAPONS.orbital.color,
       explodeRadius: radius,
+      // `splash` carries the outer shockwave radius for the two-zone detonation.
+      // Reusing the existing pooled field keeps the projectile struct fixed-size.
+      splash: radius * SURVIVOR.orbital.shockwaveRadiusMul,
     });
   }
 }
@@ -1866,6 +2025,7 @@ function resetProj(
   proj.hitPlayer = opts.hitPlayer ?? false;
   proj.splitDone = opts.splitDone ?? false;
   proj.fuseDelay = opts.fuseDelay ?? 0;
+  proj.srcOverride = opts.srcOverride ?? null;
 }
 
 function fireBioGlob(
@@ -2194,6 +2354,15 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       }
       if (proj.armTimer > 0 && proj.life > 0) continue;
       const er = proj.explodeRadius || proj.radius;
+      /*
+       * Orbital Lance detonates in two concentric zones: the heavy core (`er`) and a
+       * wider shockwave (`sr`) at a fraction of the damage. Each target resolves
+       * against the core first and is damaged exactly once, so nothing is
+       * double-counted and a single boss standing in the core is unaffected by the
+       * ring — which is what keeps the single-boss progression benchmark honest.
+       */
+      const sr = proj.kind === 'orbital-marker' ? proj.splash : 0;
+      const shockMul = SURVIVOR.orbital.shockwaveDamageMul;
       pushEffect(
         state,
         proj.kind === 'orbital-marker' ? 'orbital-strike' : 'impact',
@@ -2207,28 +2376,38 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       if (proj.kind === 'rocket') {
         pushEffect(state, 'pulse', proj.x, proj.z, 0.28, '#fff6d0', er * 0.9, { radius: er * 0.9 });
       } else if (proj.kind === 'orbital-marker') {
-        pushEffect(state, 'pulse', proj.x, proj.z, 0.55, '#fff4c8', er * 1.8, { radius: er * 1.8 });
+        // Core flash, then the expanding shockwave ring at its true damage radius, then
+        // a short-lived floor scorch. All three are pooled effects — no new geometry.
+        pushEffect(state, 'pulse', proj.x, proj.z, 0.42, '#fff4c8', er * 1.15, { radius: er * 1.15 });
+        pushEffect(state, 'orbital-shock', proj.x, proj.z, 0.62, '#ffd46a', sr, { radius: sr });
+        pushEffect(state, 'orbital-scorch', proj.x, proj.z, 1.35, '#ff9a3c', er, { radius: er });
       }
       for (const e of state.enemies) {
         if (!e.alive) continue;
         const dx = e.x - proj.x;
         const dz = e.z - proj.z;
-        if (dx * dx + dz * dz <= (er + e.radius) ** 2) {
-          damageEnemy(state, e, proj.damage, { src: projSrc(proj) });
-          if (proj.kind === 'rocket' && e.alive) {
-            const len = Math.hypot(dx, dz) || 1;
-            const push = e.isMiniboss ? 0.35 : e.isElite ? 0.75 : 1.8;
-            applyKnockback(e, dx / len, dz / len, push);
-          }
+        const d2 = dx * dx + dz * dz;
+        let dealt = 0;
+        if (d2 <= (er + e.radius) ** 2) dealt = proj.damage;
+        else if (sr > 0 && d2 <= (sr + e.radius) ** 2) dealt = proj.damage * shockMul;
+        if (dealt <= 0) continue;
+        damageEnemy(state, e, dealt, { src: projSrc(proj) });
+        if (proj.kind === 'rocket' && e.alive) {
+          const len = Math.hypot(dx, dz) || 1;
+          const push = e.isMiniboss ? 0.35 : e.isElite ? 0.75 : 1.8;
+          applyKnockback(e, dx / len, dz / len, push);
         }
       }
       for (const b of state.bosses) {
         if (!b.active || b.state === 'dead') continue;
         const dx = b.x - proj.x;
         const dz = b.z - proj.z;
-        if (dx * dx + dz * dz <= (er + b.colliderRadius) ** 2) {
-          damageBoss(state, proj.damage * (proj.kind === 'orbital-marker' ? 1.1 : 1), { boss: b, src: projSrc(proj) });
-        }
+        const d2 = dx * dx + dz * dz;
+        const bossMul = proj.kind === 'orbital-marker' ? 1.1 : 1;
+        let dealt = 0;
+        if (d2 <= (er + b.colliderRadius) ** 2) dealt = proj.damage * bossMul;
+        else if (sr > 0 && d2 <= (sr + b.colliderRadius) ** 2) dealt = proj.damage * bossMul * shockMul;
+        if (dealt > 0) damageBoss(state, dealt, { boss: b, src: projSrc(proj) });
       }
       proj.active = false;
       continue;
@@ -2368,7 +2547,44 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
   }
 }
 
+/**
+ * Squared distance from a point to the segment `(ax,az)-(bx,bz)`.
+ *
+ * Shared by the capsule collision test and, through `hazardCapsuleFrame`, by the
+ * renderer's ribbon geometry — one definition of where a trail segment is.
+ */
+function pointSegmentDist2(
+  px: number,
+  pz: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): number {
+  const vx = bx - ax;
+  const vz = bz - az;
+  const len2 = vx * vx + vz * vz;
+  let t = 0;
+  if (len2 > 1e-12) {
+    t = ((px - ax) * vx + (pz - az) * vz) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+  }
+  const dx = px - (ax + vx * t);
+  const dz = pz - (az + vz * t);
+  return dx * dx + dz * dz;
+}
+
 function hazardHitsPoint(h: SurvivorHazard, x: number, z: number, pointRadius = 0): boolean {
+  /*
+   * Capsule hazards (Plasma Wake trail segments) are swept segments: the damaging
+   * region is everything within `radius` of the segment. This is the same geometry the
+   * renderer draws, which is the whole point of the 2.7.0 rebuild — the old ellipse
+   * footprint could not represent a connected trail at all.
+   */
+  if (h.capsule) {
+    const r = h.radius + pointRadius;
+    return pointSegmentDist2(x, z, h.x, h.z, h.x1, h.z1) <= r * r;
+  }
   const fl = Math.hypot(h.facingX, h.facingZ) || 1;
   const fx = h.facingX / fl;
   const fz = h.facingZ / fl;
@@ -2416,10 +2632,11 @@ function updateHazards(state: SurvivorState, dt: number): void {
       continue;
     }
 
+    const potency = hazardPotency(h);
     for (const e of state.enemies) {
       if (!e.alive || e.hazardHitCd > 0) continue;
       if (hazardHitsPoint(h, e.x, e.z, e.radius)) {
-        damageEnemy(state, e, h.damage, { src: hazardSrc(h) });
+        damageEnemy(state, e, h.damage * potency, { src: hazardSrc(h) });
         if (h.kind === 'puddle') {
           e.slowTimer = Math.max(e.slowTimer, 0.7);
           e.slowMul = Math.min(e.slowMul, 0.72);
@@ -2432,7 +2649,7 @@ function updateHazards(state: SurvivorState, dt: number): void {
         if (!b.active || b.state === 'dead' || b.hitFlash > 0.02) continue;
         if (hazardHitsPoint(h, b.x, b.z, b.colliderRadius)) {
           const bossMul = h.kind === 'plasma-wake' ? 0.65 : 0.7;
-          damageBoss(state, h.damage * bossMul, { boss: b, src: hazardSrc(h) });
+          damageBoss(state, h.damage * bossMul * potency, { boss: b, src: hazardSrc(h) });
         }
       }
     }
@@ -3287,8 +3504,8 @@ function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): v
   } else if (id === 'gravitic-recall') {
     startGraviticRecall(state);
     trackProtocol(state, id, state.recall.duration, potency);
-  } else if (id === 'starbreaker-array') {
-    startStarbreakerArray(state);
+  } else if (id === 'cleanup-crew') {
+    startCleanupCrew(state);
     trackProtocol(state, id, SURVIVOR.megaProtocol.titanDuration, potency);
   } else if (id === 'carrier-wing') {
     startCarrierWing(state);
@@ -3314,17 +3531,326 @@ function resetMegaProtocol(state: SurvivorState): void {
   state.megaProtocol.fleetDamageDue = [];
   state.megaProtocol.orbIds = [];
   state.megaProtocol.hitIds = [];
+  // Replacing or restarting a Titan removes any allied squad immediately.
+  state.allies = [];
 }
 
-function startStarbreakerArray(state: SurvivorState): void {
+// --------------------------------------------------------------- Cleanup Crew
+//
+// The third Mega Protocol. Summons the three heroes the player is *not* piloting; they
+// arrive in their own ships, deploy as allied Mechs, fight with only their exclusive
+// signature weapon for five minutes, then transform back and fly out.
+//
+// Architecture note: there are no duplicate player states here. An ally is a small
+// bounded actor (position, facing, formation slot, one weapon slot, a phase timer). It
+// has no health, form, passives, Build, pickups or cooldown bank, it is invulnerable and
+// non-colliding, and nothing in the horde or boss code ever reads it — so allies cannot
+// block, displace, or divert aggro from anything.
+
+/** The three heroes summoned for a given player hero, in stable order. */
+export function cleanupCrewFor(heroId: HeroId): HeroId[] {
+  const all: HeroId[] = ['bee', 'flamingo', 'frog', 'red-panda'];
+  return all.filter((h) => h !== heroId);
+}
+
+/** Telemetry bucket for one ally. */
+function allySrc(heroId: HeroId): string {
+  return `titan-cleanup:${heroId}`;
+}
+
+function startCleanupCrew(state: SurvivorState): void {
   resetMegaProtocol(state);
   const m = state.megaProtocol;
-  m.id = 'starbreaker-array';
+  m.id = 'cleanup-crew';
   m.remaining = SURVIVOR.megaProtocol.titanDuration;
-  m.tickCd = 0;
-  pushEffect(state, 'titan-deploy', state.player.x, state.player.z, 1.6, '#fff1a8', 6.5, { radius: 6.5 });
-  pushEffect(state, 'orbital-strike', state.player.x - 2, state.player.z, 1.1, '#ffd46a', 2.8, { radius: 2.8 });
-  pushEffect(state, 'orbital-strike', state.player.x + 2, state.player.z, 1.1, '#ffd46a', 2.8, { radius: 2.8 });
+
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+  const crew = cleanupCrewFor(state.heroId);
+  state.allies = crew.map((heroId, i) => {
+    const slotAngle = (i / crew.length) * Math.PI * 2 + Math.PI / 6;
+    // Ships enter from off-arena, each on its own bearing, so arrivals read as three
+    // distinct transports rather than one blob.
+    const shipX = state.player.x + Math.cos(slotAngle) * cfg.shipEntryDistance;
+    const shipZ = state.player.z + Math.sin(slotAngle) * cfg.shipEntryDistance;
+    const ally: SurvivorAlly = {
+      id: nextEntityId(state),
+      heroId,
+      phase: 'arriving',
+      phaseTimer: cfg.arriveDuration,
+      delay: i * cfg.arriveStagger,
+      x: shipX,
+      z: shipZ,
+      facingX: -Math.cos(slotAngle),
+      facingZ: -Math.sin(slotAngle),
+      slotAngle,
+      slot: {
+        weaponId: heroStarterWeapon(heroId),
+        level: cfg.weaponLevel,
+        cooldown: cfg.arriveDuration + i * cfg.arriveStagger,
+        focusDebt: 0,
+        prototype: false,
+      },
+      shipX,
+      shipZ,
+      active: true,
+    };
+    return ally;
+  });
+
+  pushEffect(state, 'titan-deploy', state.player.x, state.player.z, 1.8, '#9ef0ff', 7.5, { radius: 7.5 });
+}
+
+/** Formation slot for an ally: a loose ring around the player, not a rigid lattice. */
+function allyFormationPoint(state: SurvivorState, a: SurvivorAlly): { x: number; z: number } {
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+  // Slow deterministic drift keeps the squad alive-looking without random jitter.
+  const drift = Math.sin(state.time * 0.6 + a.slotAngle * 2) * 0.35;
+  const ang = a.slotAngle + drift;
+  return {
+    x: state.player.x + Math.cos(ang) * cfg.formationRadius,
+    z: state.player.z + Math.sin(ang) * cfg.formationRadius,
+  };
+}
+
+/** Tear the squad down completely. Safe to call repeatedly. */
+function clearCleanupCrew(state: SurvivorState): void {
+  state.allies = [];
+}
+
+/** Begin the visible departure sequence for every ally. */
+function departCleanupCrew(state: SurvivorState): void {
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+  for (const a of state.allies) {
+    if (!a.active || a.phase === 'departing') continue;
+    a.phase = 'departing';
+    a.phaseTimer = cfg.departDuration;
+    a.delay = 0;
+    // Exit along the bearing it arrived on.
+    a.shipX = state.player.x + Math.cos(a.slotAngle) * cfg.shipEntryDistance;
+    a.shipZ = state.player.z + Math.sin(a.slotAngle) * cfg.shipEntryDistance;
+    pushEffect(state, 'titan-deploy', a.x, a.z, 0.75, '#9ef0ff', 3.4, { radius: 3.4 });
+  }
+}
+
+function updateCleanupCrew(state: SurvivorState, dt: number): void {
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+  const m = state.megaProtocol;
+  if (m.remaining <= 0) departCleanupCrew(state);
+
+  for (const a of state.allies) {
+    if (!a.active) continue;
+    if (a.delay > 0) {
+      a.delay = Math.max(0, a.delay - dt);
+      continue;
+    }
+    a.phaseTimer = Math.max(0, a.phaseTimer - dt);
+
+    if (a.phase === 'arriving') {
+      // Transport run: fly the ship in and set the Mech down at the formation slot.
+      const target = allyFormationPoint(state, a);
+      const u = 1 - a.phaseTimer / cfg.arriveDuration;
+      a.x = a.shipX + (target.x - a.shipX) * u;
+      a.z = a.shipZ + (target.z - a.shipZ) * u;
+      const dx = target.x - a.x;
+      const dz = target.z - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      a.facingX = dx / len;
+      a.facingZ = dz / len;
+      if (a.phaseTimer <= 0) {
+        a.phase = 'active';
+        // Deployment flash: the ship transforms into the Mech.
+        pushEffect(state, 'transform', a.x, a.z, 0.75, '#9ef0ff', 3.0);
+        pushEffect(state, 'pulse', a.x, a.z, 0.55, '#d8f6ff', 4.2, { radius: 4.2 });
+        pushEffect(state, 'impact', a.x, a.z, 0.3, '#ffffff', 2.0);
+      }
+      continue;
+    }
+
+    if (a.phase === 'departing') {
+      const u = 1 - a.phaseTimer / cfg.departDuration;
+      const fromX = a.x;
+      const fromZ = a.z;
+      void fromX;
+      void fromZ;
+      a.x += (a.shipX - a.x) * Math.min(1, dt * 3.2 + u * 0.02);
+      a.z += (a.shipZ - a.z) * Math.min(1, dt * 3.2 + u * 0.02);
+      const dx = a.shipX - a.x;
+      const dz = a.shipZ - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      a.facingX = dx / len;
+      a.facingZ = dz / len;
+      if (a.phaseTimer <= 0) a.active = false;
+      continue;
+    }
+
+    // Active: hold a readable loose formation and fire the signature weapon.
+    const target = allyFormationPoint(state, a);
+    const dx = target.x - a.x;
+    const dz = target.z - a.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.05) {
+      const step = Math.min(d, cfg.followSpeed * dt);
+      a.x += (dx / d) * step;
+      a.z += (dz / d) * step;
+    }
+    const clamped = clampArena(a.x, a.z, 1.2);
+    a.x = clamped.x;
+    a.z = clamped.z;
+
+    a.slot.cooldown = Math.max(0, a.slot.cooldown - dt);
+    if (a.slot.cooldown <= 0) fireAllySignature(state, a);
+  }
+
+  if (state.allies.length > 0 && state.allies.every((a) => !a.active)) clearCleanupCrew(state);
+}
+
+/**
+ * Fire one ally's exclusive signature weapon.
+ *
+ * Mechanics and presentation are the authored L5 behaviour of that hero's signature —
+ * Boswell's directional drones, Fitzwilliam's optimised piercing rail lines, Fortunato's
+ * bursting toxic globs, Rutherford's cluster-led proximity rockets — but damage and
+ * cadence are re-based by the Titan coefficients so three allies are a squad, not three
+ * extra maxed players.
+ */
+function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+  const def = wdef(a.slot.weaponId, a.slot.level);
+  const power = playerPowerScale({ weapons: state.weapons, passives: state.passives });
+  const dmg = def.damage * cfg.damageMul * power;
+  const src = allySrc(a.heroId);
+  const accent = HEROES[a.heroId].accent;
+  a.slot.cooldown = def.cadence * cfg.cadenceMul;
+
+  const aim = selectWeaponTarget(state, a.slot, a.x, a.z, 20);
+  const pos = targetPosition(aim);
+  if (pos) {
+    const fdx = pos.x - a.x;
+    const fdz = pos.z - a.z;
+    const flen = Math.hypot(fdx, fdz) || 1;
+    a.facingX = fdx / flen;
+    a.facingZ = fdz / flen;
+  }
+
+  if (a.slot.weaponId === 'microdrone') {
+    // Boswell: directional drone formation, homing.
+    if (!pos) {
+      a.slot.cooldown = 0.2;
+      return;
+    }
+    const base = Math.atan2(pos.x - a.x, pos.z - a.z);
+    for (let i = 0; i < def.count; i += 1) {
+      const proj = acquireProjectile(state);
+      if (!proj) break;
+      const ang = base + (i - (def.count - 1) / 2) * 0.16;
+      const spd = def.speed ?? 17;
+      resetProj(proj, state, 'drone', 'microdrone', a.x, a.z, Math.sin(ang) * spd, Math.cos(ang) * spd, {
+        damage: dmg,
+        radius: (def.radius ?? 0.18) * 1.1,
+        life: def.life ?? 1.4,
+        homing: true,
+        color: accent,
+        srcOverride: src,
+      });
+      proj.owner = 'player';
+    }
+    pushEffect(state, 'muzzle', a.x, a.z, 0.12, accent, 1.0);
+    return;
+  }
+
+  if (a.slot.weaponId === 'rail') {
+    // Fitzwilliam: optimised piercing lines through the most valuable lane.
+    const length = def.length ?? 14;
+    const width = (def.width ?? 0.5) * 1.1;
+    const { fx, fz } = bestRailDirection(state, a.slot, a.x, a.z, length, width);
+    for (let i = 0; i < def.count; i += 1) {
+      const off = (i - (def.count - 1) / 2) * 0.4;
+      const ox = -fz * off;
+      const oz = fx * off;
+      const x1 = a.x + ox + fx * length;
+      const z1 = a.z + oz + fz * length;
+      state.rails.push({ x0: a.x + ox, z0: a.z + oz, x1, z1, life: 0.22, color: accent });
+      pushEffect(state, 'rail', a.x + ox, a.z + oz, 0.25, accent, length, {
+        facingX: fx,
+        facingZ: fz,
+        length,
+        width,
+      });
+      for (const e of state.enemies) {
+        if (!e.alive) continue;
+        if (segmentHit(a.x + ox, a.z + oz, x1, z1, e.x, e.z, e.radius + width * 0.5)) {
+          damageEnemy(state, e, dmg, { src });
+          if (e.alive) applyKnockback(e, fx, fz, e.isMiniboss ? 0.8 : e.isElite ? 2.2 : 5.5);
+        }
+      }
+      for (const b of livingBosses(state)) {
+        if (segmentHit(a.x + ox, a.z + oz, x1, z1, b.x, b.z, b.colliderRadius + width * 0.5)) {
+          damageBoss(state, dmg * cfg.bossMul, { boss: b, src });
+        }
+      }
+    }
+    return;
+  }
+
+  if (a.slot.weaponId === 'bioplasma') {
+    // Fortunato: toxic globs that splash and leave corrosive residue.
+    if (!pos) {
+      a.slot.cooldown = 0.2;
+      return;
+    }
+    for (let i = 0; i < def.count; i += 1) {
+      const ang = Math.atan2(pos.x - a.x, pos.z - a.z) + (i - (def.count - 1) / 2) * 0.1;
+      const proj = acquireProjectile(state);
+      if (!proj) break;
+      const spd = def.speed ?? 16;
+      resetProj(proj, state, 'bioplasma', 'bioplasma', a.x, a.z, Math.sin(ang) * spd, Math.cos(ang) * spd, {
+        damage: dmg,
+        radius: def.radius ?? 0.28,
+        life: def.life ?? 1.4,
+        color: WEAPONS.bioplasma.color,
+        splash: def.splash ?? 1.3,
+        puddleRadius: def.puddleRadius ?? 1.1,
+        puddleLife: def.puddleLife ?? 1.6,
+        puddleDamage: (def.puddleDamage ?? 6) * cfg.damageMul * power,
+        bounceLeft: def.bounce ?? 0,
+        splitOnHit: def.split ?? 0,
+        srcOverride: src,
+      });
+    }
+    pushEffect(state, 'muzzle', a.x, a.z, 0.12, WEAPONS.bioplasma.color, 1.0);
+    return;
+  }
+
+  // Rutherford: distributed cluster-leading proximity-fused mini-rockets.
+  const travelBase = 0.32;
+  const clusters = aim?.kind === 'boss' && pos ? [pos] : rocketClusterTargets(state, a.x, a.z, def.count, travelBase);
+  for (let i = 0; i < def.count; i += 1) {
+    const cluster = clusters[i % clusters.length]!;
+    const ox = (i - (def.count - 1) / 2) * 0.9;
+    const tx = cluster.x - a.facingZ * ox * 0.35;
+    const tz = cluster.z + a.facingX * ox * 0.35;
+    const proj = acquireProjectile(state);
+    if (!proj) break;
+    const travel = travelBase + i * 0.035;
+    const ddx = tx - a.x;
+    const ddz = tz - a.z;
+    const dist = Math.hypot(ddx, ddz) || 1;
+    const spd = dist / travel;
+    resetProj(proj, state, 'rocket', 'rocket', a.x, a.z, (ddx / dist) * spd, (ddz / dist) * spd, {
+      damage: dmg,
+      radius: 0.25,
+      life: travel + 0.08,
+      color: accent,
+      armTimer: travel,
+      fuseDelay: 0.11,
+      explodeRadius: def.radius ?? 1.4,
+      srcOverride: src,
+    });
+    pushEffect(state, 'muzzle', a.x, a.z, 0.12, accent, 0.9);
+    pushEffect(state, 'telegraph', tx, tz, travel, accent, proj.explodeRadius, {
+      radius: proj.explodeRadius,
+    });
+  }
 }
 
 function fleetLane(state: SurvivorState, pass: number): { x0: number; z0: number; x1: number; z1: number } {
@@ -3502,13 +4028,14 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
     return;
   }
 
-  if (m.id === 'starbreaker-array') {
-    m.tickCd -= dt;
-    if (m.tickCd <= 0) {
-      m.tickCd += 2.7;
-      fireStarbreaker(state);
-    }
-    if (m.remaining <= 0) {
+  if (m.id === 'cleanup-crew') {
+    updateCleanupCrew(state, dt);
+    /*
+     * Hold the protocol open until the departure choreography finishes. Expiring the
+     * armament the instant its timer hits zero would delete three actors mid-frame,
+     * which is exactly the "actors simply disappearing" the brief rules out.
+     */
+    if (m.remaining <= 0 && state.allies.length === 0) {
       pushEffect(state, 'mega', state.player.x, state.player.z, 1.1, '#fff2a8', 6.5, { radius: 6.5 });
       resetMegaProtocol(state);
     }
@@ -3546,42 +4073,6 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
     if (m.remaining <= 0) {
       pushEffect(state, 'mega', m.x, m.z, 1.1, '#d8c0ff', cfg.singularityRadius, { radius: cfg.singularityRadius });
       resetMegaProtocol(state);
-    }
-  }
-}
-
-function fireStarbreaker(state: SurvivorState): void {
-  const p = state.player;
-  const boss = nearestAliveBoss(state, p.x, p.z);
-  const target = boss ?? densestPoint(state, p.x, p.z);
-  const tx = target.x;
-  const tz = target.z;
-  const dx = tx - p.x;
-  const dz = tz - p.z;
-  const len0 = Math.hypot(dx, dz) || 1;
-  const fx = dx / len0;
-  const fz = dz / len0;
-  const px = -fz;
-  const pz = fx;
-  const length = 34;
-  const damage = 72 * playerPowerScale(state);
-  for (const side of [-1.7, 1.7]) {
-    const x0 = p.x + px * side;
-    const z0 = p.z + pz * side;
-    const x1 = x0 + fx * length;
-    const z1 = z0 + fz * length;
-    pushEffect(state, 'rail', x0, z0, 0.48, '#ffe28a', length, {
-      facingX: fx, facingZ: fz, length, width: 1.05,
-    });
-    pushEffect(state, 'orbital-strike', x0, z0, 0.55, '#fff4c8', 1.8, { radius: 1.8 });
-    for (const e of state.enemies) {
-      if (!e.alive || !segmentHit(x0, z0, x1, z1, e.x, e.z, e.radius + 0.55)) continue;
-      damageEnemy(state, e, damage, { kind: 'ability', pop: 0.9, src: 'titan-starbreaker' });
-    }
-    for (const b of livingBosses(state)) {
-      if (segmentHit(x0, z0, x1, z1, b.x, b.z, b.colliderRadius + 0.55)) {
-        damageBoss(state, damage * 1.25, { kind: 'ability', pop: 1, boss: b, src: 'titan-starbreaker' });
-      }
     }
   }
 }
@@ -3847,7 +4338,15 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   p.isMoving = len > 0.05 || p.dodgeActive > 0;
   let speed = SURVIVOR.playerSpeed * moveMul(state);
   if ((p as { _thruster?: boolean })._thruster) speed *= SURVIVOR.tempBuff.thrusterSpeedMul;
-  if (p.form === 'mech') speed *= 0.92;
+  /*
+   * Mech movement.
+   *
+   * 2.6.1 applied a flat 0.92 drag here. 2.7.0 replaces it with the Overdrive Systems
+   * table, whose level 0 row is defined as +0% — an uninvested Mech now moves at plain
+   * astronaut speed rather than being quietly slower than the form it replaces, and a
+   * fully invested one reaches 1.30 × 1.15 = 1.495 against unupgraded astronaut speed.
+   */
+  if (p.form === 'mech') speed *= mechSpeedMul(state);
   if (p.form === 'ship') speed *= SURVIVOR.ship.speedMul;
   if (p.slowTimer > 0) speed *= p.slowMul;
 
@@ -4555,8 +5054,9 @@ function openProtocolCache(state: SurvivorState): void {
           : 'No energy currently on the field.';
     } else if (p.id === 'carrier-wing') {
       body = 'For 5:00, a fighter squadron repeatedly strafes distributed threats. Dedicated Titan slot; cannot be upgraded.';
-    } else if (p.id === 'starbreaker-array') {
-      body = 'For 5:00, twin orbital satellites fire colossal piercing beams. Dedicated Titan slot; cannot be upgraded.';
+    } else if (p.id === 'cleanup-crew') {
+      body =
+        'For 5:00, the rest of the crew arrive in their ships and fight beside you as allied Mechs, each using only their own signature weapon. Dedicated Titan slot; cannot be upgraded.';
     } else if (p.id === 'singularity-engine') {
       body = 'For 5:00, repeated anomalies pull and detonate the horde. Dedicated Titan slot; cannot be upgraded.';
     }
@@ -4620,12 +5120,68 @@ export function applyBossBodyContact(state: SurvivorState): void {
   }
 }
 
+/**
+ * Ship boss ram (2.7.0).
+ *
+ * Flying the ship through a boss is the most committal thing the form can do, and in
+ * 2.6.1 it was worth exactly nothing: the `ship-body` bucket recorded 4,994 damage and
+ * **zero** boss damage across the reference 21:18 run, because the body-impact pass only
+ * ever iterated `state.enemies`.
+ *
+ * This is a deliberately separate pass from {@link applyBossBodyContact}:
+ *
+ * - That function applies *incoming* damage and is gated by the player's shared
+ *   `bossContactCd` and i-frames. Outgoing ram damage must not be suppressed merely
+ *   because the player is mid-invulnerability, and must not consume that throttle.
+ * - It `break`s after one boss. A ram should credit every boss actually overlapped, so
+ *   this loop does not break — but each boss carries its own `shipRamCd`, so overlapping
+ *   two bosses yields one bounded impact each rather than an uncontrolled stream.
+ *
+ * Boss pass-through is preserved exactly: no knockback, no displacement and no
+ * positional correction is applied to either the boss or the player.
+ */
+export function applyShipBossRam(state: SurvivorState): void {
+  const p = state.player;
+  if (!p.alive || p.form !== 'ship') return;
+  const power = thrusterPower(state);
+  const reach = SURVIVOR.ship.radius;
+  for (const b of state.bosses) {
+    if (!b.active || b.state === 'dead') continue;
+    if (b.shipRamCd > 0) continue;
+    const dx = p.x - b.x;
+    const dz = p.z - b.z;
+    if (dx * dx + dz * dz > (b.colliderRadius + reach) ** 2) continue;
+
+    // One bounded impact per boss per interval, regardless of overlap duration.
+    b.shipRamCd = SURVIVOR.ship.ramInternalCd;
+    damageBoss(state, SURVIVOR.ship.ramBossDamage * power, {
+      // 'large' gives the ram its own heavy damage-number presentation rather than
+      // blending into ordinary boss chip damage.
+      kind: 'large',
+      pop: 1,
+      boss: b,
+      src: 'ship-ram',
+    });
+
+    // Impact feedback on the hull surface facing the ship, not at the boss centre.
+    const len = Math.hypot(dx, dz) || 1;
+    const cx = b.x + (dx / len) * b.colliderRadius;
+    const cz = b.z + (dz / len) * b.colliderRadius;
+    pushEffect(state, 'impact', cx, cz, 0.34, '#fff2c0', 3.0);
+    pushEffect(state, 'pulse', cx, cz, 0.42, '#ffb347', 3.6, { radius: 3.6 });
+    pushEffect(state, 'muzzle', cx, cz, 0.16, '#ffffff', 2.2);
+    p.hitShake = Math.max(p.hitShake, 0.16);
+  }
+}
+
 function updateBosses(state: SurvivorState, dt: number): void {
   if (state.inboundBanner > 0) state.inboundBanner = Math.max(0, state.inboundBanner - dt);
   for (const b of state.bosses) {
+    if (b.shipRamCd > 0) b.shipRamCd = Math.max(0, b.shipRamCd - dt);
     updateOneBossPatterns(state, b, dt, bossApi);
   }
   applyBossBodyContact(state);
+  applyShipBossRam(state);
   // Prune long-dead bosses to keep list bounded
   if (state.bosses.length > 8) {
     state.bosses = state.bosses.filter((b) => b.active || b.state !== 'dead' || b.timer > 0);
@@ -4707,6 +5263,7 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
   ensureBossSchedule(state);
   updatePlayer(state, input, dt);
   rebuildHash(state);
+  updatePlasmaTrails(state, dt);
   fireWeapons(state, dt);
   updateProjectiles(state, dt);
   updateHazards(state, dt);

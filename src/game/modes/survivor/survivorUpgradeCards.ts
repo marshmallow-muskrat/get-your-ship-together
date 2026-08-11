@@ -23,8 +23,10 @@ import {
   WEAPONS,
   formatOverclockLabel,
   hullPlatingGainAtLevel,
-  mechCooldownReduction,
-  mechDurationBonus,
+  mechCooldownAtLevel,
+  mechDurationAtLevel,
+  mechSpeedBonusAtLevel,
+  mechUptimeFractionAtLevel,
   moveSpeedBonus,
   overclockLevel,
   regenFractionAtLevel,
@@ -362,20 +364,31 @@ export function passiveCard(
       summary = 'Every weapon radius, blast and beam gets larger.';
       break;
     }
-    case 'mech-cycle': {
-      const a = mechCooldownReduction(currentLevel);
-      const b = mechCooldownReduction(next);
-      stats.push(`Mech cooldown ${round(SURVIVOR.mech.cooldown * (1 - a), 1)}s → ${round(SURVIVOR.mech.cooldown * (1 - b), 1)}s`);
-      stats.push(`Hard cap −${round(mechCooldownReduction(def.maxLevel) * 100)}%`);
-      summary = 'Mech Overdrive comes back sooner. The cooldown runs from activation to activation, including the time you spend in Mech.';
-      break;
-    }
-    case 'mech-duration': {
-      const a = mechDurationBonus(currentLevel);
-      const b = mechDurationBonus(next);
-      stats.push(`Mech duration ${round(SURVIVOR.mech.duration * (1 + a), 1)}s → ${round(SURVIVOR.mech.duration * (1 + b), 1)}s`);
-      stats.push(`Hard cap +${round(mechDurationBonus(def.maxLevel) * 100)}%`);
-      summary = 'Each Mech Overdrive lasts longer. It does not change the cooldown.';
+    /*
+     * One card now carries the whole Mech investment, so it must show all three
+     * properties plus the derived uptime — otherwise the player cannot tell what the
+     * card is actually buying, which is exactly why the two former passives were
+     * routinely skipped.
+     */
+    case 'overdrive-systems': {
+      const cap = def.maxLevel;
+      stats.push(
+        `Mech duration ${round(mechDurationAtLevel(currentLevel), 1)}s → ${round(mechDurationAtLevel(next), 1)}s`,
+      );
+      stats.push(
+        `Mech cooldown ${round(mechCooldownAtLevel(currentLevel), 1)}s → ${round(mechCooldownAtLevel(next), 1)}s`,
+      );
+      stats.push(
+        `Mech uptime ${round(mechUptimeFractionAtLevel(currentLevel) * 100, 1)}% → ${round(mechUptimeFractionAtLevel(next) * 100, 1)}%`,
+      );
+      stats.push(
+        `Mech speed +${round(mechSpeedBonusAtLevel(currentLevel) * 100)}% → +${round(mechSpeedBonusAtLevel(next) * 100)}%`,
+      );
+      stats.push(
+        `Hard cap at L${cap}: ${round(mechDurationAtLevel(cap), 1)}s / ${round(mechCooldownAtLevel(cap), 1)}s · ${round(mechUptimeFractionAtLevel(cap) * 100, 1)}% uptime · +${round(mechSpeedBonusAtLevel(cap) * 100)}% speed`,
+      );
+      summary =
+        'Mech Overdrive lasts longer, returns sooner, and moves faster while active. The cooldown is measured activation-to-activation and keeps counting down during Mech, so a longer duration also means less waiting after it ends. The speed bonus applies only in Mech form and multiplies on top of Thruster Boost.';
       break;
     }
     case 'breach-shielding': {

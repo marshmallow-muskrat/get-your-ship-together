@@ -14,7 +14,7 @@ import {
 } from '../../content/enemies';
 
 /** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.6.1';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.7.0';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -297,6 +297,139 @@ export const SURVIVOR = {
     singularityTick: 0.25,
     singularityDamage: 34,
     singularityBossFraction: 0.055,
+    /**
+     * Cleanup Crew (2.7.0) — the third Mega Protocol, replacing the deleted orbital-beam
+     * armament.
+     *
+     * The three heroes the player is *not* using arrive in their own ships, deploy as
+     * allied Mechs, fight with only their exclusive signature weapon for five minutes,
+     * and then leave the way they came.
+     *
+     * Allies are bounded actors, not duplicate players: they are invulnerable,
+     * non-colliding, never displace anything, and hold no passives, forms or Build.
+     */
+    cleanup: {
+      /** Seconds of arrival choreography before an ally starts fighting. */
+      arriveDuration: 1.9,
+      /** Stagger between the three arrivals, for a readable sequence. */
+      arriveStagger: 0.42,
+      /** Seconds of departure choreography at expiry. */
+      departDuration: 1.7,
+      /**
+       * Distance the transport ships fly in from.
+       *
+       * Kept just inside the isometric camera's reach (`cameraHalf` 12) so the arrival
+       * is actually *watched* rather than happening off-screen: at 26 the ships spent
+       * almost the whole sequence outside the view and the player only ever saw the
+       * landing flash.
+       */
+      shipEntryDistance: 15,
+      /** Loose formation radius around the player. */
+      formationRadius: 7.2,
+      /** How quickly an ally closes on its formation slot. */
+      followSpeed: 9.4,
+      /** Authored ally weapon level. Never the player's own level. */
+      weaponLevel: 5,
+      /**
+       * Titan normalization.
+       *
+       * Allies do *not* get a free L5 player weapon. Authored L5 mechanics (projectile
+       * counts, radii, pierce, splash) are preserved so each signature stays
+       * recognisable, while damage and cadence are re-based for a three-actor squad and
+       * scaled by the same bounded `playerPowerScale` every other Titan uses.
+       *
+       * Calibrated against the deterministic Titan comparison so the squad's direct
+       * damage lands at parity with Carrier Wing, which the release brief holds fixed as
+       * the reference "already feels good" armament.
+       */
+      damageMul: 0.33,
+      cadenceMul: 1.28,
+      /** Boss damage multiplier applied on top, matching ordinary weapon boss ratios. */
+      bossMul: 0.8,
+    },
+  },
+  /**
+   * Plasma Wake trail (2.7.0).
+   *
+   * 2.6.1 emitted an independent wide/thin ellipse every `cadence` seconds. At any real
+   * movement speed the forward extent of one ellipse (~1.1 world units) was smaller than
+   * the distance covered between emissions (~2.2 units at astronaut speed), so the
+   * weapon read — and collided — as a row of disconnected discs, and at L1 each disc
+   * vanished after 1.8s before it could matter.
+   *
+   * 2.7.0 emits *connected capsule segments*: each new segment starts exactly where the
+   * previous one ended, so continuity is structural and no speed can open a gap. Because
+   * segments chain, coverage is a function of lifetime and speed rather than of emission
+   * frequency, which is why emission can be made much less frequent while the trail gets
+   * denser rather than sparser.
+   */
+  plasmaTrail: {
+    /** Seconds the burning trail lags behind the hero. */
+    delay: 0.5,
+    /** Emission spacing along the travelled path (world units), by form. */
+    segmentLength: 3.2,
+    shipSegmentLength: 5.5,
+    /** Never emit slivers, and never emit more often than this. */
+    minSegmentLength: 0.9,
+    minInterval: 0.1,
+    /** Cross-track half-width = weapon radius x this (preserves the wide/thin identity). */
+    widthMul: 1.72,
+    /** Ship trails are wider and brighter. */
+    shipWidthMul: 1.35,
+    /** Lateral offset between Twin Wake ribbons, as a multiple of half-width. */
+    twinOffsetMul: 0.95,
+    /**
+     * Each ribbon narrows when the wake splits.
+     *
+     * Twin Wake laying two full-width ribbons doubled coverage outright, which made L5
+     * a +231% breakpoint. Splitting the wake into two narrower strips keeps the
+     * mechanic readable while landing the breakpoint inside the documented band.
+     */
+    twinWidthMul: 0.72,
+    /**
+     * Ember phase.
+     *
+     * A segment burns at full strength for the first `emberStart` of its life, then
+     * decays linearly to `emberFloor`. This is simultaneously the readable dissipating
+     * tail and the mechanism that stops a much longer lifetime from multiplying
+     * late-game damage.
+     */
+    emberStart: 0.45,
+    emberFloor: 0.25,
+    /**
+     * Per-level integrated-damage normalization.
+     *
+     * A continuous ribbon covers far more ground than the old disc row, so raw authored
+     * damage would inflate every level. These factors re-base the weapon against the
+     * deterministic `mobile-offaxis` weapon benchmark, measured L1->L5:
+     *
+     * ```text
+     * endless-2.6.1   2052  2838  3744  4680  6732   (ratio 3.28)
+     * endless-2.7.0   2249  2883  3717  4818  6949   (ratio 3.09)
+     * ```
+     *
+     * Late game is held within ~3% of the 2.6.1 baseline, exactly as intended: L4-L5
+     * were already strong (Plasma Wake was 15.5% of the reference 21:18 run). The L1
+     * gain is deliberately modest in raw damage — its real fix is that the trail is now
+     * continuous and lasts 3.6s instead of 1.8s — because the published L5/L1 band of
+     * 3.0-4.2 bounds how far L1 can rise while L5 stays at baseline.
+     */
+    damageNorm: [0.88, 0.92, 0.96, 1.02, 1.194] as readonly number[],
+  },
+  /**
+   * Orbital Lance two-zone strike (2.7.0).
+   *
+   * The identity — boss preference, motion-leading, delayed telegraph, one heavy
+   * impact — is unchanged. What changes is *coverage*: every strike now also lays down
+   * a wider shockwave ring. A target is damaged by exactly one zone, the core taking
+   * precedence, so a single enemy can never be double-counted and the single-boss
+   * benchmark scenario is unaffected by the ring.
+   */
+  orbital: {
+    /** Shockwave radius as a multiple of the authored core radius. */
+    shockwaveRadiusMul: 1.6,
+    /** Shockwave damage as a fraction of the central impact (design band 35-40%). */
+    shockwaveDamageMul: 0.375,
   },
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
@@ -321,7 +454,20 @@ export const SURVIVOR = {
     duration: 2.5,
     cooldown: 16,
     speedMul: 2.6,
-    damageTakenMul: 0.6,
+    /**
+     * Ship takes 20% of incoming damage (80% reduction), raised from 0.60 in 2.7.0.
+     *
+     * Ship form is a short, high-commitment offensive window whose fantasy is flying
+     * *through* danger. At 0.60 it was not survivable enough to do that: the reference
+     * 21:18 run ended in ship form to a 103-damage Mega Body Slam plus Bruiser contact.
+     * This is a survivability change, not a damage change — ship offence is unchanged
+     * apart from the explicit boss ram below.
+     *
+     * Ship is still not invulnerable, and Breach Shielding continues to apply on top for
+     * boss sources through the established mitigation order (form -> titan -> boss
+     * reduction -> shield -> integrity).
+     */
+    damageTakenMul: 0.2,
     wakeInterval: 0.14,
     wakeLife: 1.25,
     wakeRadius: 1.15,
@@ -342,6 +488,25 @@ export const SURVIVOR = {
     exhaustVisualScale: 1.85,
     /** Power scale caps thruster damage growth with permanent build. */
     powerScaleCap: 10.0,
+    /**
+     * Boss ram (2.7.0).
+     *
+     * Ship Body previously dealt exactly zero boss damage: flying through a boss —
+     * the single most committal thing ship form can do — was mechanically unrewarded.
+     * The ram pays that off with one heavy, well-telegraphed impact.
+     *
+     * Bounded three ways so it cannot become a boss-melting source:
+     *  1. `ramInternalCd` is per boss, so overlapping frames inside one body produce at
+     *     most one impact per interval no matter how many frames the overlap spans.
+     *  2. Damage rides the existing capped `thrusterPower` scale, not a new curve.
+     *  3. Ship form is 2.5s on a 16s cooldown, so contact time is inherently scarce.
+     *
+     * At the `powerScaleCap` of 10 a single ram applies 420 — a satisfying heavy number
+     * comparable to a strong Orbital Lance impact, not a boss deletion.
+     */
+    ramBossDamage: 42,
+    /** Per-boss internal cooldown between ram impacts (seconds). */
+    ramInternalCd: 0.75,
   },
   /** Per-hero ship dimensions for pickup/exhaust (world units). Substantially larger reach. */
   heroShips: {
@@ -589,11 +754,18 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Movement leaves a burning energy trail that punishes pursuit.',
     color: '#ff6f4d',
     levels: [
-      { level: 1, label: 'Plasma Wake I', damage: 54, cadence: 0.34, count: 1, radius: 1.15, life: 1.8 },
-      { level: 2, label: 'Plasma Wake II', damage: 66, cadence: 0.31, count: 1, radius: 1.22, life: 2.0 },
-      { level: 3, label: 'Hot Trail', damage: 78, cadence: 0.28, count: 1, radius: 1.3, life: 2.2 },
-      { level: 4, label: 'Fusion Footprint', damage: 90, cadence: 0.25, count: 1, radius: 1.4, life: 2.45 },
-      { level: 5, label: 'Twin Wake', damage: 99, cadence: 0.55, count: 2, radius: 1.5, life: 2.7 },
+      /*
+       * 2.7.0: `life` is the *trail lifetime*, roughly doubled at L1 and raised through
+       * the line. Segments are emitted by distance rather than by `cadence` (see
+       * SURVIVOR.plasmaTrail), so `cadence` now only bounds how often the emitter may
+       * add a piece; coverage comes from lifetime and speed. `radius` is the
+       * cross-track half-width basis, preserving the wide/thin identity.
+       */
+      { level: 1, label: 'Plasma Wake I', damage: 54, cadence: 0.34, count: 1, radius: 1.15, life: 3.6 },
+      { level: 2, label: 'Plasma Wake II', damage: 66, cadence: 0.31, count: 1, radius: 1.22, life: 3.8 },
+      { level: 3, label: 'Hot Trail', damage: 78, cadence: 0.28, count: 1, radius: 1.3, life: 4.0 },
+      { level: 4, label: 'Fusion Footprint', damage: 90, cadence: 0.25, count: 1, radius: 1.4, life: 4.2 },
+      { level: 5, label: 'Twin Wake', damage: 99, cadence: 0.55, count: 2, radius: 1.5, life: 4.5 },
     ],
   },
   pulsar: {
@@ -638,11 +810,15 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // Orbital grows through strike power, not cadence: its identity is a small number
       // of heavy, telegraphed impacts, and a slow weapon measured over a fixed window is
       // dominated by shot quantisation if growth is pushed through cadence instead.
-      { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 2.1, life: 0.85 },
-      { level: 2, label: 'Orbital Lance II', damage: 168, cadence: 4.0, count: 1, radius: 2.2, life: 0.8 },
-      { level: 3, label: 'Orbital Lance III', damage: 205, cadence: 3.8, count: 1, radius: 2.32, life: 0.78 },
-      { level: 4, label: 'Sustained Lance', damage: 250, cadence: 3.6, count: 1, radius: 2.45, life: 0.72 },
-      { level: 5, label: 'Judgment Array', damage: 290, cadence: 5.9, count: 2, radius: 2.6, life: 0.68 },
+      // 2.7.0 widens the core impact substantially. Orbital's 2.6.1 problem was never
+      // hit strength (304 max hit) — it was coverage: 2.6% of a 21:18 run because a
+      // 2.1-2.6 radius simply missed most of what was on screen. `radius` is the
+      // high-damage core; the wider shockwave is derived from it in SURVIVOR.orbital.
+      { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 3.2, life: 0.85 },
+      { level: 2, label: 'Orbital Lance II', damage: 168, cadence: 4.0, count: 1, radius: 3.45, life: 0.8 },
+      { level: 3, label: 'Orbital Lance III', damage: 205, cadence: 3.8, count: 1, radius: 3.7, life: 0.78 },
+      { level: 4, label: 'Sustained Lance', damage: 250, cadence: 3.6, count: 1, radius: 3.95, life: 0.72 },
+      { level: 5, label: 'Judgment Array', damage: 290, cadence: 5.9, count: 2, radius: 4.25, life: 0.68 },
     ],
   },
 
@@ -655,9 +831,12 @@ export type PassiveId =
   | 'regen'
   | 'weapon-haste'
   | 'area'
-  /** Mech cooldown reduction. Replaces the removed kill-charge passive 'mech-charge'. */
-  | 'mech-cycle'
-  | 'mech-duration'
+  /**
+   * Single Mech passive (2.7.0). Replaces the two separately-weak passives
+   * `mech-cycle` (Core Cycling) and `mech-duration` (Reactor Hold), neither of which
+   * was worth a card slot on its own.
+   */
+  | 'overdrive-systems'
   | 'breach-shielding';
 
 export interface PassiveDef {
@@ -720,18 +899,13 @@ export const PASSIVES: PassiveDef[] = [
     perLevel: 0.055,
   },
   {
-    id: 'mech-cycle',
-    name: 'Core Cycling',
-    description: 'Mech Overdrive comes back 3% sooner per level, up to 15% off its cooldown.',
+    id: 'overdrive-systems',
+    name: 'Overdrive Systems',
+    description:
+      'Mech Overdrive lasts longer, returns sooner, and moves faster. Cooldown is measured activation-to-activation and keeps counting down while Mech is active. At L5: 7.0s duration, 28.0s cooldown (exactly 25% scheduled uptime) and +15% Mech-only movement speed.',
     maxLevel: 5,
+    // Representative per-level step; the authored table below is authoritative.
     perLevel: 0.03,
-  },
-  {
-    id: 'mech-duration',
-    name: 'Reactor Hold',
-    description: 'Mech Overdrive lasts 5% longer per level, up to +25%.',
-    maxLevel: 5,
-    perLevel: 0.05,
   },
   {
     id: 'breach-shielding',
@@ -742,29 +916,71 @@ export const PASSIVES: PassiveDef[] = [
   },
 ];
 
-/** Hard-capped Mech cooldown reduction from Core Cycling. */
-export function mechCooldownReduction(level: number): number {
-  return Math.min(0.15, Math.max(0, level) * 0.03);
-}
-
-/** Hard-capped Mech duration bonus from Reactor Hold. */
-export function mechDurationBonus(level: number): number {
-  return Math.min(0.25, Math.max(0, level) * 0.05);
-}
-
 /** Hard-capped Thruster Boost movement bonus. */
 export function moveSpeedBonus(level: number): number {
   return Math.min(0.3, Math.max(0, level) * 0.06);
 }
 
 /**
- * Best achievable Mech uptime with both passives fully invested.
- * Duration / cooldown, both hard-capped — deliberately far from permanent.
+ * Overdrive Systems (2.7.0) — the single Mech passive.
+ *
+ * This is an **authored table**, not three independent formulas, because the three
+ * properties it moves are read together: the player is choosing a Mech uptime and a
+ * Mech mobility, and the card shows the exact resulting numbers. Level 0 is the
+ * uninvested baseline and must agree with `SURVIVOR.mech`.
+ *
+ * Level 5 is deliberately `7.0 / 28.0` — exactly 25% scheduled uptime, a round,
+ * explainable ceiling rather than an artefact of compounding percentages. The former
+ * pair (Core Cycling -3%/level and Reactor Hold +5%/level) reached only 7.5s of 25.5s
+ * and required *two* fully-invested passives to do it.
+ */
+export const OVERDRIVE_SYSTEMS = [
+  { level: 0, duration: 6.0, cooldown: 30.0, speedBonus: 0.0 },
+  { level: 1, duration: 6.2, cooldown: 29.6, speedBonus: 0.03 },
+  { level: 2, duration: 6.4, cooldown: 29.2, speedBonus: 0.06 },
+  { level: 3, duration: 6.6, cooldown: 28.8, speedBonus: 0.09 },
+  { level: 4, duration: 6.8, cooldown: 28.4, speedBonus: 0.12 },
+  { level: 5, duration: 7.0, cooldown: 28.0, speedBonus: 0.15 },
+] as const;
+
+/** Authored Overdrive Systems row, clamped to the hard-capped 0-5 range. */
+export function overdriveRow(level: number): (typeof OVERDRIVE_SYSTEMS)[number] {
+  const lv = Math.max(0, Math.min(OVERDRIVE_SYSTEMS.length - 1, Math.floor(level || 0)));
+  return OVERDRIVE_SYSTEMS[lv]!;
+}
+
+/** Mech active duration in seconds at the given Overdrive Systems level. */
+export function mechDurationAtLevel(level: number): number {
+  return overdriveRow(level).duration;
+}
+
+/** Mech activation-to-activation cooldown in seconds at the given level. */
+export function mechCooldownAtLevel(level: number): number {
+  return overdriveRow(level).cooldown;
+}
+
+/**
+ * Mech-only movement bonus.
+ *
+ * Applied **multiplicatively after** ordinary Thruster Boost, so a fully invested build
+ * reaches `1.30 x 1.15 = 1.495` — +49.5% against unupgraded astronaut speed while Mech
+ * is active. Ship speed is a separate multiplier and is unaffected.
+ */
+export function mechSpeedBonusAtLevel(level: number): number {
+  return overdriveRow(level).speedBonus;
+}
+
+/**
+ * Best achievable Mech uptime with Overdrive Systems fully invested.
+ * Duration / cooldown — exactly 0.25 at L5.
  */
 export function maxMechUptimeFraction(): number {
-  const dur = SURVIVOR.mech.duration * (1 + mechDurationBonus(5));
-  const cd = SURVIVOR.mech.cooldown * (1 - mechCooldownReduction(5));
-  return dur / cd;
+  return mechDurationAtLevel(5) / mechCooldownAtLevel(5);
+}
+
+/** Scheduled Mech uptime fraction at any Overdrive Systems level. */
+export function mechUptimeFractionAtLevel(level: number): number {
+  return mechDurationAtLevel(level) / mechCooldownAtLevel(level);
 }
 
 /** Integrity gained when taking Hull Plating to the given absolute level. */
@@ -1703,7 +1919,7 @@ export type ProtocolId =
   | 'gunship-flyby'
   | 'gravitic-recall'
   | 'carrier-wing'
-  | 'starbreaker-array'
+  | 'cleanup-crew'
   | 'singularity-engine';
 
 export interface ProtocolDef {
@@ -1743,9 +1959,9 @@ export const MEGA_PROTOCOLS: ProtocolDef[] = [
     duration: 5 * 60,
   },
   {
-    id: 'starbreaker-array',
-    title: 'Starbreaker Array',
-    body: 'Orbital satellites fire colossal piercing beams for five minutes.',
+    id: 'cleanup-crew',
+    title: 'Cleanup Crew',
+    body: 'The rest of the crew arrive in their ships and deploy as allied Mechs for five minutes.',
     duration: 5 * 60,
   },
   {
@@ -1820,6 +2036,14 @@ export type SurvivorFixture =
   | 'survivor-gunship'
   | 'survivor-identity'
   | 'survivor-rotary'
+  | 'survivor-plasma-l1'
+  | 'survivor-plasma-ship'
+  | 'survivor-ship-ram'
+  | 'survivor-overdrive'
+  | 'survivor-cleanup-arrival'
+  | 'survivor-cleanup-combat'
+  | 'survivor-cleanup-departure'
+  | 'survivor-telemetry'
   | 'survivor-stress'
   | null;
 
@@ -1844,5 +2068,13 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-gunship',
   'survivor-identity',
   'survivor-rotary',
+  'survivor-plasma-l1',
+  'survivor-plasma-ship',
+  'survivor-ship-ram',
+  'survivor-overdrive',
+  'survivor-cleanup-arrival',
+  'survivor-cleanup-combat',
+  'survivor-cleanup-departure',
+  'survivor-telemetry',
   'survivor-stress',
 ];
