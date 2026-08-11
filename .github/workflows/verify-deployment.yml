@@ -83,12 +83,21 @@ jobs:
             echo "FAIL: deployment serves raw Vite source (/src/main.ts), not a production build" >&2
             exit 1
           fi
-          if ! echo "${ASSETS}" | grep -qE '\.js | Deployed bytes | Reference bytes | SHA-256 match |" >> "$GITHUB_STEP_SUMMARY"
+          if ! printf '%s\\n' "${ASSETS}" | grep -qE "[.]js"; then
+            echo "FAIL: deployed HTML references no built JavaScript asset" >&2
+            exit 1
+          fi
+          if ! printf '%s\\n' "${ASSETS}" | grep -qE "[.]css"; then
+            echo "FAIL: deployed HTML references no built CSS asset" >&2
+            exit 1
+          fi
+
+          echo "| Asset | Deployed bytes | Reference bytes | SHA-256 match |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | ---: | ---: | --- |" >> "$GITHUB_STEP_SUMMARY"
 
           STATUS=0
           for a in ${ASSETS}; do
-            curl -sS -o "deployed/$(basename "$a")" "${URL}${a}"
+            curl --fail -sS -o "deployed/$(basename "$a")" "${URL}${a}"
             D="deployed/$(basename "$a")"
             R="dist${a}"
             DB="$(stat -c%s "$D")"; DH="$(sha256sum "$D" | cut -d' ' -f1)"
