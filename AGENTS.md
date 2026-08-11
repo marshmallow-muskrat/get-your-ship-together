@@ -75,13 +75,24 @@ npm run typecheck
 npm run build
 ```
 
-Two CPU-bound benchmark tests can exceed vitest's 5000ms default on slow hardware
-and fail as timeouts rather than assertions (`per-level effective gains`,
-`pressure director > never stacks surges`). With headroom both suites pass in
-full. CI runs `npm test -- --testTimeout=120000`. If you see exactly those two
-failing on time, raise the timeout and re-run before treating it as a
-regression — and never "fix" it by changing a balance value or an acceptance
-band.
+A few CPU-bound benchmark tests drive hundreds of simulated seconds of the real
+simulation and can exceed vitest's 5000ms default, failing as timeouts rather
+than assertions. Each carries an **explicit per-test budget at its declaration
+site**, so the suite runs at the default budget everywhere else and a genuine
+slowdown anywhere else still shows up:
+
+- `weapon combat benchmark > per-level effective gains`
+- `pressure director > never stacks surges`
+- `pressure director > uses a 60-75 second cadence` (added in endless-2.8.0)
+- `renderer resource stability > effect, attack and rail pools`
+
+CI does **not** pass a blanket `--testTimeout`. If one of these fails on time,
+first measure it against the previous commit before assuming a regression: a
+test sitting near the default can be pushed over by suite growth and worker
+contention alone, which is what happened to the cadence test. If the simulation
+genuinely did slow down, fix the slowdown. Never "fix" a timeout by changing a
+balance value or an acceptance band, and do not widen a budget that is already
+explicit.
 
 Browser QA is scriptable and does not require a human:
 

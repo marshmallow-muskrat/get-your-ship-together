@@ -564,13 +564,21 @@ describe('§3 pressure director', () => {
     return { state, seen };
   }
 
+  // Proving determinism means running the director twice, so this drives 260 simulated
+  // seconds of the real simulation and measures ~3.8s alone — thin against vitest's 5s
+  // default, and it went over on the CI runner in endless-2.8.0 once the suite grew
+  // enough to add worker contention. Measured before and after that release's simulation
+  // changes at 3763ms and 3813ms, so the budget is contention headroom and not cover for
+  // a slowdown. If this ever times out at 60s the director genuinely regressed; do not
+  // widen it further, and never resolve it by touching a balance value or an
+  // acceptance band.
   it('uses a 60-75 second cadence with deterministic variation', () => {
     expect(SURVIVOR.surgeIntervalMin).toBe(60);
     expect(SURVIVOR.surgeIntervalMax).toBe(75);
     const a = runDirector(31, 130).state.surge.nextSurgeAt;
     const b = runDirector(31, 130).state.surge.nextSurgeAt;
     expect(a).toBe(b); // same seed, same schedule
-  });
+  }, 60_000);
 
   it('telegraphs for 3-4 seconds, not 1.1', () => {
     expect(SURVIVOR.surgeTelegraph).toBeGreaterThanOrEqual(3);

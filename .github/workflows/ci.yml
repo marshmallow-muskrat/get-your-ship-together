@@ -39,7 +39,7 @@ jobs:
       - name: Lint (zero warnings)
         run: npm run lint
 
-      # Two CPU-bound benchmark tests carry explicit per-test timeouts at their
+      # The CPU-bound benchmark tests carry explicit per-test timeouts at their
       # declaration sites, so the suite runs at vitest's default budget here.
       # A blanket flag would have hidden genuine slowdowns everywhere else.
       - name: Test suite
