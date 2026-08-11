@@ -3761,6 +3761,11 @@ function startCleanupCrew(state: SurvivorState): void {
       },
       shipX,
       shipZ,
+      engageX: 0,
+      engageZ: 0,
+      engageValid: false,
+      // Staggered so three allies do not re-evaluate on the same frame forever.
+      retarget: i * 0.17,
       active: true,
     };
     return ally;
@@ -3779,6 +3784,101 @@ function allyFormationPoint(state: SurvivorState, a: SurvivorAlly): { x: number;
     x: state.player.x + Math.cos(ang) * cfg.formationRadius,
     z: state.player.z + Math.sin(ang) * cfg.formationRadius,
   };
+}
+
+/**
+ * Pick this ally's ground (endless-2.8.0).
+ *
+ * An ally scores every living enemy inside its leash by the threat density around it,
+ * takes the best cluster, and moves to a standoff position at *its own weapon's*
+ * preferred range on the near side of that cluster. Rail Lance holds long, drones close.
+ *
+ * Three properties this has to keep:
+ *
+ * - **Bounded.** The scan is a single pass over the enemy pool with no allocation and no
+ *   nested search; density is sampled from the broad-phase the simulation already
+ *   rebuilt this frame.
+ * - **Leashed.** The chosen point is clamped into `leash` of the player, so independence
+ *   never becomes abandonment — the squad still fights the player's fight.
+ * - **Deterministic.** No RNG. Scoring ties break on enemy index, which is stable for a
+ *   given seed, so a replay is identical.
+ */
+function chooseAllyEngagement(state: SurvivorState, a: SurvivorAlly): void {
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+  const p = state.player;
+  const leash2 = cfg.leash * cfg.leash;
+  const cluster2 = cfg.clusterRadius * cfg.clusterRadius;
+
+  let bestScore = 0;
+  let bestX = 0;
+  let bestZ = 0;
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    // Only ground the ally can legitimately hold: measured from the player, not the ally,
+    // so a squad member cannot be dragged outward by chasing a target it briefly neared.
+    const pdx = e.x - p.x;
+    const pdz = e.z - p.z;
+    if (pdx * pdx + pdz * pdz > leash2) continue;
+
+    let score = enemyThreatWeight(e, cfg);
+    for (const o of state.enemies) {
+      if (!o.alive || o === e) continue;
+      const dx = o.x - e.x;
+      const dz = o.z - e.z;
+      if (dx * dx + dz * dz <= cluster2) score += enemyThreatWeight(o, cfg);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestX = e.x;
+      bestZ = e.z;
+    }
+  }
+
+  if (bestScore <= 0) {
+    a.engageValid = false;
+    return;
+  }
+
+  /*
+   * Stand off on the *player's* side of the cluster, not on whichever side the ally
+   * happened to be on.
+   *
+   * The first draft pushed outward from the ally's own bearing, which measured worse than
+   * the formation AI it replaced (mortal-mode direct damage 31348 against 35380). The
+   * horde converges on the player, so the densest cluster is usually between the two —
+   * and standing off along the ally's bearing put it on the far side, drifting away from
+   * everything else it could have been shooting. Interposing keeps the squad between the
+   * player and the threat, which is both what a squad is for and where the targets are.
+   */
+  const standoff = cfg.standoff[a.slot.weaponId] ?? cfg.standoffDefault;
+  const px = p.x - bestX;
+  const pz = p.z - bestZ;
+  const plen = Math.hypot(px, pz) || 1;
+  let ex = bestX + (px / plen) * standoff;
+  let ez = bestZ + (pz / plen) * standoff;
+
+  // Clamp back inside the leash, then inside the arena.
+  const ldx = ex - p.x;
+  const ldz = ez - p.z;
+  const ld = Math.hypot(ldx, ldz);
+  if (ld > cfg.leash) {
+    ex = p.x + (ldx / ld) * cfg.leash;
+    ez = p.z + (ldz / ld) * cfg.leash;
+  }
+  const c = clampArena(ex, ez, 1.2);
+  a.engageX = c.x;
+  a.engageZ = c.z;
+  a.engageValid = true;
+}
+
+/** Threat weight used by ally cluster scoring. */
+function enemyThreatWeight(
+  e: SurvivorEnemy,
+  cfg: { clusterEliteWeight: number; clusterMinibossWeight: number },
+): number {
+  if (e.isMiniboss) return cfg.clusterMinibossWeight;
+  if (e.isElite) return cfg.clusterEliteWeight;
+  return 1;
 }
 
 /** Tear the squad down completely. Safe to call repeatedly. */
@@ -3852,8 +3952,13 @@ function updateCleanupCrew(state: SurvivorState, dt: number): void {
       continue;
     }
 
-    // Active: hold a readable loose formation and fire the signature weapon.
-    const target = allyFormationPoint(state, a);
+    // Active: choose ground independently, then fire the signature weapon.
+    a.retarget = Math.max(0, a.retarget - dt);
+    if (a.retarget <= 0) {
+      chooseAllyEngagement(state, a);
+      a.retarget = SURVIVOR.megaProtocol.cleanup.retargetInterval;
+    }
+    const target = a.engageValid ? { x: a.engageX, z: a.engageZ } : allyFormationPoint(state, a);
     const dx = target.x - a.x;
     const dz = target.z - a.z;
     const d = Math.hypot(dx, dz);

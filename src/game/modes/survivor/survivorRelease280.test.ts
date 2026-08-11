@@ -42,6 +42,7 @@ import {
 import {
   applyBossBodyContact,
   forceBossIntoPattern,
+  forceStartProtocol,
   spawnGravityWellForTest,
   stepSurvivor,
   surroundPlayer,
@@ -283,6 +284,105 @@ describe('§5 Upgrade Numbers setting', () => {
     expect(hudSource).toMatch(/this\.upgradeNumbers \? '#n' : ''/);
     expect(hudSource).toMatch(/setUpgradeNumbers\(on: boolean\)/);
   });
+});
+
+describe('§6 Cleanup Crew allies fight independently', () => {
+  const cfg = SURVIVOR.megaProtocol.cleanup;
+
+  /** A live squad, past its arrival choreography, with a horde on the field. */
+  function squad(seed: number, enemies = 26): SurvivorState {
+    const state = createSurvivorState('bee', null, seed);
+    state.phase = 'playing';
+    state.time = 600;
+    state.player.invuln = 1e9;
+    forceStartProtocol(state, 'cleanup-crew');
+    surroundPlayer(state, enemies, 9);
+    // Run past arrival stagger + choreography so every ally is fighting.
+    for (let i = 0; i < Math.ceil((cfg.arriveDuration + cfg.arriveStagger * 3 + 1) / DT); i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    }
+    return state;
+  }
+
+  it('never lets an ally stray beyond its leash from the player', () => {
+    const state = squad(2860);
+    for (let i = 0; i < 600; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      for (const a of state.allies) {
+        if (!a.active || a.phase !== 'active') continue;
+        const d = Math.hypot(a.x - state.player.x, a.z - state.player.z);
+        // Leash plus a small movement overshoot; independence is not abandonment.
+        expect(d, `ally ${a.heroId} at ${d.toFixed(1)}`).toBeLessThan(cfg.leash + 4);
+      }
+    }
+  }, 60_000);
+
+  it('chooses ground rather than holding a fixed orbit', () => {
+    /*
+     * The endless-2.7.0 behaviour was a fixed bearing at a constant radius with a sine
+     * drift, so every ally sat at essentially the same distance forever. Independent
+     * engagement means that distance varies with where the fight actually is.
+     */
+    const state = squad(2861);
+    const spread = new Set<string>();
+    let engaged = 0;
+    let samples = 0;
+    for (let i = 0; i < 420; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      for (const a of state.allies) {
+        if (!a.active || a.phase !== 'active') continue;
+        samples += 1;
+        if (a.engageValid) engaged += 1;
+        const d = Math.hypot(a.x - state.player.x, a.z - state.player.z);
+        spread.add(d.toFixed(0));
+      }
+    }
+    // Every sampled frame found ground worth holding, rather than idling on station.
+    expect(samples).toBeGreaterThan(0);
+    expect(engaged).toBe(samples);
+    /*
+     * The old behaviour parked every ally at `formationRadius` regardless of weapon or
+     * battlefield, so the observed set would be the single value {7}. Independent
+     * engagement holds weapon-dependent standoff instead — measured here as {3, 6},
+     * Rail Lance long and drones close.
+     */
+    expect(spread.size).toBeGreaterThanOrEqual(2);
+    expect(spread.has(cfg.formationRadius.toFixed(0))).toBe(false);
+  }, 60_000);
+
+  it('falls back to the formation slot when nothing is in reach', () => {
+    const state = squad(2862, 0);
+    for (const e of state.enemies) e.alive = false;
+    for (let i = 0; i < 120; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    const active = state.allies.filter((a) => a.active && a.phase === 'active');
+    expect(active.length).toBeGreaterThan(0);
+    for (const a of active) {
+      // No target selected, and still holding station near the player rather than adrift.
+      const d = Math.hypot(a.x - state.player.x, a.z - state.player.z);
+      expect(d).toBeLessThan(cfg.leash + 4);
+    }
+  }, 60_000);
+
+  it('weights elites and minibosses above fodder when choosing a cluster', () => {
+    expect(cfg.clusterEliteWeight).toBeGreaterThan(1);
+    expect(cfg.clusterMinibossWeight).toBeGreaterThan(cfg.clusterEliteWeight);
+  });
+
+  it('commits to a choice instead of re-deciding every frame', () => {
+    expect(cfg.retargetInterval).toBeGreaterThan(0.25);
+  });
+
+  it('replays identically for the same seed', () => {
+    const a = squad(2863);
+    const b = squad(2863);
+    for (let i = 0; i < 240; i += 1) {
+      stepSurvivor(a, EMPTY_SURVIVOR_INPUT, DT);
+      stepSurvivor(b, EMPTY_SURVIVOR_INPUT, DT);
+    }
+    expect(a.allies.map((x) => `${x.x.toFixed(6)},${x.z.toFixed(6)}`)).toEqual(
+      b.allies.map((x) => `${x.x.toFixed(6)},${x.z.toFixed(6)}`),
+    );
+  }, 60_000);
 });
 
 // ------------------------------------------------------------------ §3 boss fairness

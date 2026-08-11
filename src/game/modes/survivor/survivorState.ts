@@ -219,6 +219,17 @@ export interface SurvivorAlly {
   /** Transport ship origin/exit point for arrival and departure presentation. */
   shipX: number;
   shipZ: number;
+  /**
+   * Independent engagement bookkeeping (endless-2.8.0).
+   *
+   * `engageX/Z` is the ground this ally has chosen to hold. `retarget` counts down to
+   * the next re-evaluation, which is what stops an ally from re-deciding every frame and
+   * dithering between two equally good clusters.
+   */
+  engageX: number;
+  engageZ: number;
+  engageValid: boolean;
+  retarget: number;
   active: boolean;
 }
 

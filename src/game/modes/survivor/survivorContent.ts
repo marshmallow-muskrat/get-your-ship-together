@@ -383,10 +383,41 @@ export const SURVIVOR = {
        * landing flash.
        */
       shipEntryDistance: 15,
-      /** Loose formation radius around the player. */
+      /** Loose formation radius around the player; the fallback anchor, not the plan. */
       formationRadius: 7.2,
-      /** How quickly an ally closes on its formation slot. */
+      /** How quickly an ally closes on its chosen position. */
       followSpeed: 9.4,
+      /**
+       * Independent engagement (endless-2.8.0).
+       *
+       * Allies used to orbit a fixed bearing around the player with a sine drift, which
+       * made three squadmates read as a rotating decoration: they fired at whatever was
+       * nearest, never chose ground, and never reacted to where the fight actually was.
+       *
+       * Each ally now picks its own target of opportunity — the densest cluster it can
+       * reach — and takes a standoff position at its own weapon's preferred range from
+       * it. `leash` is what keeps that independence from becoming abandonment: an ally
+       * may not stray further than this from the player, so the squad still fights the
+       * player's fight. With no target in reach it falls back to its formation slot, so
+       * it never looks lost.
+       */
+      leash: 13.5,
+      /** Radius the cluster scan scores threat density within. */
+      clusterRadius: 5.0,
+      /** Elites and minibosses are worth pursuing more than fodder. */
+      clusterEliteWeight: 4,
+      clusterMinibossWeight: 9,
+      /** Preferred standoff distance from the chosen target, per signature weapon. */
+      standoff: {
+        rail: 7.5,
+        microdrone: 4.5,
+        bioplasma: 5.0,
+        rocket: 6.5,
+      } as Record<string, number>,
+      /** Default standoff when a signature is not listed above. */
+      standoffDefault: 5.5,
+      /** Re-target no more often than this, so allies commit instead of dithering. */
+      retargetInterval: 0.85,
       /** Authored ally weapon level. Never the player's own level. */
       weaponLevel: 5,
       /**

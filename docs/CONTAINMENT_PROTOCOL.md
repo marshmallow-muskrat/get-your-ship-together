@@ -332,6 +332,52 @@ Mega-Boss death leaves a non-expiring cache with exactly three exclusive choices
 
 Titan Armaments occupy one dedicated, non-upgradable slot and expose their remaining time in Build.
 
+### Cleanup Crew independent engagement (endless-2.8.0)
+
+Allies used to orbit a fixed bearing around the player at a constant radius with a sine drift.
+Three squadmates read as rotating decoration: they fired at whatever was nearest, never chose
+ground, and never reacted to where the fight actually was.
+
+Each ally now picks its own target of opportunity — the densest threat cluster within its leash,
+weighted so elites (4x) and minibosses (9x) are worth pursuing over fodder — and takes a standoff
+position at *its own weapon's* preferred range.
+
+| Signature | Standoff |
+|---|---:|
+| Rail Lance | 7.5 |
+| Rocket Barrage | 6.5 |
+| Bio-Plasma Glob | 5.0 |
+| Drone Formation | 4.5 |
+
+Three properties hold this together. The scan is **bounded** — one pass over the enemy pool, no
+allocation. The chosen point is **leashed** to 13.5 units from the player, so independence never
+becomes abandonment; with nothing in reach the ally falls back to its formation slot rather than
+looking lost. And it is **deterministic** — no RNG, ties break on stable enemy order, so a seed
+replays identically. Re-targeting is rate-limited to 0.85s so allies commit instead of dithering.
+
+#### Standoff is measured toward the player, not away
+
+The first implementation pushed the standoff point outward along the ally's own bearing from the
+cluster, and measured *worse* than the formation AI it replaced — 31,348 mortal-mode direct damage
+against 35,380. The horde converges on the player, so the densest cluster usually sits between the
+two; standing off along the ally's bearing put it on the far side, drifting away from everything
+else it could have shot. Interposing between player and cluster fixed it, which is also what a
+squad is actually for.
+
+12-seed Titan comparison, formation AI → independent AI:
+
+| Mode | Metric | Formation | Independent |
+|---|---|---:|---:|
+| sustained | direct damage | 263,876 | 268,524 |
+| sustained | boss damage | 13,621 | 14,673 |
+| sustained | peak living | 104.6 | 105.6 |
+| mortal | direct damage | 35,380 | 34,358 |
+| mortal | protocol kills | 158 | 151 |
+
+Total player value is at parity — better sustained throughput and boss pressure, marginally lower
+mortal-mode output. The phase's goal was behaviour, and the behaviour changed without costing the
+protocol its standing against Carrier Wing and Singularity Engine.
+
 ### Cleanup Crew (endless-2.7.0)
 
 Summons the three heroes the player is **not** piloting. They arrive in their own ships, deploy as
