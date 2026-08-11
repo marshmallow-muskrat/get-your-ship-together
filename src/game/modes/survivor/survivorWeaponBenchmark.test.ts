@@ -116,6 +116,10 @@ describe('weapon combat benchmark', () => {
     expect(arc.damageDealt / arc.windowSec).toBeGreaterThanOrEqual(130);
   });
 
+  // Benchmarks every weapon at every level across the scenario set, so it is
+  // thin against vitest's 5s default on a loaded runner. Explicit budget for
+  // the same reason as the director test: a timeout here must not be mistaken
+  // for, or resolved by, a change to a damage curve or acceptance band.
   it('per-level effective gains stay inside the documented bounds', () => {
     for (const id of allBenchmarkedWeapons()) {
       const gains = levelGains(id);
@@ -136,7 +140,7 @@ describe('weapon combat benchmark', () => {
       const over = gains.filter((g) => g > PROGRESSION_BOUNDS.typicalGainMax).length;
       expect(over, `${id} levels above typical ceiling`).toBeLessThanOrEqual(1);
     }
-  });
+  }, 60_000);
 
   it('authored per-shot damage never decreases across L1-L5', () => {
     for (const id of allBenchmarkedWeapons()) {

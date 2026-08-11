@@ -613,6 +613,11 @@ describe('§3 pressure director', () => {
     expect(seen[idx + 3]).toBe('normal');
   });
 
+  // Drives 300+ simulated seconds of the real director, so it runs ~4.3s alone
+  // and longer under full-suite worker contention - thin against vitest's 5s
+  // default. The explicit budget keeps that from reading as a balance
+  // regression. If this ever times out at 60s, the director genuinely slowed
+  // down; do not widen it further, and do not touch a balance value to fix it.
   it('never stacks surges', () => {
     const state = quietRun(33, 300);
     state.nextBossTime = 1e9;
@@ -634,7 +639,7 @@ describe('§3 pressure director', () => {
       prevKind = state.surge.kind;
     }
     expect(restarts).toBe(0);
-  });
+  }, 60_000);
 
   it('does not begin an ordinary surge while a boss is alive', () => {
     const state = quietRun(34, 118);

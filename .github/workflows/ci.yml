@@ -39,13 +39,11 @@ jobs:
       - name: Lint (zero warnings)
         run: npm run lint
 
-      # The survivor/weapon benchmark suites are CPU-bound and can legitimately
-      # exceed vitest's 5000ms default on slower hardware, producing timeout
-      # failures that are infrastructure noise rather than balance regressions.
-      # This raises only the harness timeout. No test logic, acceptance band, or
-      # balance value is modified. Remove this flag to reproduce default timing.
+      # Two CPU-bound benchmark tests carry explicit per-test timeouts at their
+      # declaration sites, so the suite runs at vitest's default budget here.
+      # A blanket flag would have hidden genuine slowdowns everywhere else.
       - name: Test suite
-        run: npm test -- --testTimeout=120000
+        run: npm test
 
       - name: Production build
         run: npm run build
