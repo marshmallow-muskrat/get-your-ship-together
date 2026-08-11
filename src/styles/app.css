@@ -180,7 +180,15 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 0.6rem;
-  transform: translateY(1.45rem);
+  /*
+   * A fixed cosmetic nudge into the frame's lower bezel, deliberately in px.
+   *
+   * Since endless-2.8.0 `--ui-scale` drives the root font size, so a rem offset here
+   * would grow with the scale and push the bay past the bottom edge — browser QA caught
+   * exactly that at laptop-1024 @1.5x. The bay's own contents scale; this nudge is
+   * framing, not content, and must not compound with them.
+   */
+  transform: translateY(18px);
 }
 
 .bay-selector {
@@ -657,7 +665,7 @@ button {
   }
 
   .lower-hud {
-    transform: translateY(0.75rem);
+    transform: translateY(9px);
   }
 
   .corner-actions {
@@ -1038,6 +1046,23 @@ button {
 :root {
   --ui-scale: 1;
 }
+/*
+ * UI scale reflows (endless-2.8.0).
+ *
+ * Scaling used to be `transform: scale(var(--ui-scale))` on each HUD panel. A transform
+ * is a paint-time operation: it resizes pixels without re-running layout, so at 1.5x
+ * nothing rewrapped, nothing re-flowed, and panels simply grew past the viewport edge
+ * along whatever `transform-origin` they happened to declare. Bottom-anchored panels
+ * grew upward off the top; the top bar grew downward into the play area.
+ *
+ * Driving the root font size instead makes `--ui-scale` a *layout* input. Every rem in
+ * the HUD is recomputed, so text rewraps, flex and grid containers redistribute, and
+ * `min()`/`clamp()` caps against `vw`/`vh` keep panels inside the viewport at every
+ * scale — which is exactly what a transform could never do.
+ */
+html {
+  font-size: calc(100% * var(--ui-scale));
+}
 .survivor-hud {
   position: fixed;
   inset: 0;
@@ -1061,8 +1086,6 @@ button {
   gap: 0.8rem;
   padding: 0.7rem 1.1rem 0;
   align-items: start;
-  transform: scale(var(--ui-scale));
-  transform-origin: top center;
 }
 .survivor-hud .sv-identity {
   transform-origin: top left;
@@ -1133,8 +1156,7 @@ button {
   position: absolute;
   left: 50%;
   bottom: 0.85rem;
-  transform: translateX(-50%) scale(var(--ui-scale));
-  transform-origin: bottom center;
+  transform: translateX(-50%);
   width: min(640px, 92vw);
   display: grid;
   grid-template-columns: 1fr;
@@ -1281,8 +1303,7 @@ button {
   border-radius: 0.5rem;
   background: rgba(6, 12, 24, 0.78);
   border: 1px solid rgba(140, 180, 255, 0.16);
-  transform: scale(var(--ui-scale));
-  transform-origin: bottom right;
+
   /* Never clip build entries silently — scroll inside the panel. */
 }
 .survivor-hud .sv-build-scroll {
@@ -1318,8 +1339,7 @@ button {
   }
 }
 .survivor-hud .sv-modal {
-  transform: scale(var(--ui-scale));
-  transform-origin: center center;
+
 }
 /* Upgrade selection: +50% vs prior desktop (260→390, 920→1380, fonts/padding×1.5) */
 .survivor-hud #sv-levelup.sv-levelup-open {
@@ -1490,8 +1510,7 @@ button {
   position: absolute;
   left: 50%;
   top: 18%;
-  transform: translateX(-50%) scale(var(--ui-scale));
-  transform-origin: top center;
+  transform: translateX(-50%);
   font-family: 'Audiowide', sans-serif;
   font-size: clamp(1.6rem, 3.2vw, 2.6rem);
   letter-spacing: 0.18em;
@@ -1511,19 +1530,19 @@ button {
 @keyframes sv-mech-toast {
   0% {
     opacity: 0;
-    transform: translateX(-50%) scale(calc(var(--ui-scale) * 0.75)) translateY(16px);
+    transform: translateX(-50%) scale(0.75) translateY(16px);
   }
   18% {
     opacity: 1;
-    transform: translateX(-50%) scale(calc(var(--ui-scale) * 1.12)) translateY(0);
+    transform: translateX(-50%) scale(1.12) translateY(0);
   }
   70% {
     opacity: 1;
-    transform: translateX(-50%) scale(var(--ui-scale)) translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
   100% {
     opacity: 0;
-    transform: translateX(-50%) scale(var(--ui-scale)) translateY(-18px);
+    transform: translateX(-50%) translateY(-18px);
   }
 }
 .survivor-hud .sv-build-oc {
@@ -1876,8 +1895,7 @@ button {
   position: absolute;
   left: 50%;
   top: 16%;
-  transform: translateX(-50%) scale(var(--ui-scale));
-  transform-origin: top center;
+  transform: translateX(-50%);
   font-family: 'Audiowide', sans-serif;
   font-size: clamp(0.95rem, 1.6vw, 1.35rem);
   letter-spacing: 0.14em;
@@ -1967,8 +1985,9 @@ button {
  * match the deck at any UI scale and produced the overlap.
  *
  * Because it is absolutely positioned it is out of the deck's grid flow and can never
- * resize or reflow the command HUD, and because it is a descendant it inherits the
- * deck's `scale(var(--ui-scale))` rather than applying a second, independent scale.
+ * resize or reflow the command HUD. It needs no scale of its own: since endless-2.8.0
+ * `--ui-scale` drives the root font size, so every rem here is already scaled by the
+ * same layout pass that sized the deck.
  */
 .survivor-hud .sv-aegis-float {
   position: absolute;

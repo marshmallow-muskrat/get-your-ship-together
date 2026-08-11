@@ -5,6 +5,8 @@
  * production simulation rather than against a reimplementation of it.
  */
 import { describe, expect, it } from 'vitest';
+import cssSource from '../../../styles/app.css?raw';
+import { UI_SCALE_MAX, UI_SCALE_MIN, clampUiScale } from './survivorKeybinds';
 import {
   BOSS_DAMAGE_BASE,
   BOSS_REFERENCE_RANGED_DAMAGE,
@@ -139,6 +141,53 @@ describe('§2 ordinary repair supply is earned by killing', () => {
     expect(k.weightElite).toBeGreaterThan(k.weightOrdinary);
     expect(k.weightMiniboss).toBeGreaterThan(k.weightElite);
     expect(k.model).toBe('accumulator');
+  });
+});
+
+// --------------------------------------------------------------- §5 UI scale reflows
+
+describe('§5 UI scale is a layout input, not a transform', () => {
+  /*
+   * The defect: scaling was `transform: scale(var(--ui-scale))` on each HUD panel. A
+   * transform is a paint-time operation — it resizes pixels without re-running layout,
+   * so at 1.5x nothing rewrapped and panels simply grew past the viewport edge along
+   * whatever `transform-origin` they declared.
+   *
+   * Driving the root font size makes the scale a layout input instead: rem values are
+   * recomputed, text rewraps, and `min()`/`clamp()` caps against `vw`/`vh` keep panels
+   * inside the viewport. That cannot be asserted without a real layout engine, so pixel
+   * verification lives in the browser QA sweep; what is checkable here is that the
+   * mechanism is the font-size basis and that no transform reintroduces the old shape.
+   */
+  it('scales the root font size', () => {
+    const at = cssSource.indexOf('html {');
+    expect(at, 'missing html font-size rule').toBeGreaterThan(-1);
+    const body = cssSource.slice(at, cssSource.indexOf('}', at));
+    expect(body).toMatch(/font-size:\s*calc\(100%\s*\*\s*var\(--ui-scale\)\)/);
+  });
+
+  it('never scales a HUD panel by transform', () => {
+    // Declarations only — the section above describes the defect in prose, and a naive
+    // scan of the raw stylesheet matches that description rather than any rule.
+    const declarations = cssSource.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(declarations).not.toMatch(/transform:[^;]*scale\(\s*var\(--ui-scale\)/);
+    expect(declarations).not.toMatch(/transform:[^;]*scale\(\s*calc\(\s*var\(--ui-scale\)/);
+  });
+
+  it('keeps the scale range at 0.75-1.5', () => {
+    expect(UI_SCALE_MIN).toBe(0.75);
+    expect(UI_SCALE_MAX).toBe(1.5);
+    expect(clampUiScale(0.1)).toBe(UI_SCALE_MIN);
+    expect(clampUiScale(9)).toBe(UI_SCALE_MAX);
+  });
+
+  it('does not express framing offsets in units that compound with the scale', () => {
+    // Browser QA caught `.lower-hud`'s rem nudge pushing the bay off-screen at 1.5x.
+    const at = cssSource.indexOf('.lower-hud {');
+    expect(at).toBeGreaterThan(-1);
+    const body = cssSource.slice(at, cssSource.indexOf('}', at));
+    expect(body).toMatch(/transform:\s*translateY\(\d+px\)/);
+    expect(body).not.toMatch(/translateY\([\d.]+rem\)/);
   });
 });
 
