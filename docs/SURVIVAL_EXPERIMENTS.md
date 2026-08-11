@@ -18,6 +18,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.5.0-midgame-durability-candidate | competent | 96 | 10:25 | 6:08 | 23:08 | 29:16 | 3.1 | 15.4% | 26.4 |
 | endless-2.6.1-hero-parity-final | competent | 96 | 10:18 | 4:29 | 18:40 | 23:10 | 2.8 | 16.4% | 26.4 |
 | endless-2.7.0-cleanup-crew-release | competent | 96 | 10:42 | 5:29 | 22:36 | 28:05 | 3.7 | 16.9% | 24.7 |
+| endless-2.7.0-baseline-repro2 | competent | 96 | 10:37 | 5:14 | 21:57 | 27:11 | 3.5 | 16.9% | 25.7 |
 
 ## Per-hero medians
 
@@ -36,6 +37,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.5.0-midgame-durability-candidate (competent) | 16:14 | 6:25 | 6:51 | 7:15 |
 | endless-2.6.1-hero-parity-final (competent) | 8:54 | 7:51 | 9:32 | 10:50 |
 | endless-2.7.0-cleanup-crew-release (competent) | 11:12 | 10:41 | 12:49 | 9:28 |
+| endless-2.7.0-baseline-repro2 (competent) | 10:56 | 10:53 | 10:44 | 8:48 |
 
 ## Interpretation guardrail
 

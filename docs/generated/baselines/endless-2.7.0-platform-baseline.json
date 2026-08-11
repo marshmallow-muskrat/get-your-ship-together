@@ -1,5 +1,5 @@
 {
-  "label": "endless-2.7.0-baseline-repro2",
+  "label": "endless-2.7.0-platform-baseline",
   "balanceVersion": "endless-2.7.0",
   "policy": "competent",
   "runsPerHero": 24,

@@ -584,7 +584,10 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
     dropPickup(state, e.x, e.z + 0.4, 'xp', 55, { premium: true });
     // Miniboss repair is guaranteed and larger; it never touches the ordinary budget.
     dropPickup(state, e.x - 0.4, e.z, 'repair', SURVIVOR.repair.minibossValue, { premium: true });
+    state.repairStats.premiumSpawned += 1;
   }
+  // Every enemy death is a tick of the kill-driven budget, whether or not it drops.
+  state.repairStats.killsSinceDrop += 1;
   tryOrdinaryRepairDrop(state, e.x + 0.2, e.z - 0.2);
 }
 
@@ -631,9 +634,48 @@ function lateRepairIntervals(elapsed: number): { min: number; target: number; pi
 /** Place one ordinary repair orb and reset the economy timers. */
 function emitRepairOrb(state: SurvivorState, x: number, z: number): void {
   dropPickup(state, x, z, 'repair', SURVIVOR.repair.value);
+  const rs = state.repairStats;
+  // Close out the drought that this orb ends, before the counters reset.
+  rs.longestTimeDryStreak = Math.max(rs.longestTimeDryStreak, state.repairEconomy.sinceDrop);
+  rs.longestKillDryStreak = Math.max(rs.longestKillDryStreak, rs.killsSinceDrop);
+  rs.killsSinceDrop = 0;
+  rs.ordinarySpawned += 1;
   state.repairEconomy.sinceDrop = 0;
   state.repairEconomy.injuredFor = 0;
   state.repairEconomy.drops += 1;
+}
+
+/**
+ * Per-tick repair-economy sampling.
+ *
+ * Accumulates sums and counts rather than time series, so cost and memory stay
+ * constant no matter how long a run lasts.
+ */
+function sampleRepairStats(state: SurvivorState, dt: number): void {
+  const rs = state.repairStats;
+  const p = state.player;
+  const frac = p.maxHealth > 0 ? p.health / p.maxHealth : 1;
+  if (frac < 0.75) rs.timeBelow75 += dt;
+  if (frac < 0.5) rs.timeBelow50 += dt;
+  if (frac < 0.25) rs.timeBelow25 += dt;
+
+  let active = 0;
+  let nearest = Infinity;
+  for (const pk of state.pickups) {
+    if (!pk.active || pk.kind !== 'repair' || pk.premium) continue;
+    active += 1;
+    const dx = pk.x - p.x;
+    const dz = pk.z - p.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < nearest) nearest = d2;
+  }
+  rs.activeSamples += 1;
+  rs.activeSum += active;
+  if (active > rs.activePeak) rs.activePeak = active;
+  if (active > 0) {
+    rs.nearestSamples += 1;
+    rs.nearestSum += Math.sqrt(nearest);
+  }
 }
 
 /**
@@ -2243,6 +2285,7 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
     SURVIVOR.repair.bossValue + (b.isMega ? SURVIVOR.repair.megaBonus : 0),
     { premium: true },
   );
+  state.repairStats.premiumSpawned += 1;
   dropPickup(state, b.x - 0.5, b.z, 'xp', 70, { premium: true });
   state.telemetry.bossKills.push({
     index: b.index,
@@ -3011,6 +3054,10 @@ function updatePickups(state: SurvivorState, dt: number): void {
       if (pk.life <= 0) {
         pk.active = false;
         pk.magnetized = false;
+        state.repairStats.expired += 1;
+        // An orb timing out on a full bar is a designed outcome, not a miss:
+        // the player was meant to be able to bank it and chose not to.
+        if (p.health >= p.maxHealth - 0.01) state.repairStats.expiredAtFullHealth += 1;
         pushEffect(state, 'pulse', pk.x, pk.z, 0.25, '#ff88aa', 0.7);
         continue;
       }
@@ -3072,6 +3119,15 @@ function updatePickups(state: SurvivorState, dt: number): void {
         pk.active = false;
         pk.magnetized = false;
         state.telemetry.healedByOrbs += restored;
+        // Delivered and overheal are tracked separately so a faucet cannot hide
+        // behind face value: `delivered + overheal` always equals orb potency.
+        const rs = state.repairStats;
+        rs.collected += 1;
+        rs.healingDelivered += restored;
+        rs.overheal += Math.max(0, potency - restored);
+        // Fixed seven-element band array; index 6 absorbs everything past 30min,
+        // so elapsed time can never introduce an unbounded key.
+        rs.healingByBand[Math.min(6, Math.floor(state.time / 300))] += restored;
         emitDamage(state, `heal:${pk.id}`, p.x, p.z + 1.1, restored, 'heal');
         pushEffect(state, 'heal', p.x, p.z, 0.45, '#ff66cc', 1.8);
         pushEffect(state, 'pulse', p.x, p.z, 0.35, '#e8f4ff', 1.5);
@@ -4295,6 +4351,7 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
     state.telemetry.healedByRegen += p.health - before;
   }
   updateRepairEconomy(state, dt);
+  sampleRepairStats(state, dt);
 
   // Ability edges
   if (input.dodgePressed) tryDodge(state, input.moveX, input.moveY);

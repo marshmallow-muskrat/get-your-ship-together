@@ -141,6 +141,14 @@ export function formatSurvivalHistory(results: SurvivalBenchmarkResult[]): strin
   L.push('## Interpretation guardrail');
   L.push('');
   L.push('- Candidate deltas are trustworthy only within the same policy and identical seed set.');
+  L.push('- **Snapshots are only comparable when generated on the same machine and Node build.**');
+  L.push('  The simulation is deterministic on a given platform — two 96-run benchmarks on one');
+  L.push('  machine reproduce 96/96 identically — but it is not bit-portable across platforms.');
+  L.push('  V8 transcendental results (sin/cos/exp/pow) are not guaranteed identical across');
+  L.push('  builds, and a sub-ulp difference cascades once it flips a decision threshold.');
+  L.push('  Re-running the 2.7.0 baseline on new hardware reproduced only 59 of 96 runs.');
+  L.push('  Always regenerate the baseline locally before A/B testing a candidate against it;');
+  L.push('  never diff a candidate against a snapshot inherited from another machine.');
   L.push('- A novice/competent/expert ordering that is not monotonic means those policies need');
   L.push('  further human calibration; it is not evidence that expert play is worse.');
   L.push('- Visual clarity, satisfaction, fairness and fun still require Test Center playtesting.');

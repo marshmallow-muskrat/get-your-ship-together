@@ -554,6 +554,53 @@ export interface SurvivorState {
     /** Ordinary repair orbs produced this run (telemetry / tests). */
     drops: number;
   };
+  /**
+   * Repair-economy measurement.
+   *
+   * Every field is a scalar or a fixed-length array, so the block is bounded
+   * regardless of run length: no per-orb records and no keyed maps that could
+   * grow with kill count. Spawn totals, outcome totals, and healing must stay
+   * reconcilable, so `collected + expired + stillActive == ordinarySpawned +
+   * premiumSpawned` at any instant, and `healingDelivered + overheal` equals the
+   * face value of every collected orb.
+   */
+  repairStats: {
+    /** Kill-driven ordinary orbs placed. */
+    ordinarySpawned: number;
+    /** Guaranteed boss/miniboss orbs placed; never drawn from the ordinary budget. */
+    premiumSpawned: number;
+    collected: number;
+    /** Reached end of world lifetime without being collected. */
+    expired: number;
+    /** Evicted by pool pressure rather than lifetime; should stay at zero. */
+    evicted: number;
+    /** Integrity actually restored, overheal excluded. */
+    healingDelivered: number;
+    /** Face value that landed on a full or nearly full bar. */
+    overheal: number;
+    /** Orbs that expired while the player was at full integrity. */
+    expiredAtFullHealth: number;
+    /** Kills since the last ordinary drop, and the worst such streak. */
+    killsSinceDrop: number;
+    longestKillDryStreak: number;
+    /** Worst wall-clock gap between ordinary drops (seconds). */
+    longestTimeDryStreak: number;
+    /** Seconds spent under each integrity fraction. */
+    timeBelow75: number;
+    timeBelow50: number;
+    timeBelow25: number;
+    /** Mean/peak active ordinary orbs, accumulated by sampling. */
+    activeSamples: number;
+    activeSum: number;
+    activePeak: number;
+    /** Mean distance to the nearest reachable ordinary orb, by sampling. */
+    nearestSamples: number;
+    nearestSum: number;
+    /** True if no ordinary orb existed anywhere at the moment of death. */
+    diedWithNoOrbAvailable: boolean;
+    /** Healing delivered per five-minute elapsed band; index 6 holds 30min+. */
+    healingByBand: number[];
+  };
   /** Ordered FIFO of deferred boss schedule indices (1-based). */
   pendingBossIndices: number[];
   weapons: SurvivorWeaponSlot[];
@@ -913,6 +960,30 @@ export function createSurvivorState(
       eliteBonusSpawned: 0,
     },
     repairEconomy: { sinceDrop: 0, injuredFor: 0, drops: 0 },
+    repairStats: {
+      ordinarySpawned: 0,
+      premiumSpawned: 0,
+      collected: 0,
+      expired: 0,
+      evicted: 0,
+      healingDelivered: 0,
+      overheal: 0,
+      expiredAtFullHealth: 0,
+      killsSinceDrop: 0,
+      longestKillDryStreak: 0,
+      longestTimeDryStreak: 0,
+      timeBelow75: 0,
+      timeBelow50: 0,
+      timeBelow25: 0,
+      activeSamples: 0,
+      activeSum: 0,
+      activePeak: 0,
+      nearestSamples: 0,
+      nearestSum: 0,
+      diedWithNoOrbAvailable: false,
+      // Six five-minute bands plus a 30min+ overflow band.
+      healingByBand: [0, 0, 0, 0, 0, 0, 0],
+    },
     pendingBossIndices: [],
     cache: {
       active: false,
