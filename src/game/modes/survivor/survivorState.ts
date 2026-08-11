@@ -553,6 +553,10 @@ export interface SurvivorState {
     injuredFor: number;
     /** Ordinary repair orbs produced this run (telemetry / tests). */
     drops: number;
+    /** Threat-weighted kill credit banked toward the next ordinary orb. */
+    credit: number;
+    /** Credit the next orb costs; re-rolled with seeded variance per drop. */
+    nextThreshold: number;
   };
   /**
    * Repair-economy measurement.
@@ -959,7 +963,13 @@ export function createSurvivorState(
       banner: 0,
       eliteBonusSpawned: 0,
     },
-    repairEconomy: { sinceDrop: 0, injuredFor: 0, drops: 0 },
+    repairEconomy: {
+      sinceDrop: 0,
+      injuredFor: 0,
+      drops: 0,
+      credit: 0,
+      nextThreshold: SURVIVOR.repair.killDriven.threshold,
+    },
     repairStats: {
       ordinarySpawned: 0,
       premiumSpawned: 0,

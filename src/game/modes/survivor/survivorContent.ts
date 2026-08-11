@@ -125,10 +125,10 @@ export const SURVIVOR = {
   collapseStart: 30 * 60,
   collapseStep: 120,
   /** Ordinary repair orbs expire so full-health players cannot fill the pool forever. */
-  repairPickupLife: 48,
+  repairPickupLife: 70,
   /** After the late-game transition, repairs become bankable map resources. */
   lateRepairStart: 15 * 60,
-  lateRepairPickupLife: 65,
+  lateRepairPickupLife: 70,
   lateRepairActiveCap: 4,
   repairPickupWarnLife: 8,
   /** Keep XP from packing against perimeter walls. */
@@ -183,6 +183,42 @@ export const SURVIVOR = {
     injuredFraction: 0.9,
     /** Health fraction under which the pity floor tightens toward minInterval. */
     criticalFraction: 0.45,
+    /**
+     * Kill-driven ordinary supply (endless-2.8.0).
+     *
+     * Ordinary orbs are earned by killing, not by being hurt and not by the
+     * clock. Both candidate models below price an orb in threat-weighted kill
+     * credit, so the tap width stays roughly constant as kill rate rises
+     * instead of widening into a late-game faucet the way a flat per-kill roll
+     * did in endless-2.2.1.
+     */
+    killDriven: {
+      /**
+       * Which model is live. Both are implemented so they can be A/B'd on
+       * identical seeds; see docs/REPAIR_BENCHMARK.md for the comparison.
+       * - `accumulator`: threat credit banks toward a seeded-variance threshold.
+       * - `probability`: per-kill roll with escalating bad-luck protection.
+       */
+      model: 'accumulator' as 'accumulator' | 'probability',
+      /** Threat credit contributed per kill, by enemy class. */
+      weightOrdinary: 1,
+      weightElite: 3,
+      weightMiniboss: 8,
+      /** Accumulator: mean credit an ordinary orb costs. */
+      threshold: 40,
+      /** Accumulator: seeded +/- fraction applied to each next threshold. */
+      thresholdVariance: 0.25,
+      /** Probability model: chance per unit of threat weight. */
+      baseChancePerWeight: 1 / 40,
+      /**
+       * Probability model: once credit passes `escalateAfter`, the effective
+       * chance climbs so an unlucky streak is bounded rather than unbounded.
+       */
+      escalateAfter: 40,
+      escalatePerCredit: 0.02,
+      /** Probability model: hard guarantee, so no drought can run forever. */
+      guaranteeAt: 140,
+    },
     /** Ordinary orb value. */
     value: 22,
     /** Miniboss guaranteed reward. */

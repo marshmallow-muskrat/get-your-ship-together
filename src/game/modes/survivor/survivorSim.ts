@@ -588,47 +588,56 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
   }
   // Every enemy death is a tick of the kill-driven budget, whether or not it drops.
   state.repairStats.killsSinceDrop += 1;
-  tryOrdinaryRepairDrop(state, e.x + 0.2, e.z - 0.2);
+  tryOrdinaryRepairDrop(state, e.x + 0.2, e.z - 0.2, threatWeight(e));
 }
 
 /**
- * Ordinary repair-orb faucet.
+ * Kill-driven ordinary repair supply (endless-2.8.0).
  *
- * The endless-2.2.1 model was a flat 4% roll per kill. That is a faucet whose flow
- * rate is the player's kill rate, so by the time kills-per-second reached double
- * digits an isolated mistake healed itself within a couple of seconds. Drops are now
- * paced by wall-clock since the last orb, with a randomised window between
- * `minInterval` and `targetInterval`, and they require the player to be missing
- * integrity at all. The pity guarantee lives in `updateRepairEconomy`.
+ * Supply is earned by killing. It is not gated on being hurt, not paced by the
+ * wall clock, and not capped at a handful of orbs: a player at full integrity
+ * still earns orbs and may leave them on the floor to route back to later.
+ *
+ * The endless-2.2.1 model was a flat 4% roll per kill, whose flow rate was
+ * simply the kill rate, so late-game density turned it into a faucet. Both
+ * models here price an orb in *threat-weighted credit* instead, so a trash mob
+ * and an elite are not worth the same, and the tap width stays roughly constant
+ * as kill rate climbs.
+ *
+ * Two models are implemented so they can be compared on identical seeds rather
+ * than argued about; `SURVIVOR.repair.killDriven.model` selects the live one.
  */
-function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number): boolean {
-  const cfg = SURVIVOR.repair;
-  const p = state.player;
+function threatWeight(e: SurvivorEnemy): number {
+  const k = SURVIVOR.repair.killDriven;
+  if (e.isMiniboss) return k.weightMiniboss;
+  if (e.isElite) return k.weightElite;
+  return k.weightOrdinary;
+}
+
+function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number, weight: number): boolean {
+  const k = SURVIVOR.repair.killDriven;
   const eco = state.repairEconomy;
-  const late = state.time >= SURVIVOR.lateRepairStart;
-  if (!late && p.health >= p.maxHealth) return false;
-  if (late && activeOrdinaryRepairs(state) >= SURVIVOR.lateRepairActiveCap) return false;
-  const minInterval = late ? lateRepairIntervals(state.time).min : cfg.minInterval;
-  const targetInterval = late ? lateRepairIntervals(state.time).target : cfg.targetInterval;
-  if (eco.sinceDrop < minInterval) return false;
-  // Between min and target the chance ramps in, so the cadence averages inside the band
-  // instead of snapping to exactly `targetInterval` every time.
-  const span = Math.max(0.001, targetInterval - minInterval);
-  const progress = Math.min(1, (eco.sinceDrop - minInterval) / span);
-  if (progress < 1 && rng(state) > progress * 0.5) return false;
-  emitRepairOrb(state, x, z);
-  return true;
-}
+  eco.credit += weight;
 
-function activeOrdinaryRepairs(state: SurvivorState): number {
-  return state.pickups.reduce((n, p) => n + (p.active && p.kind === 'repair' && !p.premium ? 1 : 0), 0);
-}
+  if (k.model === 'accumulator') {
+    // Credit banks toward a threshold that is re-rolled with seeded variance on
+    // every drop, so the cadence is readable without being metronomic.
+    if (eco.credit < eco.nextThreshold) return false;
+    emitRepairOrb(state, x, z);
+    return true;
+  }
 
-function lateRepairIntervals(elapsed: number): { min: number; target: number; pity: number } {
-  const m = elapsed / 60;
-  if (m < 20) return { min: 9, target: 12, pity: 15 };
-  if (m < 25) return { min: 7.5, target: 10, pity: 12 };
-  return { min: 6, target: 8, pity: 10 };
+  // Probability model: a per-kill roll whose odds climb once the drought passes
+  // `escalateAfter`, with a hard guarantee so no streak is unbounded.
+  let chance = k.baseChancePerWeight * weight;
+  if (eco.credit > k.escalateAfter) {
+    chance += (eco.credit - k.escalateAfter) * k.escalatePerCredit;
+  }
+  if (eco.credit >= k.guaranteeAt || rng(state) < chance) {
+    emitRepairOrb(state, x, z);
+    return true;
+  }
+  return false;
 }
 
 /** Place one ordinary repair orb and reset the economy timers. */
@@ -640,9 +649,15 @@ function emitRepairOrb(state: SurvivorState, x: number, z: number): void {
   rs.longestKillDryStreak = Math.max(rs.longestKillDryStreak, rs.killsSinceDrop);
   rs.killsSinceDrop = 0;
   rs.ordinarySpawned += 1;
-  state.repairEconomy.sinceDrop = 0;
-  state.repairEconomy.injuredFor = 0;
-  state.repairEconomy.drops += 1;
+  const eco = state.repairEconomy;
+  eco.sinceDrop = 0;
+  eco.injuredFor = 0;
+  eco.drops += 1;
+  eco.credit = 0;
+  // Seeded variance keeps the next orb from landing on an exact metronome while
+  // remaining fully deterministic for a given seed.
+  const k = SURVIVOR.repair.killDriven;
+  eco.nextThreshold = k.threshold * (1 + (rng(state) * 2 - 1) * k.thresholdVariance);
 }
 
 /**
@@ -679,39 +694,19 @@ function sampleRepairStats(state: SurvivorState, dt: number): void {
 }
 
 /**
- * Timers plus the pity guarantee.
+ * Repair-economy clock.
  *
- * A player who is injured and unlucky — or who simply is not killing anything, which
- * is exactly when they most need repair — must never be abandoned. Once they have
- * spent `pityInterval` injured, an orb is placed near them regardless of kills. Below
- * `criticalFraction` integrity the guarantee tightens toward `minInterval`.
+ * endless-2.8.0 removes the two rules that made ordinary supply feel arbitrary:
+ * the injured-only pity timer, which required the player to stay hurt to be
+ * eligible, and the late-game time-spawned schedule with its four-orb active
+ * cap, which capped supply exactly when kill rate peaked.
+ *
+ * Nothing here places orbs any more. No kills means no ordinary repair drops,
+ * by design; bounded droughts are the kill-driven models' responsibility.
+ * `sinceDrop` survives purely as drought telemetry.
  */
 function updateRepairEconomy(state: SurvivorState, dt: number): void {
-  const cfg = SURVIVOR.repair;
-  const p = state.player;
-  const eco = state.repairEconomy;
-  eco.sinceDrop += dt;
-  const late = state.time >= SURVIVOR.lateRepairStart;
-  if (late) {
-    // Late repairs are bankable resources, not hidden assistance for taking damage.
-    const intervals = lateRepairIntervals(state.time);
-    if (activeOrdinaryRepairs(state) >= SURVIVOR.lateRepairActiveCap) return;
-    if (eco.sinceDrop < intervals.target) return;
-    const ang = rng(state) * Math.PI * 2;
-    const r = 6 + rng(state) * 5;
-    emitRepairOrb(state, p.x + Math.cos(ang) * r, p.z + Math.sin(ang) * r);
-    return;
-  }
-  const injured = p.health < p.maxHealth * cfg.injuredFraction;
-  if (!injured) return;
-  eco.injuredFor += dt;
-  const critical = p.health < p.maxHealth * cfg.criticalFraction;
-  const pity = critical ? cfg.minInterval : cfg.pityInterval;
-  if (eco.injuredFor < pity) return;
-  // Place it a short distance away so it is a pickup to walk to, not an instant heal.
-  const ang = rng(state) * Math.PI * 2;
-  const r = 3.5 + rng(state) * 2.5;
-  emitRepairOrb(state, p.x + Math.cos(ang) * r, p.z + Math.sin(ang) * r);
+  state.repairEconomy.sinceDrop += dt;
 }
 
 function isImportantPickup(kind: SurvivorPickup['kind']): boolean {
@@ -846,10 +841,10 @@ function dropPickup(
   slot.value = value;
   slot.active = true;
   slot.magnetized = false;
+  // One world lifetime for every ordinary orb: long enough to be banked and
+  // routed back to, short enough that the floor does not accumulate forever.
   slot.life = kind === 'repair'
-    ? state.time >= SURVIVOR.lateRepairStart
-      ? SURVIVOR.lateRepairPickupLife
-      : SURVIVOR.repairPickupLife
+    ? SURVIVOR.repairPickupLife
     : Infinity;
   slot.premium = !!opts?.premium;
 }

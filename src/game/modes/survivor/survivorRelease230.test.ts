@@ -239,66 +239,55 @@ describe('§5 contact damage', () => {
 
 // ---------------------------------------------------------------- §6 repair economy
 
-describe('§6 bounded repair economy', () => {
-  /** Count ordinary repair orbs produced over a window at a forced kill rate. */
-  function repairDropsOverWindow(seconds: number, healthFraction: number): number {
-    const state = quietRun(4242, 600);
+describe('§6 kill-driven repair economy', () => {
+  /*
+   * endless-2.8.0 replaced a wall-clock faucet gated on being injured with an
+   * economy earned by killing. The tests below are written to fail against
+   * endless-2.7.0: time pacing, the 90% eligibility gate, the injured-only pity
+   * floor and the four-orb late cap are all gone.
+   */
+  it('drops nothing without kills, no matter how long an injured player waits', () => {
+    const state = quietRun(4101);
     state.nextBossTime = 1e9;
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;
-    state.player.maxHealth = 100;
-    for (let i = 0; i < seconds * 60; i += 1) {
-      // Pin health so the injured gate is the variable under test.
-      state.player.health = 100 * healthFraction;
-      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-      // Sustained high kill rate: many kills every second.
-      for (let k = 0; k < 6; k += 1) {
-        const e = state.enemies.find((x) => x.alive);
-        if (e) e.health = -1;
-      }
-    }
-    return state.repairEconomy.drops;
-  }
-
-  it('is paced by time, not by kill rate', () => {
-    const window = 120;
-    const drops = repairDropsOverWindow(window, 0.5);
-    // ~one drop every 12-18s => 6-10 in two minutes. A per-kill roll would produce
-    // dozens at this kill rate.
-    expect(drops).toBeGreaterThanOrEqual(4);
-    expect(drops).toBeLessThanOrEqual(12);
-  });
-
-  it('averages inside the 12-18 second design band when injured', () => {
-    const window = 180;
-    const drops = repairDropsOverWindow(window, 0.5);
-    const avgGap = window / Math.max(1, drops);
-    expect(avgGap).toBeGreaterThanOrEqual(11);
-    expect(avgGap).toBeLessThanOrEqual(19);
-  });
-
-  it('does not drop ordinary repair for a player at full health', () => {
-    expect(repairDropsOverWindow(60, 1.0)).toBe(0);
-  });
-
-  it('never abandons an injured player with no kills at all (pity floor)', () => {
-    const state = quietRun(77, 600);
-    state.nextBossTime = 1e9;
-    state.nextCacheTime = 1e9;
-    state.surge.nextSurgeAt = 1e9;
-    state.spawnAcc = -1e9;
-    state.player.maxHealth = 100;
-    for (let i = 0; i < 25 * 60; i += 1) {
-      state.player.health = 40;
+    state.player.health = state.player.maxHealth * 0.3;
+    for (let i = 0; i < 120 * 60; i += 1) {
       state.spawnAcc = -1e9;
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
     }
-    expect(state.repairEconomy.drops).toBeGreaterThan(0);
+    expect(state.repairEconomy.drops).toBe(0);
   });
 
-  it('tightens the pity floor at critical health', () => {
-    expect(SURVIVOR.repair.criticalFraction).toBeLessThan(SURVIVOR.repair.injuredFraction);
-    expect(SURVIVOR.repair.minInterval).toBeLessThan(SURVIVOR.repair.pityInterval);
+  it('prices an orb in threat-weighted credit, so elites are worth more than fodder', () => {
+    const k = SURVIVOR.repair.killDriven;
+    expect(k.weightElite).toBeGreaterThan(k.weightOrdinary);
+    expect(k.weightMiniboss).toBeGreaterThan(k.weightElite);
+    // A drought cannot run forever under either model.
+    expect(k.guaranteeAt).toBeGreaterThan(k.threshold);
+    expect(k.thresholdVariance).toBeGreaterThan(0);
+    expect(k.thresholdVariance).toBeLessThan(1);
+  });
+
+  it('leaves an orb on the floor for a player at full integrity', () => {
+    const state = quietRun(4102);
+    state.player.health = state.player.maxHealth;
+    state.pickups.push({
+      id: state.nextId++,
+      kind: 'repair',
+      x: state.player.x,
+      z: state.player.z,
+      value: SURVIVOR.repair.value,
+      active: true,
+      magnetized: false,
+      life: SURVIVOR.repairPickupLife,
+    });
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const orb = state.pickups.find((p) => p.kind === 'repair');
+    // Standing on it at full health must neither consume it nor magnetize it.
+    expect(orb?.active).toBe(true);
+    expect(orb?.magnetized).toBe(false);
+    expect(state.player.health).toBe(state.player.maxHealth);
   });
 
   it('keeps boss and miniboss repair guaranteed and larger than an ordinary orb', () => {
@@ -306,30 +295,9 @@ describe('§6 bounded repair economy', () => {
     expect(SURVIVOR.repair.bossValue).toBeGreaterThan(SURVIVOR.repair.minibossValue);
   });
 
-  it('heals exactly once per collected orb', () => {
-    const state = quietRun(9, 60);
-    state.nextBossTime = 1e9;
-    state.spawnAcc = -1e9;
-    state.player.maxHealth = 200;
-    state.player.health = 50;
-    state.pickups.push({
-      id: 4242,
-      kind: 'repair',
-      x: state.player.x,
-      z: state.player.z,
-      value: 20,
-      active: true,
-      magnetized: false,
-      life: Infinity,
-    });
-    for (let i = 0; i < 12; i += 1) {
-      state.spawnAcc = -1e9;
-      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-    }
-    const orb = state.pickups.find((p) => p.id === 4242)!;
-    expect(orb.active).toBe(false);
-    // One heal of exactly 20 (no Nanite Bleed levels), never two.
-    expect(state.telemetry.healedByOrbs).toBeCloseTo(20, 5);
+  it('gives every ordinary orb a bankable world lifetime', () => {
+    expect(SURVIVOR.repairPickupLife).toBeGreaterThanOrEqual(60);
+    expect(SURVIVOR.repairPickupLife).toBeLessThanOrEqual(75);
   });
 });
 
@@ -368,22 +336,27 @@ describe('endless-2.6.1 identity and late repair contracts', () => {
     expect(new Set(drones.map((p) => p.z.toFixed(2))).size).toBeGreaterThan(1);
   });
 
-  it('banks late-game repair at full integrity, with long life and a hard floor cap', () => {
+  /*
+   * endless-2.8.0 replaced the time-spawned late repair schedule with a
+   * kill-driven economy. These two cases pin the halves of that contract that a
+   * future tuning pass could quietly undo.
+   */
+  it('produces no ordinary repair orbs without kills, however long it waits', () => {
     const state = quietRun(2601, SURVIVOR.lateRepairStart + 1);
-    state.spawnAcc = -1e9;
     state.nextBossTime = 1e9;
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;
-    state.player.health = state.player.maxHealth;
+    // Injured, and well past every interval the old time-based schedule used.
+    state.player.health = state.player.maxHealth * 0.4;
     for (let i = 0; i < 70 * 60; i += 1) {
       state.spawnAcc = -1e9;
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
     }
     const repairs = state.pickups.filter((p) => p.active && p.kind === 'repair' && !p.premium);
-    expect(repairs).toHaveLength(SURVIVOR.lateRepairActiveCap);
-    expect(repairs.every((p) => p.life <= SURVIVOR.lateRepairPickupLife && p.life > 0)).toBe(true);
-    expect(state.player.health).toBe(state.player.maxHealth);
+    expect(repairs).toHaveLength(0);
+    expect(state.repairEconomy.drops).toBe(0);
   });
+
 });
 
 // --------------------------------------------------------- §7 Nanite Bleed / passives
