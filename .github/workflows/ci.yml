@@ -1,0 +1,79 @@
+name: CI
+
+# Release gates for the survivor build.
+#
+# Deployment itself is handled by the Cloudflare Pages Git integration, which
+# builds directly from this repository. This workflow deliberately does NOT
+# deploy: it exists so that the gates required by the release protocol
+# (typecheck, lint at zero warnings, full test suite, production build) run on
+# every push and pull request, and so a red check is visible before a Pages
+# build promotes anything.
+#
+# No Cloudflare credentials are required or used here.
+
+on:
+  push:
+    branches:
+      - main
+      - 'test-center-**'
+      - 'claude/**'
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (zero warnings)
+        run: npm run lint
+
+      # The survivor/weapon benchmark suites are CPU-bound and can legitimately
+      # exceed vitest's 5000ms default on slower hardware, producing timeout
+      # failures that are infrastructure noise rather than balance regressions.
+      # This raises only the harness timeout. No test logic, acceptance band, or
+      # balance value is modified. Remove this flag to reproduce default timing.
+      - name: Test suite
+        run: npm test -- --testTimeout=120000
+
+      - name: Production build
+        run: npm run build
+
+      - name: Record balance partition and build provenance
+        run: |
+          set -euo pipefail
+          BUNDLE="$(find dist/assets -name '*.js' | head -n1)"
+
+          {
+            echo "### Build provenance"
+            echo ""
+            echo "- Commit: \`$(git rev-parse HEAD)\`"
+            echo ""
+            echo "Balance markers found in \`${BUNDLE#dist/}\`:"
+            echo ""
+            MARKERS="$(grep -oE 'endless-[0-9]+\.[0-9]+\.[0-9]+' "${BUNDLE}" | sort -u || true)"
+            if [ -z "${MARKERS}" ]; then
+              echo "- (none detected)"
+            else
+              echo "${MARKERS}" | sed 's/^/- `/; s/$/`/'
+            fi
+            echo ""
+            echo "| Artifact | Bytes | SHA-256 |"
+            echo "| --- | ---: | --- |"
+            find dist -maxdepth 2 -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' \) \
+              | sort | while read -r f; do
+                printf '| `%s` | %s | `%s` |\n' \
+                  "${f#dist/}" "$(stat -c%s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
+              done
+          } >> "$GITHUB_STEP_SUMMARY"

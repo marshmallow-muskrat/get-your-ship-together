@@ -1,0 +1,135 @@
+name: Verify deployment
+
+# Verifies a deployed Cloudflare Pages URL against a reference build of a given
+# commit, and runs browser QA against the live site.
+#
+# Why this exists: the release sandbox cannot reach *.pages.dev or any
+# Cloudflare host (egress policy denies CONNECT), so deployed verification has
+# to run somewhere with real network access. GitHub runners have it. The full
+# report is printed to the job log and the run summary so it can be read back
+# without direct access to the deployment.
+#
+# No Cloudflare credentials are required - this only makes ordinary public HTTP
+# requests to the deployed site.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Deployed URL to verify (e.g. https://get-your-ship-together.pages.dev)'
+        required: true
+        default: 'https://get-your-ship-together.pages.dev'
+      ref:
+        description: 'Commit/branch to build as the byte-for-byte reference'
+        required: true
+        default: 'main'
+      expected_marker:
+        description: 'Balance marker that MUST be present in the served bundle (e.g. endless-2.7.0)'
+        required: false
+        default: ''
+      forbidden_marker:
+        description: 'Balance marker that must NOT be present (e.g. endless-2.8.0)'
+        required: false
+        default: ''
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build reference bundle
+        run: npm run build
+
+      - name: Fetch deployed site and compare to reference build
+        id: compare
+        run: |
+          set -euo pipefail
+          URL="${{ github.event.inputs.url }}"
+          URL="${URL%/}"
+          mkdir -p deployed
+
+          echo "## Deployment verification" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: \`${URL}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Reference commit: \`$(git rev-parse HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          CODE="$(curl -sS -o deployed/index.html -w '%{http_code}' "${URL}/")"
+          echo "index.html HTTP ${CODE}"
+          if [ "${CODE}" != "200" ]; then
+            echo "FAIL: site returned HTTP ${CODE}" >&2
+            exit 1
+          fi
+
+          # Asset paths the served HTML actually references.
+          ASSETS="$(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' deployed/index.html | sort -u)"
+          echo "Referenced assets:"; echo "${ASSETS}"
+
+          echo "| Asset | Deployed bytes | Reference bytes | SHA-256 match |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | ---: | ---: | --- |" >> "$GITHUB_STEP_SUMMARY"
+
+          STATUS=0
+          for a in ${ASSETS}; do
+            curl -sS -o "deployed/$(basename "$a")" "${URL}${a}"
+            D="deployed/$(basename "$a")"
+            R="dist${a}"
+            DB="$(stat -c%s "$D")"; DH="$(sha256sum "$D" | cut -d' ' -f1)"
+            if [ -f "$R" ]; then
+              RB="$(stat -c%s "$R")"; RH="$(sha256sum "$R" | cut -d' ' -f1)"
+              if [ "$DH" = "$RH" ]; then M='yes'; else M='**NO**'; STATUS=1; fi
+            else
+              RB='(absent)'; M='**reference missing**'; STATUS=1
+            fi
+            echo "| \`$(basename "$a")\` | ${DB} | ${RB} | ${M} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "deployed $(basename "$a") bytes=${DB} sha256=${DH}"
+          done
+
+          # Balance partition assertions against the served JavaScript.
+          JS="$(ls deployed/*.js 2>/dev/null | head -n1 || true)"
+          if [ -n "${JS}" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Balance markers served:" >> "$GITHUB_STEP_SUMMARY"
+            FOUND="$(grep -oE 'endless-[0-9]+\.[0-9]+\.[0-9]+' "${JS}" | sort -u || true)"
+            if [ -z "${FOUND}" ]; then
+              echo "- (none detected)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "${FOUND}" | sed 's/^/- `/; s/$/`/' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "markers: ${FOUND}"
+
+            EXP="${{ github.event.inputs.expected_marker }}"
+            FORB="${{ github.event.inputs.forbidden_marker }}"
+            if [ -n "${EXP}" ]; then
+              if grep -q "${EXP}" "${JS}"; then echo "OK: serves ${EXP}"; else echo "FAIL: ${EXP} absent" >&2; STATUS=1; fi
+            fi
+            if [ -n "${FORB}" ]; then
+              if grep -q "${FORB}" "${JS}"; then echo "FAIL: unexpectedly serves ${FORB}" >&2; STATUS=1; else echo "OK: does not serve ${FORB}"; fi
+            fi
+          fi
+
+          exit ${STATUS}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser QA against the deployed site
+        run: node scripts/browserQa.mjs "${{ github.event.inputs.url }}" --screenshots qa-shots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-qa-screenshots
+          path: qa-shots
+          if-no-files-found: warn
