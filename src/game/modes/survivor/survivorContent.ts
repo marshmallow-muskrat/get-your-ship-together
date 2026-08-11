@@ -476,6 +476,39 @@ export const SURVIVOR = {
     /** Shockwave damage as a fraction of the central impact (design band 35-40%). */
     shockwaveDamageMul: 0.375,
   },
+  /**
+   * Gravity Pulse control field (endless-2.8.0).
+   *
+   * The well was an instantaneous circle: one frame of damage, one nudge, a fading
+   * decal. It read as a small explosion that happened to be purple, and it gave the
+   * player no *position* — nothing about where enemies would be a second later.
+   *
+   * It is now a persistent mini-control field. It still damages exactly once per enemy,
+   * so the weapon's damage identity is unchanged, and then spends its life holding what
+   * it caught. Control is tiered by enemy class: fodder is genuinely gathered, heavier
+   * classes are slowed but barely moved, and nothing that owns a telegraphed commitment
+   * — minibosses, bosses — is displaced at all. A control tool that can drag a boss is
+   * a control tool that deletes the fight it was supposed to make readable.
+   *
+   * Displacement is bounded per enemy per well, so no stack of wells can walk the horde
+   * across the arena or pin it into the boundary.
+   */
+  gravityWell: {
+    /** Pull speed toward the well centre, in world units per second. */
+    pullSpeed: { fodder: 2.9, sprinter: 2.9, flanker: 2.2, hunter: 2.2, bruiser: 1.2, elite: 0.7, miniboss: 0 },
+    /** Movement multiplier while held. Never below this floor. */
+    slowMul: { fodder: 0.4, sprinter: 0.4, flanker: 0.5, hunter: 0.5, bruiser: 0.62, elite: 0.75, miniboss: 0.88 },
+    /** Total displacement one well may apply to one enemy, in world units. */
+    maxDisplacement: 1.8,
+    /** Enemies stop being pulled inside this fraction of the radius, so they gather rather than stack. */
+    coreFraction: 0.28,
+    /** Simultaneous wells; a bounded pool like every other collection. */
+    maxWells: 12,
+    /** Bosses take the damage and are never controlled. */
+    bossControl: false,
+  },
+  /** Gravity Pulse boss damage rate, unchanged from endless-2.7.0. */
+  gravityBossDamageMul: 0.7,
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
@@ -671,15 +704,28 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   gravity: {
     id: 'gravity',
     name: 'Gravity Pulse',
-    description: 'Circular field that damages and slows.',
-    color: '#9b7bff',
+    description: 'Collapsing well that damages once, then holds what it caught.',
+    color: '#6a2fb5',
     levels: [
-      // Area grows steadily; the second well is held back to L5 as the breakpoint.
-      { level: 1, label: 'Gravity Pulse I', damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 0.35 },
-      { level: 2, label: 'Gravity Pulse II', damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 0.38 },
-      { level: 3, label: 'Gravity Pulse III', damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 0.42 },
-      { level: 4, label: 'Deep Well', damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 0.45 },
-      { level: 5, label: 'Event Horizon', damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 0.5 },
+      /*
+       * `life` is the control window (endless-2.8.0), not a visual fade.
+       *
+       * The well persists and holds the ground it collapsed on. Damage still lands
+       * exactly once per enemy per well — the field is *control*, not a damage-over-time
+       * that would quietly rewrite the weapon's damage contract.
+       *
+       * Duration is deliberately **flat across levels**. A persistent field damages the
+       * enemies that walk into it, so a per-level duration ramp is a per-level damage
+       * ramp in disguise: the first draft grew it 1.0 → 1.5 and pushed L3's effective
+       * gain to 0.448 against a 0.40 ceiling, adding a growth axis this weapon was never
+       * authored to have. The authored axes stay damage, cadence, radius, and the second
+       * well at L5 as the declared breakpoint; duration is a property of the mechanic.
+       */
+      { level: 1, label: 'Gravity Pulse I', damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 1.05 },
+      { level: 2, label: 'Gravity Pulse II', damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 1.05 },
+      { level: 3, label: 'Gravity Pulse III', damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 1.05 },
+      { level: 4, label: 'Deep Well', damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 1.05 },
+      { level: 5, label: 'Event Horizon', damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 1.05 },
     ],
   },
   rocket: {
@@ -1580,15 +1626,35 @@ export type BossDamageCategory =
   | 'puddle'
   | 'radial';
 
-/** Base first-boss damage by category (before boss index/phase scaling). */
+/**
+ * Base first-boss damage by category, before boss index/phase scaling.
+ *
+ * `projectile` is the reference ranged impact: the physical tiers are authored as
+ * multiples of it, so "getting hit by the body" and "getting hit by a charge" have a
+ * stated, checkable relationship to "getting hit by something the boss threw".
+ *
+ *   body   18 / 15 = 1.20x  (band 1.15–1.30)
+ *   charge 22 / 15 = 1.47x  (band 1.40–1.60)
+ *
+ * endless-2.8.0 lowered body from 25 (1.67x) and charge from 32 (2.13x). Those numbers
+ * were not the damage the player actually took: both physical paths multiplied
+ * `bossCategoryDamage` — which already applies the boss-index and mega curves — by
+ * `boss.damageMul`, which *is* those same curves. Physical damage therefore scaled with
+ * the square of boss index while every pattern scaled linearly, so the "hierarchy"
+ * diverged instead of holding: 1.25x a beam at boss 1 and over 3x by boss 13.
+ * {@link bossDamageScale} is now the one curve every boss damage path multiplies by.
+ */
 export const BOSS_DAMAGE_BASE: Record<BossDamageCategory, number> = {
   projectile: 15,
-  body: 25,
-  charge: 32,
+  body: 18,
+  charge: 22,
   beam: 16,
   puddle: 12,
   radial: 18,
 };
+
+/** The reference ranged impact the physical tiers are authored against. */
+export const BOSS_REFERENCE_RANGED_DAMAGE = BOSS_DAMAGE_BASE.projectile;
 
 export type BossPhase = 1 | 2 | 3;
 
@@ -1607,7 +1673,17 @@ export const SURVIVOR_BOSS = {
     contamination: { windup: 1.0, active: 0.35, recovery: 1.05, damage: 10, radius: 3.0, life: 6 },
     'rupture-ring': { windup: 1.15, active: 0.9, recovery: 1.1, damage: 18, maxRadius: 10 },
     'cryo-lanes': { windup: 1.1, active: 0.7, recovery: 1.15, damage: 14, length: 22, width: 1.1 },
-    'ravage-charge': { windup: 1.2, active: 0.55, recovery: 1.2, damage: 22, length: 28, width: 1.4 },
+    // The charge corridor is the sole consumer of the `charge` physical tier: it is the
+    // telegraphed body impact, so it reads its damage from there rather than authoring a
+    // second number that could drift away from the hierarchy.
+    'ravage-charge': {
+      windup: 1.2,
+      active: 0.55,
+      recovery: 1.2,
+      damage: BOSS_DAMAGE_BASE.charge,
+      length: 28,
+      width: 1.4,
+    },
     'sweeping-beam': { windup: 1.15, active: 1.4, recovery: 1.1, damage: 16, length: 24, width: 1.0 },
     'aerial-strafe': { windup: 1.0, active: 1.1, recovery: 1.0, damage: 14, length: 30, width: 1.6 },
     'spore-bloom': { windup: 1.05, active: 0.4, recovery: 1.2, damage: 12, count: 5, radius: 1.4 },
@@ -1918,7 +1994,29 @@ export function compositionAt(t: number): Array<{ id: string; weight: number }> 
   ];
 }
 
-/** Scaled boss category damage for boss index (1-based) and optional mega. */
+/**
+ * The single boss damage scaling curve.
+ *
+ * Every boss damage path — body contact, charge corridor, beam, projectile, puddle,
+ * radial, phase surge — is `authored base x bossDamageScale(...)` and nothing else.
+ * One curve is what makes the physical hierarchy in {@link BOSS_DAMAGE_BASE} a real
+ * contract rather than a statement about boss 1 only.
+ *
+ * `damageMul` is the boss's own difficulty multiplier from {@link bossDifficultyFor},
+ * which already carries the boss-index and mega curves. Callers must not reapply them.
+ */
+export function bossDamageScale(damageMul: number, phase = 1, breachEmpower = 0): number {
+  const p = (phase >= 3 ? 3 : phase >= 2 ? 2 : 1) as BossPhase;
+  return damageMul * SURVIVOR_BOSS.phaseMods[p].damageMul * (1 + Math.max(0, breachEmpower));
+}
+
+/**
+ * Scaled boss category damage for boss index (1-based) and optional mega.
+ *
+ * This is the index-addressed form of the same law, for documentation, the boss damage
+ * benchmark and tests. The simulation itself works from the live boss and calls
+ * {@link bossDamageScale} directly.
+ */
 export function bossCategoryDamage(
   category: BossDamageCategory,
   bossIndex: number,
@@ -1926,15 +2024,11 @@ export function bossCategoryDamage(
   phase = 1,
 ): number {
   const n = Math.max(1, Math.floor(bossIndex));
-  const base = BOSS_DAMAGE_BASE[category];
-  const indexMul = 1 + 0.12 * (n - 1);
-  const phaseMul = phase >= 3 ? 1.25 : phase >= 2 ? 1.12 : 1;
-  const megaMul = isMega
-    ? category === 'body' || category === 'charge'
-      ? 1.35
-      : 1.2
-    : 1;
-  return base * indexMul * phaseMul * megaMul * (isMega && category === 'charge' ? 1.15 : 1);
+  const damageMul = Math.min(
+    isMega ? 4.5 : 3.2,
+    (1 + 0.12 * (n - 1)) * (isMega ? SURVIVOR.megaDamageMul : 1),
+  );
+  return BOSS_DAMAGE_BASE[category] * bossDamageScale(damageMul, phase);
 }
 
 export type TempBuffId =

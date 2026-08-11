@@ -11,9 +11,11 @@
  */
 import {
   ALL_BOSS_PATTERNS,
+  BOSS_DAMAGE_BASE,
   SURVIVOR,
   SURVIVOR_BOSS,
   assertNever,
+  bossDamageScale,
   bossDefForIndex,
   bossPhaseFromHealth,
   elitePopulationBudgetAt,
@@ -202,11 +204,21 @@ const STRAFE_IMPACT_RADIUS = 1.35;
 const STRAFE_DROPS = 6;
 /** Extra clearance beyond the boss collider that a charge body actually sweeps. */
 const CHARGE_BODY_PAD = 0.4;
+/** Share of the charge impact each trailing fissure carries. */
+const CHARGE_TRAIL_FRACTION = 0.25;
+
+/**
+ * This boss's live damage multiplier — the shared law, applied once.
+ *
+ * `bossDamageScale` is the same function the physical contact path and the boss damage
+ * benchmark use, so a pattern and a body slam on the same boss cannot scale differently.
+ */
+export function bossDamageMultiplier(b: SurvivorBoss): number {
+  return bossDamageScale(b.damageMul, bossPhaseFromHealth(b.health, b.maxHealth), b.breachEmpower);
+}
 
 function dmgScale(b: SurvivorBoss): number {
-  const phase = bossPhaseFromHealth(b.health, b.maxHealth);
-  const mod = SURVIVOR_BOSS.phaseMods[phase];
-  return b.damageMul * mod.damageMul * (1 + b.breachEmpower);
+  return bossDamageMultiplier(b);
 }
 
 function recScale(b: SurvivorBoss): number {
@@ -619,6 +631,42 @@ const DAMAGING_ON_ACTIVATE: Record<BossPatternId, boolean> = {
   cataclysm: false, // each zone armed at its own slot
 };
 
+/**
+ * Patterns during which the boss body itself travels a locked path — the charge and the
+ * strafing leap.
+ *
+ * These own their impact entirely. Each spawns an attack entity whose footprint *is* the
+ * volume the body sweeps, and that entity is `hasHit`-gated, so a traversal lands exactly
+ * one impact on the player no matter how long the bodies overlap.
+ *
+ * `applyBossBodyContact` must therefore stand down for a boss in this state. Before
+ * endless-2.8.0 it did not: a charge could land its corridor hit, and then keep billing
+ * the player for ordinary body contact every 0.45s for the rest of the pass, at the
+ * higher `charge` tier. Which of the two fired first — and so how much a single charge
+ * cost — depended only on frame ordering against the player's i-frames.
+ */
+const COMMITTED_TRAVERSAL: Record<BossPatternId, boolean> = {
+  pulse: false,
+  line: false,
+  fan: false,
+  summon: false,
+  'breach-orb': false,
+  contamination: false,
+  'rupture-ring': false,
+  'cryo-lanes': false,
+  'ravage-charge': true,
+  'sweeping-beam': false, // the boss pivots in place; the beam travels, the body does not
+  'aerial-strafe': true,
+  'spore-bloom': false,
+  'gravity-collapse': false,
+  cataclysm: false,
+};
+
+/** Whether this boss is mid-traversal and so owns its own single impact. */
+export function isCommittedTraversal(b: SurvivorBoss): boolean {
+  return b.state === 'active' && b.pattern != null && COMMITTED_TRAVERSAL[b.pattern];
+}
+
 function activateBossPattern(state: SurvivorState, b: SurvivorBoss): void {
   if (!b.pattern) return;
   b.state = 'active';
@@ -898,16 +946,21 @@ function updateActive(
       if (a) {
         // Corridor is exactly the path the body has swept so far.
         setLine(a, b.lockX, b.lockZ, b.x, b.z, b.colliderRadius + CHARGE_BODY_PAD);
+        /*
+         * One impact per charge, and this is it. `hasHit` latches for the whole pass, and
+         * `applyBossBodyContact` stands down for a committed traversal, so the corridor is
+         * the only thing that can bill the player for being run over.
+         */
         if (!a.hasHit && attackHitsPlayer(state, a)) {
           a.hasHit = true;
           b.patternTriggered = true;
-          api.damagePlayer(state, (cfg.damage ?? 22) * scale, patternSource(b));
+          api.damagePlayer(state, BOSS_DAMAGE_BASE.charge * scale, patternSource(b));
         }
       }
       // Trail fissures at a fixed cadence rather than every frame.
       if (b.patternHitCd <= 0) {
         b.patternHitCd = 0.12;
-        api.spawnHazard(state, 'fissure', b.x, b.z, 1.1, 2.2, (cfg.damage ?? 22) * scale * 0.25, '#66aa44', {
+        api.spawnHazard(state, 'fissure', b.x, b.z, 1.1, 2.2, BOSS_DAMAGE_BASE.charge * scale * CHARGE_TRAIL_FRACTION, '#66aa44', {
           owner: 'enemy',
           armTimer: 0.05,
           tickCd: 0,

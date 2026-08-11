@@ -46,6 +46,13 @@ export interface SurvivorEnemy {
   contactDamage: number;
   /** Cooldown before hazard (wake/puddle) can re-hit this enemy. */
   hazardHitCd: number;
+  /**
+   * Displacement the current Gravity Pulse well has already applied to this enemy
+   * (endless-2.8.0). Reset on first contact with a well and capped at
+   * `SURVIVOR.gravityWell.maxDisplacement`, which is what stops any stack of wells from
+   * walking the horde across the arena or pinning it into the boundary.
+   */
+  gravityPulled: number;
   /** Miniboss special telegraph timer. */
   specialCd: number;
   specialWindup: number;
@@ -120,7 +127,15 @@ export interface SurvivorProjectile {
   srcOverride: string | null;
 }
 
-export type HazardKind = 'wake' | 'plasma-wake' | 'puddle' | 'contamination' | 'spore' | 'fissure';
+export type HazardKind =
+  | 'wake'
+  | 'plasma-wake'
+  | 'puddle'
+  | 'contamination'
+  | 'spore'
+  | 'fissure'
+  /** Gravity Pulse control field (endless-2.8.0): damages once, then holds. */
+  | 'gravity-well';
 
 export interface SurvivorHazard {
   id: number;
@@ -153,6 +168,17 @@ export interface SurvivorHazard {
   armTimer: number;
   /** Owning boss for cleanup; 0 = none. */
   sourceBossId: number;
+  /**
+   * Entity ids this hazard has already damaged (endless-2.8.0, Gravity Pulse only).
+   *
+   * A persistent control field must damage each target exactly once *per well*, and the
+   * bookkeeping has to live on the well rather than on the target: a single "last well
+   * that hit me" slot on the enemy ping-pongs between two overlapping wells and bills
+   * damage every frame, which is how the Event Horizon pair first measured at 237x its
+   * authored L1 output. Enemy and boss ids share one monotonic counter, so one set
+   * covers both. Bounded by the living entity count; reused in place on pool reuse.
+   */
+  hitEntityIds?: Set<number> | null;
   /** Elliptical footprint in local side/forward axes; 1/1 is circular. */
   scaleX: number;
   scaleZ: number;
@@ -874,6 +900,7 @@ function emptyEnemy(): SurvivorEnemy {
     speedMul: 1,
     contactDamage: 8,
     hazardHitCd: 0,
+    gravityPulled: 0,
     specialCd: 0,
     specialWindup: 0,
     lungeCd: 0,

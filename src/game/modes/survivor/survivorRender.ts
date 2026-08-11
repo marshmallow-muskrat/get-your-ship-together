@@ -707,6 +707,48 @@ export class SurvivorRenderer {
   }
 
   /**
+   * Per-layer cooling ramps for the Plasma Wake, newest → oldest.
+   *
+   * Authored as explicit stops rather than a hue rotation so each layer cools on its own
+   * curve: the core abandons white almost immediately, the fire body holds orange much
+   * longer, and the ember shell ends at a dull ash that still reads on a dark floor.
+   */
+  private static readonly PLASMA_HEAT: Record<string, readonly string[]> = {
+    'pw-core': ['#fffdf0', '#ffe89a', '#ffb347', '#e0631a', '#7a2408'],
+    'pw-fire': ['#ffc25a', '#ff8a2b', '#ff4f24', '#c2321a', '#5e1c0c'],
+    'pw-ember': ['#ff8a3d', '#ff5a24', '#d33a17', '#8a2a12', '#3d1608'],
+  };
+
+  /** Sample a ramp at `k` in [0,1] with linear interpolation between stops. */
+  private static rampAt(stops: readonly string[], k: number, out: THREE.Color): void {
+    const clamped = k < 0 ? 0 : k > 1 ? 1 : k;
+    const span = clamped * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(span));
+    out.set(stops[i]!);
+    out.lerp(new THREE.Color(stops[i + 1]!), span - i);
+  }
+
+  private applyPlasmaHeat(obj: THREE.Object3D, age: number): void {
+    for (const child of obj.children) {
+      if (!(child instanceof THREE.Mesh)) continue;
+      const mat = child.material;
+      if (!(mat instanceof THREE.MeshBasicMaterial)) continue;
+      const name = child.name;
+      const key = name.startsWith('pw-core')
+        ? 'pw-core'
+        : name.startsWith('pw-fire')
+          ? 'pw-fire'
+          : name.startsWith('pw-ember')
+            ? 'pw-ember'
+            : name === 'pw-tongue'
+              ? 'pw-core'
+              : null;
+      if (!key) continue;
+      SurvivorRenderer.rampAt(SurvivorRenderer.PLASMA_HEAT[key]!, age, mat.color);
+    }
+  }
+
+  /**
    * Place a segment's meshes on the authoritative capsule the simulation owns.
    *
    * The strip length is the true segment length and the strip/cap width is the true
@@ -731,6 +773,19 @@ export class SurvivorRenderer {
     // Ember phase: the tail narrows and cools rather than simply fading out.
     const cool = age < 0.45 ? 1 : 1 - ((age - 0.45) / 0.55) * 0.45;
     const flicker = 0.9 + Math.sin(performance.now() * 0.009 + h.id * 0.7) * 0.1;
+    /*
+     * Heat ramp (endless-2.8.0, presentation only).
+     *
+     * The trail previously held one authored colour per layer for its whole life and
+     * expressed age purely as opacity, so a two-second-old segment was the same fire as a
+     * fresh one, just dimmer — the ribbon read as a flat decal that was being erased
+     * rather than as something burning down. Each layer now walks its own cooling ramp,
+     * so the head is white-hot, the body is fire, and the tail genuinely goes to ash.
+     *
+     * This changes no geometry, no lifetime and no damage. The strip is still scaled to
+     * `h.radius` and `len`, which are the simulation's authoritative capsule.
+     */
+    this.applyPlasmaHeat(obj, age);
 
     for (const child of obj.children) {
       if (!(child instanceof THREE.Mesh)) continue;
@@ -863,6 +918,96 @@ export class SurvivorRenderer {
     return { root, mech, ship, trail, glow };
   }
 
+  /**
+   * Gravity Pulse well — dark violet, and deliberately not part of the hostile palette.
+   *
+   * Boss danger footprints are red/magenta. A player control field that the player wants
+   * to stand next to must never read as something to run from, so the well is built from
+   * deep violet: a near-black event horizon, a bright accretion rim at the true damage
+   * radius, and counter-rotating debris arcs that make "this is still holding" legible in
+   * a crowd without adding another red shape to the floor.
+   */
+  private createGravityWell(): THREE.Object3D {
+    const g = new THREE.Group();
+
+    // Outer falloff at the exact collision radius: the field you see is the field that pulls.
+    const halo = this.ownMesh(
+      new THREE.Mesh(new THREE.CircleGeometry(1, 28), this.effectMat('#6a2fb5', 0.26)),
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = 0.035;
+    halo.userData.baseOpacity = 0.26;
+    halo.userData.wellRole = 'halo';
+    g.add(halo);
+
+    // Accretion rim, sitting just inside the radius so the boundary stays readable.
+    const rim = this.ownMesh(
+      new THREE.Mesh(new THREE.RingGeometry(0.82, 1.0, 32), this.effectMat('#b98cff', 0.55, true)),
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.y = 0.045;
+    rim.userData.baseOpacity = 0.55;
+    rim.userData.wellRole = 'rim';
+    g.add(rim);
+
+    // Event horizon: the core enemies gather around rather than collapse into.
+    const core = this.ownMesh(
+      new THREE.Mesh(new THREE.CircleGeometry(1, 24), this.effectMat('#160726', 0.82)),
+    );
+    core.rotation.x = -Math.PI / 2;
+    core.position.y = 0.05;
+    core.userData.baseOpacity = 0.82;
+    core.userData.wellRole = 'core';
+    g.add(core);
+
+    // Two counter-rotating debris arcs — motion is what says "persistent", not "flash".
+    for (let i = 0; i < 2; i += 1) {
+      const arc = this.ownMesh(
+        new THREE.Mesh(
+          new THREE.RingGeometry(0.5 + i * 0.16, 0.58 + i * 0.16, 24, 1, 0, Math.PI * (i === 0 ? 1.1 : 0.8)),
+          this.effectMat(i === 0 ? '#8f57e0' : '#d8b6ff', 0.5, true),
+        ),
+      );
+      arc.rotation.x = -Math.PI / 2;
+      arc.position.y = 0.055 + i * 0.002;
+      arc.userData.baseOpacity = 0.5;
+      arc.userData.wellRole = 'arc';
+      arc.userData.spin = i === 0 ? 3.1 : -4.4;
+      g.add(arc);
+    }
+    return g;
+  }
+
+  /**
+   * Lay the well out on its authoritative footprint.
+   *
+   * `h.radius` is the collision radius, so the halo is scaled to exactly that. The core
+   * is scaled to `coreFraction`, which is the same number the simulation stops pulling
+   * at — the visible "safe" centre is the real one.
+   */
+  private layoutGravityWell(obj: THREE.Object3D, h: SurvivorState['hazards'][0], t: number): void {
+    obj.position.set(h.x, 0, h.z);
+    const coreFraction = SURVIVOR.gravityWell.coreFraction;
+    // Collapse in fast, then hold: the field is at full extent for almost all of its life.
+    const settle = Math.min(1, (1 - t) * 6);
+    for (const child of obj.children) {
+      if (!(child instanceof THREE.Mesh)) continue;
+      const role = child.userData.wellRole as string | undefined;
+      const base = (child.userData.baseOpacity as number | undefined) ?? 0.4;
+      const scale =
+        role === 'core' ? h.radius * coreFraction : role === 'arc' ? h.radius : h.radius;
+      child.scale.setScalar(Math.max(0.001, scale * (0.35 + 0.65 * settle)));
+      if (role === 'arc') {
+        child.rotation.z = (child.userData.spin as number) * (h.maxLife - h.life);
+      }
+      if (child.material instanceof THREE.MeshBasicMaterial) {
+        // Hold opacity flat, then fade only over the last fifth of the life.
+        const fade = t > 0.2 ? 1 : t / 0.2;
+        child.material.opacity = Math.max(0.04, base * fade * (0.4 + 0.6 * settle));
+      }
+    }
+  }
+
   private syncHazards(state: SurvivorState): void {
     const alive = new Set(state.hazards.filter((h) => h.active).map((h) => h.id));
     for (const [id, obj] of this.hazards) {
@@ -878,6 +1023,8 @@ export class SurvivorRenderer {
       if (!obj) {
         if (h.kind === 'plasma-wake') {
           obj = this.createPlasmaSegment();
+        } else if (h.kind === 'gravity-well') {
+          obj = this.createGravityWell();
         } else {
           const ring = this.ownMesh(new THREE.Mesh(
             new THREE.CircleGeometry(1, 20),
@@ -893,6 +1040,10 @@ export class SurvivorRenderer {
       const t = h.life / h.maxLife;
       if (h.kind === 'plasma-wake') {
         this.layoutPlasmaSegment(obj, h, t);
+        continue;
+      }
+      if (h.kind === 'gravity-well') {
+        this.layoutGravityWell(obj, h, t);
         continue;
       }
       obj.position.set(h.x, h.kind === 'wake' ? 0.06 : 0.04, h.z);

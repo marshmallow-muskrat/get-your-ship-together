@@ -195,6 +195,63 @@ Persistent red floor auras are removed.
 Boss bodies are contact-damage volumes, not solid obstacles. Astronaut, mech, and ship forms may
 pass through a boss without forced displacement; the normal contact-damage cooldown still applies.
 
+## Boss damage law (endless-2.8.0)
+
+Every boss damage path is `authored category base × bossDamageScale(...)` and nothing else. One
+curve, applied once. `bossDamageScale` carries the boss's difficulty multiplier (which already
+contains the boss-index and Mega curves), the phase multiplier, and any breach empowerment.
+
+Category bases are authored against `projectile`, the **representative ranged impact**:
+
+| Category | Base | × ranged | Band |
+|---|---:|---:|---|
+| `puddle` | 12 | 0.80× | — |
+| `projectile` | 15 | 1.00× | reference |
+| `beam` | 16 | 1.07× | — |
+| `radial` | 18 | 1.20× | — |
+| `body` | 18 | 1.20× | 1.15–1.30× |
+| `charge` | 22 | 1.47× | 1.40–1.60× |
+
+Incidental contact with a body sits just above a thrown impact. A telegraphed, committed charge —
+the thing the player is given time to read and answer — hits meaningfully harder. Because there is
+one curve, those ratios are identical at boss 1 and at boss 20, in every phase.
+
+`npm run bench:bossdamage` regenerates `BOSS_DAMAGE_BENCHMARK.md`, which evaluates the law across
+the boss ladder and drives the real simulation to count impacts.
+
+### One impact per committed traversal
+
+A pattern during which the boss **body itself travels a locked path** — the Ravage Charge, the
+Aerial Strafe leap — owns its impact entirely. Its attack entity's footprint *is* the volume the
+body sweeps, and that entity is one-shot gated, so the traversal bills the player exactly once no
+matter how long the bodies overlap. The ordinary body-contact pass stands down for the duration.
+
+The charge's trailing fissures are deliberately **not** part of that impact. They are a separate,
+persistent, escapable hazard under their own `boss-puddle` damage kind, carrying 25% of the charge
+each. A player who never moves off the trail pays at most the charge again; a player who leaves
+pays nothing more.
+
+### What this replaced
+
+endless-2.7.0 applied the boss-index curve **twice** on the physical paths: `bossCategoryDamage`
+scaled by index and Mega internally, and both call sites multiplied the result by `boss.damageMul`,
+which is that same curve. Physical damage therefore grew with the square of boss index while every
+pattern grew linearly, and the two used different phase curves as well. The hierarchy held at boss 1
+and drifted from 1.25× a beam to over 3× by boss 13.
+
+It also let a traversal bill twice. A boss flying its strafe over a stationary player was charged
+for ordinary body contact rather than the strafe drop — measured at **182.5 raw at boss 10**, versus
+36.4 for the telegraphed impact the player was actually shown. The mechanic that hurt the player was
+not the mechanic that was telegraphed, which no amount of telegraph quality can make fair.
+
+### Recorded, not fixed
+
+The Containment Warden's Ground Slam (`26 × 1.8 = 46.8`) is a telegraphed melee AOE authored as a
+flat miniboss constant. It never touches the boss damage law and does not scale with the run at all:
+it out-hits a first boss's charge by more than 2×, and an ordinary boss charge does not overtake it
+until boss 11. Changing it is a horde-pressure change rather than a boss-fairness one, so it is left
+alone here instead of being folded into this phase's A/B where it would confound attribution.
+
 ### Ship boss ram (endless-2.7.0)
 
 Ship Body dealt exactly **zero** boss damage in 2.6.1 — flying through a boss, the most committal
@@ -385,21 +442,56 @@ readiness, not kill charge.
 Mech weapon output uses bounded multipliers: `1.35×` damage, `1.15×` cadence and `1.15×` area.
 It no longer adds a projectile to every weapon, which was the largest cause of boss deletion.
 
-## Bounded repair economy (endless-2.3.0)
+## Kill-driven repair economy (endless-2.8.0)
 
-Ordinary repair drops are paced by wall clock, never by an independent per-kill roll:
+Ordinary repair supply is **earned by killing**. It is not gated on being hurt, not paced by the
+wall clock, and not capped at a handful of orbs on the field.
 
 | Property | Value |
 |---|---|
-| Minimum interval | 12s |
-| Typical interval | ~15s |
-| Pity guarantee (injured) | 18s, tightening to 12s below 45% integrity |
-| Injured gate | Drops require missing integrity; pity requires <90% |
-| Ordinary orb | 22 |
-| Miniboss / boss | 45 / 55 (+30 Mega), guaranteed, outside the budget |
+| Model | Threat credit banks toward a re-rolled threshold (`accumulator`) |
+| Credit per kill | fodder 1, elite 3, miniboss 8 |
+| Threshold | mean 40 credit, ±25% seeded variance per drop |
+| Ordinary orb | 16 |
+| Orb lifetime | 70s, with an 8s expiry warning |
+| Miniboss / boss | 45 / 55 (+30 Mega), guaranteed, premium, outside the ordinary economy |
+
+Pricing an orb in **threat-weighted** credit is what keeps the tap width roughly constant as kill
+rate climbs. A flat per-kill roll makes flow rate equal to kill rate, which is how endless-2.2.1
+turned into a late-game faucet. Measured kills per ordinary drop across the early/mid/late/dense
+windows is 47.0 / 42.8 / 41.0 / 43.0, against 45.9 / 86.8 / 53.7 / 50.3 under the old model.
+
+A second `probability` model — a per-kill roll with escalating bad-luck protection and a hard
+guarantee — is implemented and selectable via `SURVIVOR.repair.killDriven.model`, so the two can be
+compared on identical seeds rather than argued about.
+
+### What this replaced, and why
+
+endless-2.7.0 paced drops on the wall clock (12s minimum, ~15s typical, 18s pity) and required the
+player to be **below 90% integrity** to be eligible at all, with a late schedule that capped the
+field at four ordinary orbs. Three consequences, all of them removed:
+
+- An uninjured player earned nothing. Measured in the mid-run window at full integrity, 2.7.0
+  produced **zero** ordinary orbs on every seed.
+- The late window sat pinned at exactly **four** orbs on every seed — the cap, not the economy.
+- The injured-only pity floor actively paid more to the player doing worse, which is a difficulty
+  cushion disguised as a supply rule.
+
+Orbs an uninjured player walks past now stay on the floor as a routable resource to come back for.
+That is the route-planning choice the redesign exists to create; lowering face value from 22 to 16
+is what keeps that choice from also being a healing increase.
 
 Nanite Bleed increases orb healing by 10% per level through L5. Every collected orb heals exactly
-once.
+once. `npm run bench:repair` regenerates `REPAIR_BENCHMARK.md`.
+
+### Known open question
+
+Kill-driven supply is **correlated with performance** where the old model was not, and that widens
+the survival distribution by design: a player who is killing well is supplied well. The 96-run A/B
+held median and mean flat (10:37 → 9:58 median, 11:27 → 11:16 mean) while standard deviation rose
+from 5:14 to 6:20 and the +3σ tail crossed thirty minutes. Death attribution shows the mechanism
+directly — horde-contact deaths went from 21 to 45 of 96, as weak runs lost their supply cushion.
+This is unresolved and is not to be fixed by nerfing an unrelated system.
 
 ### Specialist eligibility gates
 

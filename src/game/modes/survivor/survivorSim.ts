@@ -39,9 +39,8 @@ import {
   xpForLevel,
   isMegaBossIndex,
   breachShieldingReduction,
-  bossCategoryDamage,
+  BOSS_DAMAGE_BASE,
   computeShieldDuration,
-  type BossDamageCategory,
   type PassiveId,
   type ProtocolId,
   type TempBuffId,
@@ -60,6 +59,8 @@ import {
   forceBossPattern,
   cancelBossPattern,
   setPhaseTransitionHandler,
+  bossDamageMultiplier,
+  isCommittedTraversal,
   type BossSimApi,
 } from './survivorBossPatterns';
 import {
@@ -1098,6 +1099,7 @@ function acquireHazard(state: SurvivorState): SurvivorHazard | null {
     scaleZ: 1,
     facingX: 0,
     facingZ: 1,
+    hitEntityIds: null,
   };
   state.hazards.push(h);
   return h;
@@ -1143,6 +1145,14 @@ function spawnHazard(
   h.scaleZ = opts?.scaleZ ?? 1;
   h.facingX = opts?.facingX ?? 0;
   h.facingZ = opts?.facingZ ?? 1;
+  if (kind === 'gravity-well') {
+    // Reused in place rather than reallocated, so a recycled pool slot never inherits
+    // the previous well's hit list.
+    if (h.hitEntityIds) h.hitEntityIds.clear();
+    else h.hitEntityIds = new Set<number>();
+  } else if (h.hitEntityIds) {
+    h.hitEntityIds.clear();
+  }
   return h;
 }
 
@@ -1593,13 +1603,28 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         }
       }
     } else if (slot.weaponId === 'gravity') {
+      /*
+       * Gravity Pulse (endless-2.8.0): the collapse damages, the field controls.
+       *
+       * Damage resolves here, on the cast, against exactly the enemies and bosses inside
+       * the radius — unchanged from endless-2.7.0, down to the boss rate. What is new is
+       * that the well then *persists* as a control field for its duration.
+       *
+       * The field deliberately does not damage what walks into it later. A persistent
+       * field that also damages late entrants makes effective output a function of enemy
+       * flow rather than of the authored table, and the weapon benchmark showed exactly
+       * that: per-level gains scattered to 0.54/0.20/0.48/0.42 against a 0.40 ceiling
+       * from an unchanged damage curve. Splitting the two — collapse damages once, field
+       * only controls — is what lets this be a control rework rather than a stealth
+       * damage buff, and it leaves the documented progression contract untouched.
+       */
       for (let i = 0; i < count; i += 1) {
         const radius = (def.radius ?? 3) * area;
         const aim = selectWeaponTarget(state, slot, p.x, p.z, 14);
         const pos = targetPosition(aim);
         const cx = pos ? pos.x : p.x + state.player.facingX * (2 + i * 0.8);
         const cz = pos ? pos.z : p.z + state.player.facingZ * (2 + i * 0.8);
-        pushEffect(state, 'pulse', cx, cz, 0.4, state.accent, radius, { radius });
+        pushEffect(state, 'pulse', cx, cz, 0.32, WEAPONS.gravity.color, radius, { radius });
         const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
         for (const e of state.enemies) {
           if (!e.alive) continue;
@@ -1607,8 +1632,6 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           const dz = e.z - cz;
           if (dx * dx + dz * dz <= (radius + e.radius) ** 2) {
             damageEnemy(state, e, dmg, { src: weaponSrc('gravity') });
-            const len = Math.hypot(dx, dz) || 1;
-            applyKnockback(e, -dx / len, -dz / len, 0.8);
           }
         }
         for (const b of state.bosses) {
@@ -1616,9 +1639,13 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           const dx = b.x - cx;
           const dz = b.z - cz;
           if (dx * dx + dz * dz <= (radius + b.colliderRadius) ** 2) {
-            damageBoss(state, dmg * 0.7, { boss: b, src: weaponSrc('gravity') });
+            damageBoss(state, dmg * SURVIVOR.gravityBossDamageMul, { boss: b, src: weaponSrc('gravity') });
           }
         }
+        // The control field itself carries no damage.
+        spawnHazard(state, 'gravity-well', cx, cz, radius, def.life ?? 1, 0, WEAPONS.gravity.color, {
+          owner: 'player',
+        });
       }
     } else if (slot.weaponId === 'rocket') {
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 22);
@@ -2239,6 +2266,8 @@ function damageBoss(
  * damaging shockwave the player must move out of, then returns to its normal cycle
  * with a shortened idle so the next attack arrives promptly.
  */
+const PHASE_SURGE_FRACTION = 0.85;
+
 export function resolveBossPhaseTransition(state: SurvivorState, b: SurvivorBoss): void {
   if (!b.pendingPhaseTransition) return;
   b.pendingPhaseTransition = false;
@@ -2248,7 +2277,7 @@ export function resolveBossPhaseTransition(state: SurvivorState, b: SurvivorBoss
   const p = state.player;
   const d = Math.hypot(p.x - b.x, p.z - b.z);
   if (d <= radius + SURVIVOR.playerRadius) {
-    const dmg = bossCategoryDamage('radial', b.index, b.isMega, b.phase) * b.damageMul * 0.85;
+    const dmg = BOSS_DAMAGE_BASE.radial * bossDamageMultiplier(b) * PHASE_SURGE_FRACTION;
     damagePlayer(state, dmg, makeBossSource(b, 'boss-radial', 'Phase Surge'));
   }
   b.state = 'recover';
@@ -2637,6 +2666,88 @@ function hazardHitsPoint(h: SurvivorHazard, x: number, z: number, pointRadius = 
   return (localSide * localSide) / (rx * rx) + (localForward * localForward) / (rz * rz) <= 1;
 }
 
+/**
+ * Gravity Pulse control field.
+ *
+ * The field carries **no damage**. The collapse already resolved that at cast time, so
+ * everything here is control:
+ *
+ * 1. **Control is tiered by class.** Fodder is genuinely gathered; bruisers and elites
+ *    are slowed but barely moved; minibosses are only slowed; bosses are never touched
+ *    at all. Anything that owns a telegraphed commitment must be able to keep it — a
+ *    control tool that drags a boss deletes the fight it exists to make readable.
+ * 2. **Displacement is bounded per enemy per well.** `gravityPulled` accumulates the
+ *    distance this well has moved this enemy and stops at `maxDisplacement`, so no
+ *    number of overlapping wells can walk the horde across the arena or pin it into the
+ *    boundary. The budget is reset by the well that claims the enemy, and the claim list
+ *    lives on the well rather than on the enemy: a single "last well" slot on the enemy
+ *    ping-pongs between two overlapping wells, which is how the Event Horizon pair first
+ *    measured at 237x its authored L1 output before the damage moved to the cast.
+ *
+ * Enemies are pulled toward the rim of a small core rather than the exact centre, so a
+ * caught pack gathers into a cluster instead of collapsing onto one point.
+ */
+function applyGravityWell(state: SurvivorState, h: SurvivorHazard, dt: number): void {
+  const cfg = SURVIVOR.gravityWell;
+  const hits = h.hitEntityIds;
+  if (!hits) return;
+  const core = h.radius * cfg.coreFraction;
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    const dx = e.x - h.x;
+    const dz = e.z - h.z;
+    const d2 = dx * dx + dz * dz;
+    const reach = h.radius + e.radius;
+    if (d2 > reach * reach) continue;
+
+    // First contact with this well: a fresh displacement budget, bounded from here on.
+    if (!hits.has(e.id)) {
+      hits.add(e.id);
+      e.gravityPulled = 0;
+    }
+
+    const tier = gravityTier(e.role);
+    e.slowTimer = Math.max(e.slowTimer, 0.25);
+    e.slowMul = Math.min(e.slowMul, cfg.slowMul[tier]);
+
+    const pull = cfg.pullSpeed[tier];
+    if (pull <= 0) continue;
+    const dist = Math.sqrt(d2);
+    if (dist <= core) continue;
+    const budget = cfg.maxDisplacement - e.gravityPulled;
+    if (budget <= 0) continue;
+    // Never overshoot the core, and never spend more than the remaining budget.
+    const step = Math.min(pull * dt, dist - core, budget);
+    if (step <= 0) continue;
+    e.x -= (dx / dist) * step;
+    e.z -= (dz / dist) * step;
+    e.gravityPulled += step;
+  }
+
+  // Bosses are deliberately absent from this loop: they took the collapse damage at cast
+  // and are never slowed, pulled or otherwise controlled by the field.
+}
+
+/** Map an enemy's behaviour role onto its gravity-control tier. */
+function gravityTier(role: string): keyof typeof SURVIVOR.gravityWell.pullSpeed {
+  switch (role) {
+    case 'sprinter':
+      return 'sprinter';
+    case 'flanker':
+      return 'flanker';
+    case 'hunter':
+      return 'hunter';
+    case 'bruiser':
+      return 'bruiser';
+    case 'elite':
+      return 'elite';
+    case 'miniboss':
+      return 'miniboss';
+    default:
+      return 'fodder';
+  }
+}
+
 function updateHazards(state: SurvivorState, dt: number): void {
   for (const h of state.hazards) {
     if (!h.active) continue;
@@ -2667,6 +2778,11 @@ function updateHazards(state: SurvivorState, dt: number): void {
         );
         h.tickCd = 0.45;
       }
+      continue;
+    }
+
+    if (h.kind === 'gravity-well') {
+      applyGravityWell(state, h, dt);
       continue;
     }
 
@@ -5150,20 +5266,18 @@ export function applyBossBodyContact(state: SurvivorState): void {
   const pr = p.form === 'ship' ? SURVIVOR.ship.radius : SURVIVOR.playerRadius;
   for (const b of state.bosses) {
     if (!b.active || b.state === 'dead') continue;
+    /*
+     * A charge or strafing leap owns its own impact. Its attack corridor is the volume
+     * the body sweeps and it lands exactly once, so ordinary body contact must not also
+     * bill the player for the same pass — see `isCommittedTraversal`.
+     */
+    if (isCommittedTraversal(b)) continue;
     const dx = p.x - b.x;
     const dz = p.z - b.z;
     const dist = Math.hypot(dx, dz);
-    // Charge pattern uses higher physical tier; avoid double body+charge same frame.
-    const charging = b.pattern === 'ravage-charge' && b.state === 'active';
-    const hitR = b.colliderRadius + pr + (charging ? 0.35 : 0.05);
-    if (dist > hitR) continue;
-    const cat: BossDamageCategory = charging ? 'charge' : 'body';
-    const dmg = bossCategoryDamage(cat, b.index, b.isMega, b.phase) * b.damageMul;
-    damagePlayer(
-      state,
-      dmg,
-      makeBossSource(b, charging ? 'boss-charge' : 'boss-body', charging ? 'Ravage Charge' : 'Body Slam'),
-    );
+    if (dist > b.colliderRadius + pr + 0.05) continue;
+    const dmg = BOSS_DAMAGE_BASE.body * bossDamageMultiplier(b);
+    damagePlayer(state, dmg, makeBossSource(b, 'boss-body', 'Body Slam'));
     p.bossContactCd = 0.45;
     // Boss bodies are damage volumes, not solid walls. The player must remain
     // free to pass through them in every form instead of being shoved, pinned,
@@ -5248,6 +5362,24 @@ export function forceBossIntoPattern(state: SurvivorState, boss: SurvivorBoss, p
 
 export function cancelBossCombat(state: SurvivorState, boss: SurvivorBoss): void {
   cancelBossPattern(state, boss);
+}
+
+/**
+ * Test/fixture helper: place a Gravity Pulse control field directly.
+ *
+ * The field carries no damage in production either — the collapse resolves at cast time
+ * — so a fixture that places only the field is exercising exactly the production entity.
+ */
+export function spawnGravityWellForTest(
+  state: SurvivorState,
+  x: number,
+  z: number,
+  radius: number,
+  life: number,
+): void {
+  spawnHazard(state, 'gravity-well', x, z, radius, life, 0, WEAPONS.gravity.color, {
+    owner: 'player',
+  });
 }
 
 /** Prefill enemies for repulsor/damage fixtures. */

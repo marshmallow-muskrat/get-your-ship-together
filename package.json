@@ -13,7 +13,8 @@
     "lint": "eslint src --max-warnings 0",
     "bench:doc": "vite-node scripts/genBenchDoc.ts",
     "bench:survival": "vite-node scripts/genSurvivalBenchDoc.ts",
-    "bench:repair": "vite-node scripts/genRepairBenchDoc.ts"
+    "bench:repair": "vite-node scripts/genRepairBenchDoc.ts",
+    "bench:bossdamage": "vite-node scripts/genBossDamageDoc.ts"
   },
   "dependencies": {
     "three": "0.180.0"

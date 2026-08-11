@@ -25,38 +25,38 @@
 <text x="945" y="402" text-anchor="middle" class="tick">25m</text>
   <g>
       <text x="172" y="100" text-anchor="end" class="hero">Boswell</text>
-      <line x1="397.25858945036225" y1="94" x2="767.8673086974024" y2="94" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
-      <line x1="397.25858945036225" y1="83" x2="397.25858945036225" y2="105" stroke="#bdefff" stroke-width="2"/>
-      <line x1="767.8673086974024" y1="83" x2="767.8673086974024" y2="105" stroke="#bdefff" stroke-width="2"/>
-      <circle cx="582.5629490738825" cy="94" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
-      <path d="M 547.555416666507 82 L 554.555416666507 94 L 547.555416666507 106 L 540.555416666507 94 Z" fill="#f7fbff"/>
-      <text x="781.8673086974024" y="99" class="value">13:00 ± 6:08</text>
+      <line x1="498.2316445879125" y1="94" x2="859.5332026337514" y2="94" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+      <line x1="498.2316445879125" y1="83" x2="498.2316445879125" y2="105" stroke="#bdefff" stroke-width="2"/>
+      <line x1="859.5332026337514" y1="83" x2="859.5332026337514" y2="105" stroke="#bdefff" stroke-width="2"/>
+      <circle cx="678.882423610832" cy="94" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
+      <path d="M 761.4553055552012 82 L 768.4553055552012 94 L 761.4553055552012 106 L 754.4553055552012 94 Z" fill="#f7fbff"/>
+      <text x="873.5332026337514" y="99" class="value">16:11 ± 5:59</text>
     </g>
 <g>
       <text x="172" y="172" text-anchor="end" class="hero">Fitzwilliam</text>
-      <line x1="256.6299834178422" y1="166" x2="632.4434471375466" y2="166" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
-      <line x1="256.6299834178422" y1="155" x2="256.6299834178422" y2="177" stroke="#bdefff" stroke-width="2"/>
-      <line x1="632.4434471375466" y1="155" x2="632.4434471375466" y2="177" stroke="#bdefff" stroke-width="2"/>
-      <circle cx="444.5367152776944" cy="166" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
-      <path d="M 361.95125000000905 154 L 368.95125000000905 166 L 361.95125000000905 178 L 354.95125000000905 166 Z" fill="#f7fbff"/>
-      <text x="646.4434471375466" y="171" class="value">8:26 ± 6:13</text>
+      <line x1="280.3182653803835" y1="166" x2="730.0668873971172" y2="166" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+      <line x1="280.3182653803835" y1="155" x2="280.3182653803835" y2="177" stroke="#bdefff" stroke-width="2"/>
+      <line x1="730.0668873971172" y1="155" x2="730.0668873971172" y2="177" stroke="#bdefff" stroke-width="2"/>
+      <circle cx="505.19257638875035" cy="166" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
+      <path d="M 422.81263888884257 154 L 429.81263888884257 166 L 422.81263888884257 178 L 415.81263888884257 166 Z" fill="#f7fbff"/>
+      <text x="744.0668873971172" y="171" class="value">10:26 ± 7:27</text>
     </g>
 <g>
       <text x="172" y="244" text-anchor="end" class="hero">Fortunato</text>
-      <line x1="394.6263814998191" y1="238" x2="802.9777990553239" y2="238" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
-      <line x1="394.6263814998191" y1="227" x2="394.6263814998191" y2="249" stroke="#bdefff" stroke-width="2"/>
-      <line x1="802.9777990553239" y1="227" x2="802.9777990553239" y2="249" stroke="#bdefff" stroke-width="2"/>
-      <circle cx="598.8020902775714" cy="238" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
-      <path d="M 607.3556111108969 226 L 614.3556111108969 238 L 607.3556111108969 250 L 600.3556111108969 238 Z" fill="#f7fbff"/>
-      <text x="816.9777990553239" y="243" class="value">13:32 ± 6:46</text>
+      <line x1="458.6173194259684" y1="238" x2="852.717824092034" y2="238" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+      <line x1="458.6173194259684" y1="227" x2="458.6173194259684" y2="249" stroke="#bdefff" stroke-width="2"/>
+      <line x1="852.717824092034" y1="227" x2="852.717824092034" y2="249" stroke="#bdefff" stroke-width="2"/>
+      <circle cx="655.6675717590012" cy="238" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
+      <path d="M 678.2668888886103 226 L 685.2668888886103 238 L 678.2668888886103 250 L 671.2668888886103 238 Z" fill="#f7fbff"/>
+      <text x="866.717824092034" y="243" class="value">15:25 ± 6:31</text>
     </g>
 <g>
       <text x="172" y="316" text-anchor="end" class="hero">Rutherford</text>
-      <line x1="343.68615680393157" y1="310" x2="648.9844589365796" y2="310" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
-      <line x1="343.68615680393157" y1="299" x2="343.68615680393157" y2="321" stroke="#bdefff" stroke-width="2"/>
-      <line x1="648.9844589365796" y1="299" x2="648.9844589365796" y2="321" stroke="#bdefff" stroke-width="2"/>
-      <circle cx="496.3353078702555" cy="310" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
-      <path d="M 480.6036944443456 298 L 487.6036944443456 310 L 480.6036944443456 322 L 473.6036944443456 310 Z" fill="#f7fbff"/>
-      <text x="662.9844589365796" y="315" class="value">10:09 ± 5:03</text>
+      <line x1="373.09870541472446" y1="310" x2="721.5402529182861" y2="310" stroke="#72d8ff" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+      <line x1="373.09870541472446" y1="299" x2="373.09870541472446" y2="321" stroke="#bdefff" stroke-width="2"/>
+      <line x1="721.5402529182861" y1="299" x2="721.5402529182861" y2="321" stroke="#bdefff" stroke-width="2"/>
+      <circle cx="547.3194791665053" cy="310" r="8" fill="#ffb34d" stroke="#fff0c7" stroke-width="2"/>
+      <path d="M 519.2261388887549 298 L 526.2261388887549 310 L 519.2261388887549 322 L 512.2261388887549 310 Z" fill="#f7fbff"/>
+      <text x="735.5402529182861" y="315" class="value">11:50 ± 5:46</text>
     </g>
 </svg>

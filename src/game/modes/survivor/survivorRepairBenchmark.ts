@@ -184,6 +184,53 @@ function seedFor(scenarioIndex: number, seedIndex: number): number {
   return 0x5eed + scenarioIndex * 104_729 + seedIndex * 7919;
 }
 
+/** Look a scenario up by id, so callers name the window they mean. */
+export function repairScenario(id: string): RepairScenario {
+  const found = REPAIR_SCENARIOS.find((s) => s.id === id);
+  if (!found) throw new Error(`Unknown repair scenario: ${id}`);
+  return found;
+}
+
+/**
+ * Run one scenario window on one seed and hand back the finished state.
+ *
+ * The averaged row is the right output for a report, but it cannot answer questions
+ * about *why* supply behaved as it did. Contract tests need the state itself — how many
+ * ordinary orbs were on the floor at once, whether an uninjured player still earned any.
+ *
+ * `pinFullHealth` holds the player at maximum integrity for the whole window. That is not
+ * a balance scenario; it is the direct test of the endless-2.8.0 rule that ordinary supply
+ * is earned by killing rather than gated on being hurt. Under the endless-2.7.0 economy
+ * this window produced no ordinary orbs at all, because eligibility required the player to
+ * be below 90% integrity.
+ */
+export function runRepairWindow(
+  scenario: RepairScenario,
+  seed: number,
+  opts?: { policy?: SurvivalPolicyId; pinFullHealth?: boolean },
+): SurvivorState {
+  const state = buildScenarioState(scenario, seed);
+  const controller = new SurvivalPolicyController(opts?.policy ?? 'competent', seed);
+  const endAt = scenario.atSeconds + scenario.windowSeconds;
+  const stepLimit = Math.ceil(scenario.windowSeconds / SURVIVOR.fixedDt) + 20_000;
+  for (let steps = 0; steps < stepLimit; steps += 1) {
+    if (state.phase === 'defeat' || !state.player.alive || state.time >= endAt) break;
+    if (opts?.pinFullHealth) state.player.health = state.player.maxHealth;
+    const input = controller.input(state, SURVIVOR.fixedDt);
+    stepSurvivor(state, input, SURVIVOR.fixedDt);
+  }
+  return state;
+}
+
+/** Ordinary (non-premium) repair orbs currently on the floor. */
+export function activeOrdinaryOrbs(state: SurvivorState): number {
+  let n = 0;
+  for (const pk of state.pickups) {
+    if (pk.active && pk.kind === 'repair' && !pk.premium) n += 1;
+  }
+  return n;
+}
+
 /** Run one scenario across its seed set and average the per-seed measures. */
 export function runRepairScenario(
   scenario: RepairScenario,

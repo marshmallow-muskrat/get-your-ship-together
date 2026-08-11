@@ -1,8 +1,8 @@
 # Repair Economy Benchmark
 
 Balance version: `endless-2.7.0`
-Experiment: `endless-2.8.0-accumulator-value16`
-Policy: `competent`; 6 seeds per scenario.
+Experiment: `endless-2.8.0-boss-fairness`
+Policy: `competent`; 8 seeds per scenario.
 
 **This file is generated.** Regenerate it with `npm run bench:repair`.
 
@@ -15,28 +15,28 @@ see the portability guardrail in `SURVIVAL_EXPERIMENTS.md`.
 
 | Scenario | Kills/min | Ordinary | Premium | Kills per ordinary drop | Healing/active min |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `early-3min` | 132.4 | 4.0 | 0.0 | 47.0 | 32.0 |
-| `mid-10min` | 264.6 | 11.2 | 0.0 | 42.8 | 57.2 |
-| `late-20min` | 353.8 | 11.5 | 0.2 | 41.0 | 87.8 |
-| `dense-late-26min` | 350.5 | 9.0 | 0.0 | 43.0 | 84.8 |
+| `early-3min` | 127.9 | 4.4 | 0.0 | 45.7 | 26.9 |
+| `mid-10min` | 253.0 | 11.0 | 0.0 | 41.7 | 55.9 |
+| `late-20min` | 366.6 | 14.5 | 0.0 | 41.5 | 88.9 |
+| `dense-late-26min` | 340.2 | 9.6 | 0.0 | 41.7 | 79.0 |
 
 ## Orb outcomes
 
 | Scenario | Collected | Expired | Expired at full | Delivered | Overheal |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `early-3min` | 3.2 | 0.2 | 0.0 | 45 | 6 |
-| `mid-10min` | 7.5 | 1.2 | 0.0 | 103 | 17 |
-| `late-20min` | 8.0 | 0.0 | 0.0 | 117 | 18 |
-| `dense-late-26min` | 6.3 | 0.0 | 0.0 | 94 | 8 |
+| `early-3min` | 2.9 | 0.3 | 0.0 | 42 | 5 |
+| `mid-10min` | 7.4 | 1.4 | 0.0 | 101 | 17 |
+| `late-20min` | 10.4 | 1.3 | 0.0 | 146 | 20 |
+| `dense-late-26min` | 6.4 | 0.1 | 0.0 | 93 | 9 |
 
 ## Availability and pressure
 
 | Scenario | Mean active | Peak active | Mean nearest | Longest kill drought | Longest time drought | <75% | <50% | <25% | Deaths (no orb) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `early-3min` | 0.7 | 3 | 23.7 | 49 | 36.7s | 26s | 16s | 7s | 5 (0) |
-| `mid-10min` | 2.2 | 6 | 22.0 | 50 | 16.3s | 40s | 15s | 3s | 3 (0) |
-| `late-20min` | 1.9 | 7 | 16.8 | 49 | 23.2s | 24s | 10s | 4s | 5 (0) |
-| `dense-late-26min` | 1.6 | 5 | 19.0 | 50 | 19.0s | 25s | 16s | 6s | 6 (0) |
+| `early-3min` | 0.9 | 4 | 23.5 | 49 | 45.0s | 27s | 14s | 5s | 5 (0) |
+| `mid-10min` | 2.1 | 6 | 20.5 | 50 | 22.6s | 34s | 20s | 7s | 4 (0) |
+| `late-20min` | 2.2 | 9 | 19.6 | 50 | 23.8s | 33s | 14s | 8s | 6 (0) |
+| `dense-late-26min` | 1.9 | 6 | 21.0 | 50 | 20.4s | 24s | 16s | 5s | 8 (0) |
 
 ## Scenarios
 
@@ -56,4 +56,4 @@ see the portability guardrail in `SURVIVAL_EXPERIMENTS.md`.
 - **Deaths (no orb)** counts runs that ended with no ordinary orb anywhere. A non-zero
   value means availability, not player skill, decided the run.
 
-Generated: 2026-08-11T15:59:28.129Z
+Generated: 2026-08-11T17:12:18.072Z
