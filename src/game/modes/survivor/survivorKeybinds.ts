@@ -103,6 +103,21 @@ export interface StoredSettings {
   version: 1;
   keybinds: KeybindMap;
   uiScale: number;
+  /**
+   * Show raw numbers on upgrade cards (endless-2.8.0).
+   *
+   * Defaults **off**. The cards lead with what an upgrade does; the numbers are for
+   * players who want to compare precisely, and showing them by default turns a choice
+   * about identity into a spreadsheet. Persisted so the preference survives a reload.
+   */
+  upgradeNumbers: boolean;
+}
+
+export const UPGRADE_NUMBERS_DEFAULT = false;
+
+/** Unknown/missing values fall back to the default rather than to `true`. */
+export function clampUpgradeNumbers(v: unknown): boolean {
+  return v === true;
 }
 
 export function clampUiScale(v: unknown): number {
@@ -115,24 +130,41 @@ export function clampUiScale(v: unknown): number {
 export function loadSettings(): StoredSettings {
   try {
     if (typeof localStorage === 'undefined') {
-      return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+      return defaultSettings();
     }
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+    if (!raw) return defaultSettings();
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') {
-      return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+      return defaultSettings();
     }
-    const p = parsed as { version?: unknown; keybinds?: unknown; uiScale?: unknown };
-    if (p.version !== 1) return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+    const p = parsed as {
+      version?: unknown;
+      keybinds?: unknown;
+      uiScale?: unknown;
+      upgradeNumbers?: unknown;
+    };
+    if (p.version !== 1) return defaultSettings();
     return {
       version: 1,
       keybinds: normalizeKeybinds(p.keybinds),
       uiScale: clampUiScale(p.uiScale ?? UI_SCALE_DEFAULT),
+      // Settings written before endless-2.8.0 have no such key and must read as the
+      // default rather than as enabled.
+      upgradeNumbers: clampUpgradeNumbers(p.upgradeNumbers),
     };
   } catch {
-    return { version: 1, keybinds: cloneDefaults(), uiScale: UI_SCALE_DEFAULT };
+    return defaultSettings();
   }
+}
+
+function defaultSettings(): StoredSettings {
+  return {
+    version: 1,
+    keybinds: cloneDefaults(),
+    uiScale: UI_SCALE_DEFAULT,
+    upgradeNumbers: UPGRADE_NUMBERS_DEFAULT,
+  };
 }
 
 export function saveSettings(settings: StoredSettings): void {
@@ -142,6 +174,7 @@ export function saveSettings(settings: StoredSettings): void {
       version: 1,
       keybinds: normalizeKeybinds(settings.keybinds),
       uiScale: clampUiScale(settings.uiScale),
+      upgradeNumbers: clampUpgradeNumbers(settings.upgradeNumbers),
     };
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload));
   } catch {

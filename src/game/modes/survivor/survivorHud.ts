@@ -4,6 +4,7 @@ import {
   SURVIVOR,
   SURVIVOR_BALANCE_VERSION,
   WEAPONS,
+  displayName,
   formatOverclockLabel,
   isSignatureWeapon,
   overclockLevel,
@@ -62,6 +63,9 @@ export class SurvivorHud {
   private onStartRebind: (a: ActionId) => void;
   private onResetKeybinds: () => void;
   private onUiScale: (s: number) => void;
+  private onUpgradeNumbers: (on: boolean) => void;
+  /** Whether upgrade cards show raw stat lines; persisted, default off. */
+  private upgradeNumbers = false;
   private onOpenLeaderboard: () => void;
   private getKeybinds: () => KeybindMap;
   private projectWorld: (x: number, z: number) => { x: number; y: number } | null;
@@ -87,6 +91,7 @@ export class SurvivorHud {
       onStartRebind: (a: ActionId) => void;
       onResetKeybinds: () => void;
       onUiScale?: (s: number) => void;
+      onUpgradeNumbers?: (on: boolean) => void;
       onOpenLeaderboard?: () => void;
       getKeybinds: () => KeybindMap;
       projectWorld: (x: number, z: number) => { x: number; y: number } | null;
@@ -101,6 +106,7 @@ export class SurvivorHud {
     this.onStartRebind = handlers.onStartRebind;
     this.onResetKeybinds = handlers.onResetKeybinds;
     this.onUiScale = handlers.onUiScale ?? (() => undefined);
+    this.onUpgradeNumbers = handlers.onUpgradeNumbers ?? (() => undefined);
     this.onOpenLeaderboard = handlers.onOpenLeaderboard ?? (() => undefined);
     this.getKeybinds = handlers.getKeybinds;
     this.projectWorld = handlers.projectWorld;
@@ -220,6 +226,13 @@ export class SurvivorHud {
             <span id="sv-ui-scale-val">100%</span>
           </div>
         </div>
+        <div class="sv-ui-scale-row">
+          <label class="eyebrow" for="sv-upgrade-numbers">UPGRADE NUMBERS</label>
+          <div class="sv-ui-scale-controls">
+            <input type="checkbox" id="sv-upgrade-numbers" />
+            <span id="sv-upgrade-numbers-val">OFF</span>
+          </div>
+        </div>
         <div id="sv-bind-list" class="sv-bind-list"></div>
         <div class="sv-end-actions">
           <button type="button" id="sv-reset-binds" class="sv-btn ghost">RESET TO DEFAULTS</button>
@@ -248,6 +261,7 @@ export class SurvivorHud {
       <div id="sv-levelup" class="sv-modal hidden">
         <p class="eyebrow">SYSTEM UPLINK</p>
         <h2>Choose Upgrade</h2>
+        <p class="eyebrow sv-slot-counter" id="sv-slot-counter">0/5 WEAPONS</p>
         <div id="sv-choices" class="sv-choices"></div>
       </div>
       <div id="sv-protocol" class="sv-modal sv-protocol-modal hidden">
@@ -312,6 +326,24 @@ export class SurvivorHud {
       if (lab) lab.textContent = `${scale.value}%`;
       this.onUiScale(v);
     });
+    const nums = this.root.querySelector<HTMLInputElement>('#sv-upgrade-numbers');
+    nums?.addEventListener('change', () => this.onUpgradeNumbers(nums.checked));
+  }
+
+  /**
+   * Show or hide raw stat lines on upgrade cards.
+   *
+   * Cards are rebuilt only when the offered choice set changes, so flipping this while a
+   * level-up is open must invalidate that cache or the toggle appears to do nothing until
+   * the next level.
+   */
+  setUpgradeNumbers(on: boolean): void {
+    this.upgradeNumbers = on === true;
+    const el = this.root.querySelector<HTMLInputElement>('#sv-upgrade-numbers');
+    if (el) el.checked = this.upgradeNumbers;
+    const lab = this.root.querySelector('#sv-upgrade-numbers-val');
+    if (lab) lab.textContent = this.upgradeNumbers ? 'ON' : 'OFF';
+    this.lastChoicesKey = '';
   }
 
   setUiScale(scale: number): void {
@@ -488,7 +520,7 @@ export class SurvivorHud {
       if (state.inboundBanner > 0) {
         const pb = primaryBoss(state);
         inbound.textContent = pb
-          ? `BOSS INBOUND · ${pb.displayName.toUpperCase()}`
+          ? `BOSS INBOUND · ${displayName(pb.displayName)}`
           : 'CONTAINMENT BREACH';
       }
     }
@@ -755,14 +787,14 @@ export class SurvivorHud {
       const phase = this.root.querySelector('#sv-boss-phase');
       if (phase && pb) phase.textContent = String(pb.phase);
       const bname = this.root.querySelector('#sv-boss-name');
-      if (bname) bname.textContent = pb ? pb.displayName.toUpperCase() : 'CONTAINMENT BREACH';
+      if (bname) bname.textContent = pb ? displayName(pb.displayName) : 'Containment Breach';
       boss.classList.toggle('mega', !!(pb && pb.isMega));
     }
     const mb = this.root.querySelector('#sv-miniboss');
     if (mb) {
       mb.classList.toggle('hidden', !state.miniboss.alive);
       const name = this.root.querySelector('#sv-mb-name');
-      if (name) name.textContent = state.miniboss.name.toUpperCase();
+      if (name) name.textContent = displayName(state.miniboss.name);
       const bar = this.root.querySelector<HTMLElement>('#sv-mb-hp');
       if (bar && state.miniboss.maxHealth > 0) {
         bar.style.width = `${(state.miniboss.health / state.miniboss.maxHealth) * 100}%`;
@@ -854,7 +886,22 @@ export class SurvivorHud {
     levelup.classList.toggle('hidden', !open);
     levelup.classList.toggle('sv-levelup-open', open);
     if (open) {
-      const key = state.choices.map((c) => c.id).join('|') + formatKeyCode(binds.choice1);
+      /*
+       * Ordinary weapon slots only. Prototypes (Arc Conductor, Orbital Lance) are
+       * deliberately excluded because they do not consume a slot, so counting them would
+       * tell the player they are fuller than they are — the exact moment this readout
+       * exists to inform is the decision to take a new weapon or upgrade an existing one.
+       */
+      const slotCounter = this.root.querySelector('#sv-slot-counter');
+      if (slotCounter) {
+        const used = state.weapons.filter((w) => !w.prototype).length;
+        slotCounter.textContent = `${used}/${SURVIVOR.maxWeaponSlots} WEAPONS`;
+        slotCounter.classList.toggle('full', used >= SURVIVOR.maxWeaponSlots);
+      }
+      const key =
+        state.choices.map((c) => c.id).join('|') +
+        formatKeyCode(binds.choice1) +
+        (this.upgradeNumbers ? '#n' : '');
       if (key !== this.lastChoicesKey) {
         this.lastChoicesKey = key;
         const box = this.root.querySelector('#sv-choices');
@@ -883,7 +930,7 @@ export class SurvivorHud {
 
             const badge = document.createElement('span');
             badge.className = 'eyebrow sv-card-badge';
-            badge.textContent = `${card?.category ?? fallbackLabel(c)} · ${labels[i] ?? i + 1}`;
+            badge.textContent = card?.category ?? fallbackLabel(c);
             btn.appendChild(badge);
 
             // Parent weapon/passive and the exact level transition.
@@ -894,6 +941,12 @@ export class SurvivorHud {
                 ? `${card.parent} · ${card.levels}`
                 : card.parent
               : '';
+            /*
+             * The first upgrade a weapon ever receives is the one most worth noticing:
+             * it is where an authored behavioural tier actually begins. Flagged as data
+             * so the gold treatment lives in CSS rather than in a hard-coded colour here.
+             */
+            if (card?.levels === 'L1 → L2') parent.dataset.firstUpgrade = 'true';
             if (parent.textContent) btn.appendChild(parent);
 
             const name = document.createElement('strong');
@@ -906,7 +959,7 @@ export class SurvivorHud {
             summary.textContent = card?.summary ?? c.body;
             btn.appendChild(summary);
 
-            if (card && card.stats.length > 0) {
+            if (this.upgradeNumbers && card && card.stats.length > 0) {
               const stats = document.createElement('span');
               stats.className = 'sv-card-stats';
               for (const line of card.stats) {
@@ -924,6 +977,13 @@ export class SurvivorHud {
               trade.textContent = card.tradeoff;
               btn.appendChild(trade);
             }
+
+            // Bottom-left, after every content node, so it reads as an affordance on the
+            // card rather than as part of the upgrade's own copy.
+            const bind = document.createElement('kbd');
+            bind.className = 'sv-card-bind';
+            bind.textContent = labels[i] ?? String(i + 1);
+            btn.appendChild(bind);
 
             btn.addEventListener('pointerdown', (ev) => {
               ev.preventDefault();

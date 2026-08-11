@@ -24,6 +24,7 @@ import {
   findActionForCode,
   formatKeyCode,
   loadSettings,
+  UPGRADE_NUMBERS_DEFAULT,
   resetKeybinds,
   saveSettings,
   type ActionId,
@@ -72,6 +73,7 @@ export class SurvivorMode {
 
   private keybinds: KeybindMap = loadSettings().keybinds;
   private uiScale = loadSettings().uiScale;
+  private upgradeNumbers = loadSettings().upgradeNumbers;
   private settingsOpen = false;
   private rebindingAction: ActionId | null = null;
   /** Block gameplay input while rebinding or settings open */
@@ -132,7 +134,7 @@ export class SurvivorMode {
       }
       // Capture new bind (swap on conflict)
       this.keybinds = assignKeybind(this.keybinds, this.rebindingAction, code);
-      saveSettings({ version: 1, keybinds: this.keybinds, uiScale: this.uiScale });
+      this.persistSettings();
       this.rebindingAction = null;
       this.hud?.setRebinding(null);
       this.hud?.refreshKeybindLabels(this.keybinds);
@@ -269,12 +271,15 @@ export class SurvivorMode {
       onResetKeybinds: () => {
         this.keybinds = resetKeybinds();
         this.uiScale = 1;
-        saveSettings({ version: 1, keybinds: this.keybinds, uiScale: this.uiScale });
+        this.upgradeNumbers = UPGRADE_NUMBERS_DEFAULT;
+        this.persistSettings();
         this.applyUiScale(1);
         this.hud?.setUiScale(1);
+        this.hud?.setUpgradeNumbers(this.upgradeNumbers);
         this.hud?.refreshKeybindLabels(this.keybinds);
       },
       onUiScale: (s: number) => this.setUiScale(s),
+      onUpgradeNumbers: (on: boolean) => this.setUpgradeNumbers(on),
       onOpenLeaderboard: () => this.hud?.setLeaderboardOpen(true),
 
       getKeybinds: () => this.keybinds,
@@ -283,6 +288,7 @@ export class SurvivorMode {
     this.hud.refreshKeybindLabels(this.keybinds);
     this.applyUiScale(this.uiScale);
     this.hud.setUiScale(this.uiScale);
+    this.hud.setUpgradeNumbers(this.upgradeNumbers);
 
     this.bindWindowListeners();
     this.canvas.classList.add('game-mode');
@@ -586,10 +592,31 @@ export class SurvivorMode {
     document.documentElement.style.setProperty('--ui-scale', String(scale));
   }
 
+  /**
+   * The single writer for persisted settings.
+   *
+   * Four call sites used to build the payload by hand, which is exactly how a newly
+   * added preference gets silently dropped by whichever one nobody remembered to update.
+   */
+  private persistSettings(): void {
+    saveSettings({
+      version: 1,
+      keybinds: this.keybinds,
+      uiScale: this.uiScale,
+      upgradeNumbers: this.upgradeNumbers,
+    });
+  }
+
+  setUpgradeNumbers(on: boolean): void {
+    this.upgradeNumbers = on === true;
+    this.persistSettings();
+    this.hud?.setUpgradeNumbers(this.upgradeNumbers);
+  }
+
   setUiScale(scale: number): void {
     this.uiScale = clampUiScale(scale);
     this.applyUiScale(this.uiScale);
-    saveSettings({ version: 1, keybinds: this.keybinds, uiScale: this.uiScale });
+    this.persistSettings();
     this.hud?.setUiScale(this.uiScale);
   }
 

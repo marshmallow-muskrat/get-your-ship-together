@@ -2129,8 +2129,62 @@ html {
 .survivor-hud .sv-card-parent {
   font-size: 0.78rem;
   letter-spacing: 0.1em;
+  /*
+   * Shouting is presentation. The underlying string stays in authored Title Case (see
+   * `displayName`), so a name with intentional casing keeps it everywhere else.
+   */
   text-transform: uppercase;
   opacity: 0.72;
+}
+/*
+ * L1 -> L2 is the first upgrade a weapon ever receives, and the point where an authored
+ * behavioural tier actually begins. Gold marks it as the step worth noticing.
+ */
+.survivor-hud .sv-card-parent[data-first-upgrade='true'] {
+  color: #ffd46a;
+  opacity: 1;
+  font-weight: 700;
+  text-shadow: 0 0 12px color-mix(in srgb, #ffd46a 45%, transparent);
+}
+
+/*
+ * Keybind affordance, pinned to the card's bottom-left.
+ *
+ * The card is a column of copy; the bind is not part of that copy, so it sits out of
+ * flow in the corner with reserved padding on the card so it can never overlap the
+ * tradeoff line at any UI scale.
+ */
+.survivor-hud .sv-choice.sv-card {
+  position: relative;
+  padding-bottom: 2.1rem;
+}
+.survivor-hud .sv-card-bind {
+  position: absolute;
+  left: 0.85rem;
+  bottom: 0.7rem;
+  min-width: 1.5rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--hud-accent) 45%, transparent);
+  background: rgba(6, 14, 26, 0.75);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  color: color-mix(in srgb, var(--hud-accent) 88%, white 12%);
+}
+
+/* Slot pressure readout on the upgrade modal. */
+.survivor-hud .sv-slot-counter {
+  margin: 0 0 0.35rem;
+  letter-spacing: 0.16em;
+  opacity: 0.75;
+}
+.survivor-hud .sv-slot-counter.full {
+  color: #ffb066;
+  opacity: 1;
+  font-weight: 700;
 }
 .survivor-hud #sv-levelup .sv-choice.sv-card .sv-card-name {
   margin: 0.15rem 0 0.3rem;

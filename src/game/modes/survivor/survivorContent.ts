@@ -1059,6 +1059,21 @@ export function shipDamageTakenMul(reinforcedAirframeLevel: number): number {
 /** Hard floor on ship damage taken: 75% mitigation, never invulnerability. */
 export const SHIP_MITIGATION_FLOOR = 0.25;
 
+/**
+ * Player-facing display name for any authored content name (endless-2.8.0).
+ *
+ * Weapon, passive and boss names are authored in Title Case in the content tables, and
+ * the presentation layer used to shout them with scattered `.toUpperCase()` calls at
+ * each site. That put the same decision in four places, made "Bio-Plasma Glob" render as
+ * "BIO-PLASMA GLOB", and meant a name with intentional casing could never keep it.
+ *
+ * This is the one place the decision lives: the authored name is the display name.
+ * Emphasis belongs to CSS, which can shout without destroying the underlying string.
+ */
+export function displayName(authored: string): string {
+  return authored.trim();
+}
+
 /** Hard-capped Thruster Boost movement bonus. */
 export function moveSpeedBonus(level: number): number {
   return Math.min(0.3, Math.max(0, level) * 0.06);

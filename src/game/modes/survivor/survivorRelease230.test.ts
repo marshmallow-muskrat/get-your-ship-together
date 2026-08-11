@@ -826,7 +826,10 @@ describe('§13 upgrade cards', () => {
   it('Twin Globs explains the structural change and the cadence tradeoff', () => {
     const card = weaponUpgradeCard('bioplasma', 3);
     expect(card.category).toBe('WEAPON UPGRADE');
-    expect(card.parent).toBe('BIO-PLASMA GLOB');
+    // endless-2.8.0 centralised display names on `displayName`, which keeps the authored
+    // Title Case. Shouting is now CSS `text-transform`, so the string stays readable and
+    // a name with intentional casing survives.
+    expect(card.parent).toBe('Bio-Plasma Glob');
     expect(card.levels).toBe('L3 → L4');
     expect(card.name).toBe('Twin Globs');
     expect(card.summary).toMatch(/two|2/i);

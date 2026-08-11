@@ -6,7 +6,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import cssSource from '../../../styles/app.css?raw';
-import { UI_SCALE_MAX, UI_SCALE_MIN, clampUiScale } from './survivorKeybinds';
+import hudSource from './survivorHud.ts?raw';
+import upgradeCardSource from './survivorUpgradeCards.ts?raw';
+import {
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
+  UPGRADE_NUMBERS_DEFAULT,
+  clampUiScale,
+  clampUpgradeNumbers,
+} from './survivorKeybinds';
+import { passiveCard, weaponUpgradeCard } from './survivorUpgradeCards';
 import {
   BOSS_DAMAGE_BASE,
   BOSS_REFERENCE_RANGED_DAMAGE,
@@ -17,6 +26,7 @@ import {
   ALL_BOSS_PATTERNS,
   bossCategoryDamage,
   bossDamageScale,
+  displayName,
   bossDifficultyFor,
   isMegaBossIndex,
   type BossDamageCategory,
@@ -205,6 +215,73 @@ describe('§5 UI scale is a layout input, not a transform', () => {
     const body = cssSource.slice(at, cssSource.indexOf('}', at));
     expect(body).toMatch(/transform:\s*translateY\(\d+px\)/);
     expect(body).not.toMatch(/translateY\([\d.]+rem\)/);
+  });
+});
+
+describe('§5 upgrade cards', () => {
+  it('centralises display names on the authored Title Case', () => {
+    expect(displayName('Bio-Plasma Glob')).toBe('Bio-Plasma Glob');
+    expect(weaponUpgradeCard('bioplasma', 3).parent).toBe('Bio-Plasma Glob');
+    expect(passiveCard('regen', 1, 100).parent).toBe('Nanite Bleed');
+    // Nothing may re-introduce a shouted name in the data layer; that is CSS's job.
+    const sources = [hudSource, upgradeCardSource];
+    for (const src of sources) {
+      expect(src).not.toMatch(/\.name\.toUpperCase\(\)/);
+      expect(src).not.toMatch(/displayName\.toUpperCase\(\)/);
+    }
+  });
+
+  it('renders the keybind as its own bottom-left affordance', () => {
+    // Previously concatenated into the category badge, which read as part of the copy.
+    expect(hudSource).toMatch(/className = 'sv-card-bind'/);
+    expect(hudSource).not.toMatch(/card\?\.category \?\? fallbackLabel\(c\)\} · \$\{labels/);
+    const at = cssSource.indexOf('.survivor-hud .sv-card-bind {');
+    expect(at).toBeGreaterThan(-1);
+    const body = cssSource.slice(at, cssSource.indexOf('}', at));
+    expect(body).toMatch(/position:\s*absolute/);
+    expect(body).toMatch(/left:\s*[\d.]+rem/);
+    expect(body).toMatch(/bottom:\s*[\d.]+rem/);
+    // The card must reserve room for it rather than letting it overlap the copy.
+    const cardAt = cssSource.indexOf('.survivor-hud .sv-choice.sv-card {');
+    expect(cssSource.slice(cardAt, cssSource.indexOf('}', cardAt))).toMatch(/padding-bottom/);
+  });
+
+  it('marks the first upgrade of a weapon for the gold treatment', () => {
+    expect(weaponUpgradeCard('bioplasma', 1).levels).toBe('L1 → L2');
+    expect(hudSource).toMatch(/dataset\.firstUpgrade/);
+    expect(cssSource).toMatch(/\[data-first-upgrade='true'\]/);
+  });
+
+  it('counts ordinary weapon slots and excludes prototypes', () => {
+    expect(SURVIVOR.maxWeaponSlots).toBe(5);
+    // Prototypes do not consume a slot, so counting them would misreport slot pressure
+    // at exactly the moment the readout exists to inform.
+    expect(hudSource).toMatch(/state\.weapons\.filter\(\(w\) => !w\.prototype\)\.length/);
+    expect(hudSource).toMatch(/SURVIVOR\.maxWeaponSlots\} WEAPONS/);
+  });
+});
+
+describe('§5 Upgrade Numbers setting', () => {
+  it('defaults off and survives a round trip', () => {
+    expect(UPGRADE_NUMBERS_DEFAULT).toBe(false);
+    expect(clampUpgradeNumbers(undefined)).toBe(false);
+    expect(clampUpgradeNumbers(true)).toBe(true);
+    // Anything that is not exactly `true` reads as off, so a corrupted or older payload
+    // cannot silently enable it.
+    for (const v of [null, 0, 1, 'true', 'on', {}, []]) {
+      expect(clampUpgradeNumbers(v), String(v)).toBe(false);
+    }
+  });
+
+  it('gates the stat lines on the card', () => {
+    expect(hudSource).toMatch(/this\.upgradeNumbers && card && card\.stats\.length > 0/);
+  });
+
+  it('rebuilds cards when toggled mid-level-up', () => {
+    // Cards are cached by offered-choice key; without invalidation the toggle would
+    // appear to do nothing until the next level.
+    expect(hudSource).toMatch(/this\.upgradeNumbers \? '#n' : ''/);
+    expect(hudSource).toMatch(/setUpgradeNumbers\(on: boolean\)/);
   });
 });
 

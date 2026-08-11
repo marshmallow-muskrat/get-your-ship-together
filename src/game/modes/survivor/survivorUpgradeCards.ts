@@ -30,6 +30,7 @@ import {
   moveSpeedBonus,
   overclockLevel,
   regenFractionAtLevel,
+  displayName,
   repairOrbBonusAtLevel,
   shipDamageTakenMul,
   weaponStatsAtLevel,
@@ -52,7 +53,7 @@ export type CardCategory =
 /** Fully-described upgrade card. */
 export interface UpgradeCardCopy {
   category: CardCategory;
-  /** Parent weapon or passive name, e.g. "BIO-PLASMA GLOB". */
+  /** Parent weapon or passive name in authored Title Case, e.g. "Bio-Plasma Glob". */
   parent: string;
   /** Level transition, e.g. "L3 → L4". Empty for brand-new picks. */
   levels: string;
@@ -247,7 +248,7 @@ export function weaponUpgradeCard(
   if (authored) {
     return {
       category: fam.prototype ? 'PROTOTYPE UPGRADE' : 'WEAPON UPGRADE',
-      parent: fam.name.toUpperCase(),
+      parent: displayName(fam.name),
       levels: `L${currentLevel} → L${next}`,
       name: fam.levels[next - 1]!.label,
       summary: weaponUpgradeSummary(weaponId, currentLevel, next),
@@ -258,7 +259,7 @@ export function weaponUpgradeCard(
   const oc = overclockLevel(next);
   return {
     category: 'OVERCLOCK',
-    parent: fam.name.toUpperCase(),
+    parent: displayName(fam.name),
     levels: `L${currentLevel} → L${next}`,
     name: formatOverclockLabel(oc),
     summary: `Keeps the ${fam.levels[fam.levels.length - 1]!.label} structure and adds flat damage. Overclock damage is additive, so it never compounds.`,
@@ -290,7 +291,7 @@ export function newWeaponCard(weaponId: WeaponId): UpgradeCardCopy {
   if (l1.length != null) stats.push(`Length ${round(l1.length, 1)}`);
   return {
     category: fam.prototype ? 'NEW PROTOTYPE' : 'NEW WEAPON',
-    parent: fam.name.toUpperCase(),
+    parent: displayName(fam.name),
     levels: '',
     name: fam.levels[0]!.label,
     summary: fam.prototype
@@ -414,7 +415,7 @@ export function passiveCard(
 
   return {
     category: currentLevel > 0 ? 'PASSIVE UPGRADE' : 'NEW PASSIVE',
-    parent: def.name.toUpperCase(),
+    parent: displayName(def.name),
     levels: currentLevel > 0 ? `L${currentLevel} → L${next}` : `L${next}`,
     name: def.name,
     summary,

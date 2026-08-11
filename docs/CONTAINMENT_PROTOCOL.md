@@ -670,6 +670,37 @@ the joint cell, so the cross-tab reconciles with both existing views *exactly* r
 approximately, and overkill remains excluded under the existing contract. The map is bounded at
 `|sources| × 3`. The default report is unchanged in density — the breakdown is opt-in per row.
 
+## Upgrade HUD (endless-2.8.0)
+
+| Element | Behaviour |
+|---|---|
+| Slot counter | `x/5 WEAPONS` on the upgrade modal; ordinary slots only |
+| Keybind | Own affordance pinned to the card's bottom-left, not part of the copy |
+| First upgrade | `L1 → L2` rendered gold — where an authored behavioural tier begins |
+| Upgrade Numbers | Setting, **default off**, persisted; gates the raw stat lines |
+| Display names | Centralised on `displayName`; authored Title Case, shouting is CSS |
+
+The slot counter excludes prototypes (Arc Conductor, Orbital Lance) because they do not consume
+an ordinary slot. Counting them would tell the player they are fuller than they are, at exactly
+the moment the readout exists to inform: the choice between a new weapon and an upgrade.
+
+Upgrade Numbers defaults off because the cards lead with what an upgrade *does*; the numbers are
+for players who want to compare precisely, and showing them by default turns a choice about
+identity into a spreadsheet. Settings written before endless-2.8.0 have no such key and read as
+the default rather than as enabled. Toggling it while a level-up is open invalidates the card
+cache, so the change is visible immediately rather than at the next level.
+
+### UI scale reflows
+
+`--ui-scale` drives the **root font size**, not a transform. A transform is a paint-time
+operation: it resizes pixels without re-running layout, so at 1.5x nothing rewrapped and panels
+grew past the viewport edge along whatever `transform-origin` they declared. Driving the font size
+makes the scale a layout input — rem values are recomputed, text rewraps, and the existing
+`min()`/`clamp()` caps against `vw`/`vh` do what they were written to do.
+
+Range is `UI_SCALE_MIN 0.75` to `UI_SCALE_MAX 1.5`. Framing offsets that should not compound with
+the scale (the crew-select lower HUD nudge) are expressed in px deliberately.
+
 ## UI
 
 - Larger top HUD and survival/breach messaging
