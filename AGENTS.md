@@ -74,3 +74,81 @@ npm test -- --run
 npm run typecheck
 npm run build
 ```
+
+Two CPU-bound benchmark tests can exceed vitest's 5000ms default on slow hardware
+and fail as timeouts rather than assertions (`per-level effective gains`,
+`pressure director > never stacks surges`). With headroom both suites pass in
+full. CI runs `npm test -- --testTimeout=120000`. If you see exactly those two
+failing on time, raise the timeout and re-run before treating it as a
+regression — and never "fix" it by changing a balance value or an acceptance
+band.
+
+Browser QA is scriptable and does not require a human:
+
+```bash
+npm run build
+python3 -m http.server 8899 --directory dist &
+node scripts/browserQa.mjs http://127.0.0.1:8899 --screenshots qa-shots
+```
+
+It sweeps the required viewport x UI-scale matrix (75/100/125/150% at desktop,
+laptop, and narrow widths), reporting console errors, WebGL canvas presence, and
+per-edge clipping of interactive elements. It accepts any base URL, so the same
+harness runs against a deployed alias. Narrow/mobile widths are measured but
+non-blocking: this is not currently a mobile game.
+
+## Deployment
+
+Deployment is owned by the **Cloudflare Pages Git integration** on the existing
+`get-your-ship-together` project. Pushing a branch builds and publishes it.
+
+- Never create a replacement Cloudflare project.
+- Do not add a second deploy path (wrangler direct upload, a deploy workflow).
+  Two publishers racing the same alias is how deployments become unexplainable.
+- Required project build configuration: build command `npm run build`, build
+  output directory `dist`, root directory `/`. Node 22.
+
+Branch to URL:
+
+| Branch | URL |
+| --- | --- |
+| `main` | `https://get-your-ship-together.pages.dev` |
+| any other branch | `https://<branch>.get-your-ship-together.pages.dev` |
+
+Long branch names are truncated in the alias.
+
+## Verifying a deployment
+
+**"Deploy successful" does not mean the site works.** If the project's build
+configuration is missing, Pages publishes the repository verbatim: the deploy is
+reported green, the URL returns HTTP 200, and the served page is the development
+`index.html` pointing at `/src/main.ts`, which no browser can execute. This has
+happened in production. Assume nothing from deploy status.
+
+A deployment is verified only when all of these hold:
+
+1. Served `index.html` references `/assets/*.js` and `/assets/*.css`, and does
+   **not** reference `/src/main.ts`.
+2. Each served asset matches a clean local build of the deployed commit by byte
+   size and SHA-256.
+3. The served JavaScript contains the expected `SURVIVOR_BALANCE_VERSION` marker
+   and does not contain the marker of any other partition.
+4. Browser QA against the deployed URL reports no console or page errors.
+
+`.github/workflows/verify-deployment.yml` (workflow_dispatch) does all four and
+writes a byte/SHA-256 comparison table to the run summary. It takes a URL, a
+reference commit, and optional expected/forbidden markers, and needs no
+Cloudflare credentials — it only makes public HTTP requests. Use it when your
+own environment cannot reach `*.pages.dev`.
+
+## Environment notes for agents
+
+- Some sandboxes deny egress to Cloudflare entirely (`api.cloudflare.com`,
+  `*.pages.dev`). Credentials do not help; the connection is refused before
+  authentication. Run deployed verification from CI instead, and say plainly
+  that you could not reach the site rather than inferring it from deploy status.
+- Headless Chromium does not inherit `HTTPS_PROXY` the way curl does. Pass the
+  proxy explicitly when QA-ing a remote URL.
+- Pushing tags may fail where branch pushes succeed, depending on how git
+  credentials are proxied. Do not assume a tag landed; confirm with
+  `git ls-remote --tags origin`.

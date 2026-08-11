@@ -18,6 +18,19 @@ npm run build
 npm run bench:survival
 ```
 
+Browser QA against a built game, local or deployed:
+
+```bash
+npm run build
+python3 -m http.server 8899 --directory dist &
+node scripts/browserQa.mjs http://127.0.0.1:8899 --screenshots qa-shots
+```
+
+Deployment is handled by the Cloudflare Pages Git integration: pushing `main`
+publishes production, and any other branch publishes to
+`https://<branch>.get-your-ship-together.pages.dev`. See `AGENTS.md` for how to
+verify a deployment — a green deploy status alone does not mean the site works.
+
 ## The game
 
 - **One endless arena:** Reactor Platform 7

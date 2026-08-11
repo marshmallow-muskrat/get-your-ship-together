@@ -29,12 +29,20 @@ const shotIdx = process.argv.indexOf('--screenshots');
 const shotDir = shotIdx === -1 ? null : process.argv[shotIdx + 1];
 if (shotDir) mkdirSync(shotDir, { recursive: true });
 
-/** Viewport matrix: representative desktop plus mobile/narrow. */
+/**
+ * Viewport matrix.
+ *
+ * `blocking: false` viewports are still measured and reported, but do not fail
+ * the run. Narrow/mobile widths are non-blocking because this is not currently
+ * intended to be a mobile game, so their layout is recorded for information
+ * rather than gating a release. Raise them to blocking if mobile becomes a
+ * supported target.
+ */
 const VIEWPORTS = [
-  { name: 'desktop-1920', width: 1920, height: 1080 },
-  { name: 'desktop-1280', width: 1280, height: 800 },
-  { name: 'laptop-1024', width: 1024, height: 768 },
-  { name: 'mobile-390', width: 390, height: 844 },
+  { name: 'desktop-1920', width: 1920, height: 1080, blocking: true },
+  { name: 'desktop-1280', width: 1280, height: 800, blocking: true },
+  { name: 'laptop-1024', width: 1024, height: 768, blocking: true },
+  { name: 'mobile-390', width: 390, height: 844, blocking: false },
 ];
 
 /** UI scales the protocol requires. */
@@ -135,15 +143,15 @@ for (const vp of VIEWPORTS) {
 
     const off = layout.clipped.left + layout.clipped.right + layout.clipped.top + layout.clipped.bottom;
     const bad = layout.hOverflow || off > 0;
-    if (bad) failed = true;
+    if (bad && vp.blocking) failed = true;
 
     report.checks.push({
-      viewport: vp.name, scale, status, canvas: layout.canvas,
+      viewport: vp.name, scale, status, canvas: layout.canvas, blocking: vp.blocking,
       hOverflow: layout.hOverflow,
       offscreen: off,
       edges: `L${layout.clipped.left} R${layout.clipped.right} T${layout.clipped.top} B${layout.clipped.bottom}`,
       offenders: layout.offenders,
-      verdict: bad ? 'FAIL' : 'ok',
+      verdict: bad ? (vp.blocking ? 'FAIL' : 'info') : 'ok',
     });
 
     if (shotDir) {
