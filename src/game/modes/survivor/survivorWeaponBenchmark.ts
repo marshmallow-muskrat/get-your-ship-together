@@ -65,6 +65,8 @@ export const INTENDED_SCENARIO: Record<WeaponId, BenchmarkScenario | 'general'> 
   rotary: 'single-boss',
   'plasma-wake': 'mobile-offaxis',
   pulsar: 'dense',
+  // Its value is the lane it cuts twice, which only shows against a line of bodies.
+  boomerang: 'lined-up',
   arc: 'mixed-elite',
   orbital: 'single-boss',
 };
@@ -449,6 +451,7 @@ export const BREAKPOINT_LEVEL: Record<WeaponId, number> = {
   rotary: 5, // Twin Barrels
   'plasma-wake': 5, // Twin Wake
   pulsar: 5, // Echo Pulsar
+  boomerang: 5, // Twin Orbit — second disc on a diverging bearing
   arc: 5, // Arc Storm — fourth chain plus discharge
   orbital: 5, // Judgment Array — second lance
 };

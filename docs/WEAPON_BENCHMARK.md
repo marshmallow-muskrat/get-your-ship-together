@@ -1,6 +1,6 @@
 # Weapon Benchmark
 
-Balance version: `endless-2.7.0`
+Balance version: `endless-2.8.0`
 
 **This file is generated.** Every number below is produced by
 `src/game/modes/survivor/survivorWeaponBenchmark.ts` and printed by
@@ -49,7 +49,8 @@ Do not hand-edit the tables.
 | Pulse Blaster | `general` | 1917 | 2574 | 3280 | 4558 | 6320 | 3.30 | 34% | 27% | 39% | 39% | L5 |
 | Microdrone Swarm | `mobile-offaxis` | 6552 | 8400 | 9720 | 13510 | 19694 | 3.01 | 28% | 16% | 39% | 46% | L5 |
 | Rail Lance | `lined-up` | 9000 | 11845 | 16520 | 20880 | 30450 | 3.38 | 32% | 39% | 26% | 46% | L5 |
-| Gravity Pulse | `dense` | 4444 | 5733 | 7992 | 10080 | 13662 | 3.07 | 29% | 39% | 26% | 36% | L5 |
+| Gravity Pulse | `dense` | 4268 | 5782 | 7830 | 9720 | 14076 | 3.30 | 35% | 35% | 24% | 45% | L5 |
+| Cosmic Boomerang | `lined-up` | 4284 | 5889 | 8008 | 10850 | 16188 | 3.78 | 37% | 36% | 35% | 49% | L5 |
 | Rocket Barrage | `clustered` | 8326 | 9724 | 12825 | 17582 | 25992 | 3.12 | 17% | 32% | 37% | 48% | L5 |
 | Bio-Plasma Glob | `clustered` | 8159 | 11066 | 15083 | 20758 | 28679 | 3.52 | 36% | 36% | 38% | 38% | L5 |
 | Rotary Cannon | `single-boss` | 2937 | 3848 | 4995 | 5994 | 8880 | 3.02 | 31% | 30% | 20% | 48% | L5 |
@@ -88,7 +89,8 @@ Bio-Plasma chains splash/corrosion, and rockets distribute area explosions.
 | Pulse Blaster | 294 → 968 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 378 → 1188 | 336 → 1056 |
 | Microdrone Swarm | 1722 → 2752 | 2058 → 5332 | 2310 → 8342 | 2184 → 6708 | 2016 → 5590 | 1932 → 5676 | 2058 → 6880 |
 | Rail Lance | 500 → 1392 | 1800 → 5220 | 5800 → 18966 | 4000 → 10614 | 1900 → 6264 | 2300 → 8178 | 2400 → 6960 |
-| Gravity Pulse | 176 → 414 | 528 → 1656 | 1100 → 4278 | 968 → 2484 | 660 → 1932 | 704 → 1794 | 836 → 2622 |
+| Gravity Pulse | 176 → 414 | 484 → 1656 | 1408 → 4278 | 924 → 3450 | 616 → 2070 | 704 → 2346 | 924 → 2622 |
+| Cosmic Boomerang | 204 → 285 | 1020 → 2793 | 2380 → 11514 | 1292 → 7011 | 1020 → 2964 | 1088 → 2166 | 850 → 2508 |
 | Rocket Barrage | 1288 → 3168 | 2024 → 5544 | 2990 → 11448 | 2208 → 8424 | 2070 → 6696 | 2208 → 9216 | 3450 → 8136 |
 | Bio-Plasma Glob | 1029 → 4140 | 2076 → 7919 | 3143 → 11386 | 2518 → 9635 | 2092 → 8158 | 1890 → 7430 | 1804 → 7295 |
 | Rotary Cannon | 693 → 2080 | 913 → 2760 | 924 → 2800 | 924 → 2800 | 913 → 2800 | 913 → 2620 | 924 → 2640 |

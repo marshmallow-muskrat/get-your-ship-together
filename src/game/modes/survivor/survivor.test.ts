@@ -997,7 +997,9 @@ describe('mixed level-up offers (passives not starved)', () => {
     state.weapons = [{ weaponId: 'pulse', level: 3, cooldown: 0, focusDebt: 0, prototype: false }];
     const choices = generateChoices(state);
     expect(choices.length).toBe(3);
-    const forced = choices.filter((c) => c.id.includes('forced'));
+    // Anchored, not a substring scan: the Reinforced Airframe passive's id contains
+    // "forced" and made this read two forced prototypes where there was only ever one.
+    const forced = choices.filter((c) => c.id.endsWith('-forced'));
     expect(forced.length).toBeLessThanOrEqual(1);
     expect(choices.some((c) => c.kind === 'passive' || (c.kind === 'weapon' && c.weaponId === 'pulse') || c.kind === 'new-weapon')).toBe(
       true,

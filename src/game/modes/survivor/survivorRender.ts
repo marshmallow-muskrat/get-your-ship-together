@@ -189,6 +189,25 @@ export class SurvivorRenderer {
 
   /** Distinct readable silhouettes for signature projectiles. */
   private createProjectileActor(kind: import('./survivorState').ProjectileKind, color: string): THREE.Object3D {
+    if (kind === 'boomerang') {
+      /*
+       * A flat spinning disc with a bright rim, so the outbound and return legs read as
+       * the same object travelling a lane rather than as two separate shots. Spin is
+       * applied in the sync pass; the geometry is owned so teardown releases it.
+       */
+      const g = new THREE.Group();
+      const disc = this.ownMesh(
+        new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.11, 8, 20), this.effectMat(color, 0.95, true)),
+      );
+      disc.rotation.x = -Math.PI / 2;
+      const core = this.ownMesh(
+        new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), this.effectMat('#e8fbff', 0.55, true)),
+      );
+      core.rotation.x = -Math.PI / 2;
+      g.add(disc, core);
+      g.name = 'projectile-boomerang';
+      return g;
+    }
     if (kind !== 'rocket' && kind !== 'drone' && kind !== 'rotary-round') {
       return new THREE.Mesh(this.boltGeo, this.mat(color));
     }
@@ -596,6 +615,11 @@ export class SurvivorRenderer {
           const flicker = 0.82 + Math.sin(performance.now() * 0.045 + p.id) * 0.2;
           exhaust.scale.set(1, flicker, 1);
         }
+      }
+      if (mesh.name === 'projectile-boomerang') {
+        // Spin reads the flight; direction of spin flips on the return leg.
+        mesh.rotation.y += (p.returning ? -1 : 1) * 14 * (1 / 60);
+        mesh.scale.setScalar(Math.max(0.4, (p.visualRadius || p.radius) * 2.1));
       }
       const s =
         p.kind === 'drone'

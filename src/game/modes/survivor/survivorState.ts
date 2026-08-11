@@ -79,6 +79,8 @@ export type ProjectileKind =
   | 'rocket'
   | 'enemy'
   | 'bioplasma'
+  /** Cosmic Boomerang: flies out, turns, and comes back through the same lane. */
+  | 'boomerang'
   | 'boss-orb'
   | 'boss-fan'
   | 'orbital-marker';
@@ -116,6 +118,20 @@ export interface SurvivorProjectile {
   splitDone: boolean;
   /** Minimum flight time before proximity detonation is armed. */
   fuseDelay: number;
+  /**
+   * Cosmic Boomerang flight (endless-2.8.0).
+   *
+   * `returning` flips once the throw reaches its turn distance. `hitIds` is the set of
+   * entities already struck on the *current* leg and is cleared at the turn, which is
+   * what makes the return pass a genuine second opportunity rather than either a free
+   * double-hit on the way out or a wasted trip home. Bounded by the living entity count
+   * and reused in place on pool reuse.
+   */
+  returning: boolean;
+  originX: number;
+  originZ: number;
+  turnDistance: number;
+  hitIds: Set<number> | null;
   /**
    * Telemetry bucket override.
    *

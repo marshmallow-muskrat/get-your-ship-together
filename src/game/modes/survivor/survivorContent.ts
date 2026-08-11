@@ -554,6 +554,20 @@ export const SURVIVOR = {
   },
   /** Gravity Pulse boss damage rate, unchanged from endless-2.7.0. */
   gravityBossDamageMul: 0.7,
+  /**
+   * Cosmic Boomerang flight (endless-2.8.0).
+   *
+   * `turnDistance` is how far the disc carves before reversing; it scales with the
+   * authored `life` so a longer-lived throw reaches further rather than merely lingering.
+   * `bossDamageMul` keeps a lane weapon from being a boss-melting weapon: a boss is one
+   * body, so it would otherwise take both passes at full rate for free.
+   */
+  boomerang: {
+    turnDistancePerLife: 4.2,
+    /** Diverging bearing between the pair at Twin Orbit, in radians. */
+    twinSpread: 0.42,
+    bossDamageMul: 0.75,
+  },
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
@@ -676,6 +690,8 @@ export type WeaponId =
   | 'rotary'
   | 'plasma-wake'
   | 'pulsar'
+  /** Cosmic Boomerang (endless-2.8.0): returning lane weapon. */
+  | 'boomerang'
   | 'arc'
   | 'orbital';
 
@@ -778,6 +794,30 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       { level: 3, label: 'Gravity Pulse III', damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 1.05 },
       { level: 4, label: 'Deep Well', damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 1.05 },
       { level: 5, label: 'Event Horizon', damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 1.05 },
+    ],
+  },
+  boomerang: {
+    id: 'boomerang',
+    name: 'Cosmic Boomerang',
+    description: 'Thrown disc that carves out, turns, and cuts back through the same lane.',
+    color: '#7ce8ff',
+    levels: [
+      /*
+       * The identity is the *return*: every throw is two passes through the same lane, so
+       * the weapon rewards throwing across the horde's approach rather than at whatever
+       * is nearest. Damage stays modest per hit because each throw gets two chances at
+       * every body it passes, and pierce is effectively unlimited within a leg — the
+       * limit is geometry, not a hit counter.
+       *
+       * Growth comes from reach and turn distance through L4; the second disc is the
+       * declared L5 breakpoint, thrown on a diverging bearing so Twin Orbit covers a
+       * cone rather than doubling one lane.
+       */
+      { level: 1, label: 'Cosmic Boomerang I', damage: 34, cadence: 1.55, count: 1, speed: 15, radius: 0.5, life: 2.6 },
+      { level: 2, label: 'Cosmic Boomerang II', damage: 39, cadence: 1.42, count: 1, speed: 15.5, radius: 0.55, life: 2.8 },
+      { level: 3, label: 'Wide Arc', damage: 44, cadence: 1.34, count: 1, speed: 16, radius: 0.6, life: 3.0 },
+      { level: 4, label: 'Deep Throw', damage: 50, cadence: 1.24, count: 1, speed: 16.5, radius: 0.63, life: 3.15 },
+      { level: 5, label: 'Twin Orbit', damage: 57, cadence: 1.42, count: 2, speed: 17, radius: 0.66, life: 3.4 },
     ],
   },
   rocket: {

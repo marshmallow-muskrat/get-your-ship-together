@@ -118,8 +118,8 @@ burst into nearby targets and its residue slows pursuit; Rocket Barrage distribu
 proximity-fused mini-rockets across distinct clusters. These are mechanical identity improvements,
 not four recolored versions of one attack.
 
-Every hero can roll the shared Pulse Blaster, Gravity Pulse, Rotary Cannon, Plasma Wake, and Pulsar
-Core families. Arc Conductor and Orbital Lance remain prototype slots. The deterministic benchmark
+Every hero can roll the shared Pulse Blaster, Gravity Pulse, Rotary Cannon, Plasma Wake, Pulsar
+Core, and Cosmic Boomerang families. Arc Conductor and Orbital Lance remain prototype slots. The deterministic benchmark
 requires every authored family to grow 3–4.2× in its intended scenario from L1 to L5.
 
 Plasma Wake lays a **connected trail of capsule segments** (endless-2.7.0). Each segment is a
@@ -149,6 +149,28 @@ Because segments chain, coverage depends on lifetime and speed rather than emiss
 which is why emission is now much *less* frequent while the trail is *denser*. A per-level
 integrated-damage normalization (`SURVIVOR.plasmaTrail.damageNorm`) re-bases the weapon so L4–L5
 stay within ~3% of the 2.6.1 measured output while L1 gains; see [`WEAPON_BENCHMARK.md`](WEAPON_BENCHMARK.md).
+
+### Cosmic Boomerang (endless-2.8.0)
+
+A thrown disc that carves out to its turn distance, reverses, and cuts back through the same lane.
+The identity is the **return**: every throw is two passes, so the weapon rewards throwing across
+the horde's approach rather than at whatever is nearest, and rewards repositioning after the throw
+because the disc comes back to where the player *now* is.
+
+| Property | Behaviour |
+|---|---|
+| Hits per body | Once per leg, twice per throw |
+| Pierce | Unlimited within a leg — the limit is geometry, not a counter |
+| Turn distance | `life x 4.2 x area`, so a longer throw reaches further rather than lingering |
+| Twin Orbit (L5) | Second disc on a diverging bearing, covering a cone rather than one lane |
+| Boss rate | 0.75x — a boss is one body, so two full-rate passes would make a lane weapon a boss weapon |
+
+The hit list is cleared at the turn, which is what makes the return a genuine second opportunity
+rather than a free double-hit outbound or a wasted trip home. The disc is caught on reaching the
+player, and collisions resolve on that frame before it despawns.
+
+Measured progression: L5/L1 **3.78** with per-level gains 37% / 36% / 35% / 49%, the last being
+the declared L5 breakpoint. Within the documented contract on every axis.
 
 ## Time-gated prototypes
 

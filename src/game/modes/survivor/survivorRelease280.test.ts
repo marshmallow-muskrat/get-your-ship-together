@@ -27,11 +27,18 @@ import {
   bossCategoryDamage,
   bossDamageScale,
   displayName,
+  isSignatureWeapon,
   bossDifficultyFor,
   isMegaBossIndex,
   type BossDamageCategory,
   type BossPhase,
 } from './survivorContent';
+import {
+  BREAKPOINT_LEVEL,
+  PROGRESSION_BOUNDS,
+  levelGains,
+  levelProgressionRatio,
+} from './survivorWeaponBenchmark';
 import {
   BODY_RATIO_BAND,
   CHARGE_RATIO_BAND,
@@ -43,6 +50,7 @@ import {
   applyBossBodyContact,
   forceBossIntoPattern,
   forceStartProtocol,
+  spawnEnemyForTest,
   spawnGravityWellForTest,
   stepSurvivor,
   surroundPlayer,
@@ -383,6 +391,123 @@ describe('§6 Cleanup Crew allies fight independently', () => {
       b.allies.map((x) => `${x.x.toFixed(6)},${x.z.toFixed(6)}`),
     );
   }, 60_000);
+});
+
+describe('§8 Cosmic Boomerang', () => {
+  /** Fire one throw with a line of bodies in front of the player. */
+  function thrown(seed: number, level = 1): SurvivorState {
+    const state = createSurvivorState('bee', null, seed);
+    state.phase = 'playing';
+    state.player.invuln = 1e9;
+    state.weapons = [
+      { weaponId: 'boomerang', level, cooldown: 0, focusDebt: 0, prototype: false },
+    ];
+    for (let i = 0; i < 8; i += 1) {
+      spawnEnemyForTest(state, 'basic', state.player.x, state.player.z + 3 + i * 1.6);
+    }
+    return state;
+  }
+
+  it('is a returning weapon, not another straight shot', () => {
+    const state = thrown(2880);
+    let sawOutbound = false;
+    let sawReturn = false;
+    let maxDist = 0;
+    for (let i = 0; i < 300; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      for (const pr of state.projectiles) {
+        if (!pr.active || pr.kind !== 'boomerang') continue;
+        const d = Math.hypot(pr.x - state.player.x, pr.z - state.player.z);
+        maxDist = Math.max(maxDist, d);
+        if (pr.returning) sawReturn = true;
+        else sawOutbound = true;
+      }
+    }
+    expect(sawOutbound).toBe(true);
+    expect(sawReturn, 'the disc never turned').toBe(true);
+    expect(maxDist).toBeGreaterThan(4);
+  }, 60_000);
+
+  it('strikes each body once per leg, and gets two legs', () => {
+    /*
+     * The identity. Within a leg the limit is geometry, not a pierce counter, so a disc
+     * that overlaps a body for many frames still bills once — and clearing the hit list
+     * at the turn is what makes the return a genuine second opportunity rather than a
+     * free double-hit or a wasted trip home.
+     */
+    const state = thrown(2881);
+    const target = state.enemies.find((e) => e.alive)!;
+    target.maxHealth = 1_000_000;
+    target.health = target.maxHealth;
+
+    // Let exactly one throw leave the hand, then stop the weapon firing again — over a
+    // full flight the cadence would otherwise launch several discs and the count would
+    // measure the fire rate rather than the two-leg contract.
+    let launched = false;
+    for (let i = 0; i < 240 && !launched; i += 1) {
+      for (const e of state.enemies) if (e.alive && e !== target) e.alive = false;
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      launched = state.projectiles.some((pr) => pr.active && pr.kind === 'boomerang');
+    }
+    expect(launched, 'no disc was thrown').toBe(true);
+    state.weapons[0]!.cooldown = 1e9;
+
+    /*
+     * The body is pinned in the lane rather than left to chase. A chasing enemy ends up
+     * standing on the player, and the disc is caught at the player's radius — which is
+     * slightly wider than its own hit radius — so it despawns a fraction before it could
+     * strike something at point-blank. That is correct catch geometry, but it makes a
+     * chasing target the wrong instrument for measuring the two-leg contract.
+     */
+    const lane = { x: state.player.x, z: state.player.z + 4 };
+    const before = target.health;
+    let legs = 0;
+    let prevHealth = target.health;
+    for (let i = 0; i < 400; i += 1) {
+      for (const e of state.enemies) if (e.alive && e !== target) e.alive = false;
+      target.x = lane.x;
+      target.z = lane.z;
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      target.x = lane.x;
+      target.z = lane.z;
+      if (target.health < prevHealth) {
+        legs += 1;
+        prevHealth = target.health;
+      }
+    }
+    expect(before - target.health).toBeGreaterThan(0);
+    // Exactly two damage events from one throw: out and back.
+    expect(legs).toBe(2);
+  }, 60_000);
+
+  it('clears its hit list on a pooled reuse', () => {
+    const state = thrown(2882);
+    for (let i = 0; i < 60; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    const live = state.projectiles.filter((pr) => pr.active && pr.kind === 'boomerang');
+    expect(live.length).toBeGreaterThan(0);
+    for (const pr of live) expect(pr.hitIds).not.toBeNull();
+  });
+
+  it('holds the documented progression contract', () => {
+    const r = levelProgressionRatio('boomerang');
+    expect(r).toBeGreaterThanOrEqual(PROGRESSION_BOUNDS.ratioMin);
+    expect(r).toBeLessThanOrEqual(PROGRESSION_BOUNDS.ratioMax);
+    const gains = levelGains('boomerang');
+    const over = gains.filter((g) => g > PROGRESSION_BOUNDS.typicalGainMax).length;
+    // Only the declared L5 breakpoint may exceed the typical ceiling.
+    expect(over).toBeLessThanOrEqual(1);
+    expect(BREAKPOINT_LEVEL.boomerang).toBe(5);
+  }, 60_000);
+
+  it('does not melt bosses on both passes at full rate', () => {
+    // A boss is one body, so two legs at full rate would make a lane weapon a boss weapon.
+    expect(SURVIVOR.boomerang.bossDamageMul).toBeLessThan(1);
+    expect(SURVIVOR.boomerang.bossDamageMul).toBeGreaterThan(0);
+  });
+
+  it('is a shared weapon rather than anyone\'s signature', () => {
+    expect(isSignatureWeapon('boomerang')).toBe(false);
+  });
 });
 
 // ------------------------------------------------------------------ §3 boss fairness

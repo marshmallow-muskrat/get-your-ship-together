@@ -1062,6 +1062,11 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     splitDone: false,
     fuseDelay: 0,
     srcOverride: null,
+    returning: false,
+    originX: 0,
+    originZ: 0,
+    turnDistance: 0,
+    hitIds: null,
   };
   state.projectiles.push(p);
   return p;
@@ -1703,6 +1708,38 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         }
       }
       pushEffect(state, 'muzzle', p.x, p.z, 0.1, WEAPONS.bioplasma.color, 0.9);
+    } else if (slot.weaponId === 'boomerang') {
+      /*
+       * Cosmic Boomerang: thrown along a chosen lane, not at a body.
+       *
+       * Aim leads toward the current target so the outbound leg cuts through whatever is
+       * approaching, and the return leg then re-cuts the same lane from the other side.
+       * At Twin Orbit the pair diverges rather than doubling one lane, so the throw
+       * covers a cone.
+       */
+      const aim = selectWeaponTarget(state, slot, p.x, p.z, 20);
+      const pos = targetPosition(aim);
+      const base = pos ? Math.atan2(pos.x - p.x, pos.z - p.z) : Math.atan2(p.facingX, p.facingZ);
+      const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+      const spd = def.speed ?? 15;
+      const cfgB = SURVIVOR.boomerang;
+      for (let i = 0; i < count; i += 1) {
+        const proj = acquireProjectile(state);
+        if (!proj) break;
+        const ang = base + (i - (count - 1) / 2) * cfgB.twinSpread;
+        resetProj(proj, state, 'boomerang', 'boomerang', p.x, p.z, Math.sin(ang) * spd, Math.cos(ang) * spd, {
+          damage: dmg,
+          radius: (def.radius ?? 0.5) * area,
+          visualRadius: (def.radius ?? 0.5) * area * 1.25,
+          life: def.life ?? 2.6,
+          color: WEAPONS.boomerang.color,
+          originX: p.x,
+          originZ: p.z,
+          // Reach scales with the authored life, so a longer throw goes further rather
+          // than merely lingering at the same distance.
+          turnDistance: (def.life ?? 2.6) * cfgB.turnDistancePerLife * area,
+        });
+      }
     } else if (slot.weaponId === 'rotary') {
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 20, { forceBoss: state.time >= 600 });
       const pos = targetPosition(aim);
@@ -2092,6 +2129,17 @@ function resetProj(
   proj.splitDone = opts.splitDone ?? false;
   proj.fuseDelay = opts.fuseDelay ?? 0;
   proj.srcOverride = opts.srcOverride ?? null;
+  proj.returning = opts.returning ?? false;
+  proj.originX = opts.originX ?? x;
+  proj.originZ = opts.originZ ?? z;
+  proj.turnDistance = opts.turnDistance ?? 0;
+  if (kind === 'boomerang') {
+    // Reused in place so a recycled pool slot never inherits the previous throw's hits.
+    if (proj.hitIds) proj.hitIds.clear();
+    else proj.hitIds = new Set<number>();
+  } else if (proj.hitIds) {
+    proj.hitIds.clear();
+  }
 }
 
 function fireBioGlob(
@@ -2396,6 +2444,79 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
           if (proj.kind === 'boss-orb') proj.active = false;
         }
       }
+      continue;
+    }
+
+    if (proj.kind === 'boomerang') {
+      /*
+       * Two legs through one lane.
+       *
+       * Outbound until the throw reaches `turnDistance`, then it reverses and steers back
+       * toward the player — who has moved, so the return lane is never quite the outbound
+       * one and the weapon rewards positioning after the throw as well as before it.
+       *
+       * `hitIds` is cleared at the turn. Within a leg each body is struck once however
+       * long the disc overlaps it, so there is no pierce counter to exhaust: the limit is
+       * geometry. Across the two legs each body gets exactly two chances, which is the
+       * weapon's whole identity.
+       */
+      const player = state.player;
+      let caught = false;
+      proj.life -= dt;
+      proj.x += proj.vx * dt;
+      proj.z += proj.vz * dt;
+      const spd = Math.hypot(proj.vx, proj.vz) || 1;
+
+      if (!proj.returning) {
+        const travelled = Math.hypot(proj.x - proj.originX, proj.z - proj.originZ);
+        if (travelled >= proj.turnDistance) {
+          proj.returning = true;
+          proj.hitIds?.clear();
+          pushEffect(state, 'pulse', proj.x, proj.z, 0.22, proj.color, 1.1, { radius: 1.1 });
+        }
+      } else {
+        // Steer home. The disc expires on reaching the player rather than lingering.
+        const dx = player.x - proj.x;
+        const dz = player.z - proj.z;
+        const d = Math.hypot(dx, dz) || 1;
+        proj.vx = (dx / d) * spd;
+        proj.vz = (dz / d) * spd;
+        if (d <= proj.radius + SURVIVOR.playerRadius) caught = true;
+      }
+
+      /*
+       * Expire *after* resolving this frame's collisions, never before.
+       *
+       * The disc is caught on the frame it reaches the player, and enemies chasing the
+       * player are exactly the ones standing there — so deactivating first silently ate
+       * the last hit of the return leg and the weapon measured one leg instead of two.
+       */
+      const gone =
+        proj.life <= 0 ||
+        Math.abs(proj.x) > SURVIVOR.arenaHalf + 3 ||
+        Math.abs(proj.z) > SURVIVOR.arenaHalf + 3;
+
+      const hits = proj.hitIds;
+      for (const e of state.enemies) {
+        if (!e.alive || (hits && hits.has(e.id))) continue;
+        const dx = e.x - proj.x;
+        const dz = e.z - proj.z;
+        if (dx * dx + dz * dz > (proj.radius + e.radius) ** 2) continue;
+        hits?.add(e.id);
+        damageEnemy(state, e, proj.damage, { src: projSrc(proj) });
+        pushEffect(state, 'impact', proj.x, proj.z, 0.1, proj.color, 0.5);
+      }
+      for (const b of state.bosses) {
+        if (!b.active || b.state === 'dead' || (hits && hits.has(b.id))) continue;
+        const dx = b.x - proj.x;
+        const dz = b.z - proj.z;
+        if (dx * dx + dz * dz > (proj.radius + b.colliderRadius) ** 2) continue;
+        hits?.add(b.id);
+        // A boss is one body, so it would otherwise take both passes at full rate free.
+        damageBoss(state, proj.damage * SURVIVOR.boomerang.bossDamageMul, { boss: b, src: projSrc(proj) });
+      }
+
+      if (gone || caught) proj.active = false;
       continue;
     }
 
@@ -5487,6 +5608,16 @@ export function spawnGravityWellForTest(
   spawnHazard(state, 'gravity-well', x, z, radius, life, 0, WEAPONS.gravity.color, {
     owner: 'player',
   });
+}
+
+/** Test/fixture helper: place one enemy of a given definition at an exact position. */
+export function spawnEnemyForTest(
+  state: SurvivorState,
+  defId: string,
+  x: number,
+  z: number,
+): SurvivorEnemy | null {
+  return spawnEnemy(state, defId, x, z);
 }
 
 /** Prefill enemies for repulsor/damage fixtures. */
