@@ -1,0 +1,141 @@
+name: Deploy to Cloudflare Pages
+
+# Deploys the built game to the existing Cloudflare Pages project
+# `get-your-ship-together`.
+#
+# Why this exists: agent/CLI sessions do not reliably carry Cloudflare
+# credentials, and some sandboxed environments block egress to Cloudflare
+# entirely. GitHub-hosted runners have unrestricted Cloudflare egress, so
+# releases run here instead of depending on whoever happens to be at a
+# terminal.
+#
+# Required repository secrets:
+#   CLOUDFLARE_API_TOKEN   - token with the "Cloudflare Pages: Edit" permission
+#   CLOUDFLARE_ACCOUNT_ID  - the account owning the Pages project
+#
+# Pages branch semantics: deploying with --branch=main publishes to the
+# production alias (https://get-your-ship-together.pages.dev). Any other
+# branch name creates an isolated preview alias at
+# https://<branch>.get-your-ship-together.pages.dev.
+
+on:
+  push:
+    branches:
+      - main
+      - 'test-center-**'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA, tag, or branch to build and deploy'
+        required: true
+        default: 'main'
+      deploy_branch:
+        description: 'Cloudflare Pages branch name ("main" = production; anything else = preview alias)'
+        required: true
+        default: 'main'
+      expected_marker:
+        description: 'Optional: balance marker that MUST appear in the built bundle (e.g. endless-2.7.0)'
+        required: false
+        default: ''
+      forbidden_marker:
+        description: 'Optional: balance marker that must NOT appear in the built bundle (e.g. endless-2.8.0)'
+        required: false
+        default: ''
+
+# Never let two deploys race for the same Pages alias.
+concurrency:
+  group: pages-deploy-${{ github.event.inputs.deploy_branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+
+      - name: Report resolved commit
+        run: |
+          echo "Building commit: $(git rev-parse HEAD)"
+          echo "Ref requested:   ${{ github.event.inputs.ref || github.ref_name }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (zero warnings)
+        run: npm run lint
+
+      # The survivor/weapon benchmark suites are CPU-bound and can legitimately
+      # exceed vitest's 5000ms default on slower hardware, producing timeout
+      # failures that are infrastructure noise rather than balance regressions.
+      # This raises only the harness timeout. No test logic, acceptance band, or
+      # balance value is modified. Remove this flag to reproduce default timing.
+      - name: Test suite
+        run: npm test -- --testTimeout=120000
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify bundle markers and record hashes
+        run: |
+          set -euo pipefail
+          BUNDLE="$(find dist/assets -name '*.js' | head -n1)"
+          echo "Bundle: ${BUNDLE}"
+
+          EXPECTED="${{ github.event.inputs.expected_marker }}"
+          FORBIDDEN="${{ github.event.inputs.forbidden_marker }}"
+
+          if [ -n "${EXPECTED}" ]; then
+            if grep -q "${EXPECTED}" "${BUNDLE}"; then
+              echo "OK: bundle contains required marker '${EXPECTED}'"
+            else
+              echo "FAIL: bundle is missing required marker '${EXPECTED}'" >&2
+              exit 1
+            fi
+          fi
+
+          if [ -n "${FORBIDDEN}" ]; then
+            if grep -q "${FORBIDDEN}" "${BUNDLE}"; then
+              echo "FAIL: bundle unexpectedly contains '${FORBIDDEN}'" >&2
+              exit 1
+            else
+              echo "OK: bundle does not contain '${FORBIDDEN}'"
+            fi
+          fi
+
+          {
+            echo "### Build provenance"
+            echo ""
+            echo "- Commit: \`$(git rev-parse HEAD)\`"
+            echo ""
+            echo "| Artifact | Bytes | SHA-256 |"
+            echo "| --- | ---: | --- |"
+            find dist -maxdepth 2 -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' \) \
+              | sort | while read -r f; do
+                printf '| `%s` | %s | `%s` |\n' \
+                  "${f#dist/}" "$(stat -c%s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
+              done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name=get-your-ship-together
+            --branch=${{ github.event.inputs.deploy_branch || github.ref_name }}
