@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "bench:doc": "vite-node scripts/genBenchDoc.ts",
-    "bench:survival": "vite-node scripts/genSurvivalBenchDoc.ts"
+    "bench:survival": "vite-node scripts/genSurvivalBenchDoc.ts",
+    "bench:repair": "vite-node scripts/genRepairBenchDoc.ts"
   },
   "dependencies": {
     "three": "0.180.0"

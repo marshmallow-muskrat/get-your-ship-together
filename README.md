@@ -16,6 +16,7 @@ npm test
 npm run typecheck
 npm run build
 npm run bench:survival
+npm run bench:repair
 ```
 
 Browser QA against a built game, local or deployed:

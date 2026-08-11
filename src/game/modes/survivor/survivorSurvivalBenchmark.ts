@@ -266,7 +266,7 @@ function selectProtocol(state: SurvivorState, policy: SurvivalPolicyId): number 
   return choose('gunship-flyby');
 }
 
-class SurvivalPolicyController {
+export class SurvivalPolicyController {
   private readonly tuning: PolicyTuning;
   private readonly random: () => number;
   private decisionIn = 0;
