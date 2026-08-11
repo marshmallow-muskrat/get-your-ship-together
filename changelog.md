@@ -8,6 +8,101 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### Boss fairness, control fields and the Cosmic Boomerang (`endless-2.8.0` Test Center candidate)
+
+**One boss damage law.** Every boss damage path is now `authored base x bossDamageScale(...)`,
+applied exactly once. The physical tiers previously applied the boss-index curve *twice* — once
+inside `bossCategoryDamage` and again as `boss.damageMul` at the call site — so body and charge grew
+with the square of boss index while every pattern grew linearly, and the two used different phase
+curves as well. The hierarchy held at boss 1 and nowhere else, drifting from 1.25x a beam to over 3x
+by boss 13. Category bases are authored against `projectile` as the reference ranged impact: body 18
+(1.20x) and charge 22 (1.47x), constant at every index and phase.
+
+**One impact per committed traversal.** A charge or strafing leap owns its impact, and the ordinary
+body-contact pass stands down for its duration. Measured on 2.7.0, a boss flying its strafe over a
+stationary player was billed a **182.5 raw body slam** at boss 10 rather than the 36.4 telegraphed
+impact it was shown — the mechanic that hurt the player was not the mechanic that was telegraphed.
+`npm run bench:bossdamage` is new: it evaluates the law across the boss ladder and drives the real
+simulation to count what the player was actually billed for.
+
+**Gravity Pulse is a control field.** The collapse damages at cast, unchanged from 2.7.0 down to the
+boss rate; the field then holds what it caught for 1.05s. Control is tiered by class — fodder is
+gathered, bruisers and elites slowed but barely moved, minibosses only slowed, and bosses never
+touched, because anything that owns a telegraphed commitment must be able to keep it. Displacement
+is bounded per enemy per well. Dark violet, deliberately outside the hostile red/magenta palette
+reserved for boss danger.
+
+**Ship survivability is earned.** Baseline mitigation drops from 80% to 50%, with the missing 25
+points moved behind a new Reinforced Airframe passive that reaches the same 75% ceiling at L5. A
+fully invested build gets what every build used to get free, but it now costs five card slots.
+Window duration rises 2.5s to 3.25s.
+
+**Cleanup Crew allies choose their own ground.** Allies scored threat clusters within a leash and
+take standoff positions at their own weapon's preferred range, instead of orbiting a fixed bearing.
+Bounded, leashed, deterministic. The first implementation measured *worse* than what it replaced;
+standing off along the ally's own bearing put it on the far side of the cluster, drifting away from
+the fight. Interposing between player and threat fixed it.
+
+**Cosmic Boomerang.** A thrown disc that carves out, turns, and cuts back through the same lane.
+Each body is struck once per leg and twice per throw; the limit within a leg is geometry rather than
+a pierce counter. Twin Orbit at L5 throws a diverging pair. L5/L1 3.78, inside the documented
+progression contract.
+
+**Kill-driven repair supply, proven.** The inherited test gap is closed using the repair benchmark's
+own scenario window. Measured on 2.7.0 for contrast: the mid-run window at full integrity produced
+**zero** ordinary orbs on every seed (the eligibility gate), and the late window sat pinned at
+exactly **four** on every seed (the cap). Both are gone.
+
+**UI scale reflows.** `--ui-scale` drives the root font size rather than a per-panel
+`transform: scale()`. A transform resizes pixels without re-running layout, so panels grew past the
+viewport edge instead of rewrapping. Upgrade cards gain an `x/5 WEAPONS` counter, a bottom-left
+keybind affordance, gold `L1 -> L2` progression, and an Upgrade Numbers setting (default off,
+persisted). Display names are centralised on `displayName` in authored Title Case.
+
+**Balance partition marker.** `SURVIVOR_BALANCE_VERSION` is `endless-2.8.0`. It had lagged at
+`endless-2.7.0`, which meant a 2.8.0 Test Center build was indistinguishable from production by the
+deployment verifier's own partition check — the one check that exists to catch a mis-publish.
+
+#### The distribution target is still missed, and this is the headline caveat
+
+96 competent runs on identical seeds, 30-minute censor:
+
+| Candidate | Median | SD | Mean+2sd | Mean+3sd |
+|---|---:|---:|---:|---:|
+| `endless-2.7.0` baseline | 10:40 | 5:14 | 21:57 | 27:11 |
+| Phase 2 repair economy | 10:01 | 6:20 | 23:57 | 30:17 |
+| Phase 3 boss fairness | 14:41 | 6:48 | 27:04 | 33:53 |
+| Combined (through Phase 7) | 13:31 | 6:31 | 26:17 | 32:48 |
+| **`endless-2.8.0` final** | **9:24** | **7:20** | **26:00** | **33:20** |
+
+Guardrails want SD 3:30–4:00 and mean+3sd 22:00–24:00. The release misses both, by more than 2.7.0
+did. Two contributing causes are understood and neither was papered over:
+
+- **Kill-driven supply is correlated with performance** where the old time-paced model was not, and
+  its injured-only pity floor actively favoured the player doing badly. Supply now tracks how well
+  the player is already killing, which widens outcomes by design. Death attribution shows it
+  directly: horde-contact deaths went from 21 of 96 to 47.
+- **2.7.0's boss lethality was resting on the double-scaling bug and the traversal double-billing.**
+  An attribution run isolating the base retune from the scaling correction put the majority of the
+  median move on the correction itself. Inflating the acceptance bands to recover a median would be
+  tuning to hit a number, so it was not done.
+
+Phase 7 was expected to pull the tail back and did move the median down 1:10 from Phase 3 alone,
+but it did not tighten the distribution. This is reported as an open design question about
+kill-driven supply itself rather than chased with further tuning.
+
+Policy separation is now cleanly monotonic, which it has not reliably been: novice 4:59, competent
+9:24, expert 12:23.
+
+#### Recorded, not fixed
+
+The Containment Warden's Ground Slam is a telegraphed melee AOE authored as a flat miniboss
+constant, entirely outside the boss damage law. It never scales with the run, out-hits a first
+boss's charge by over 2x, and is not overtaken by an ordinary boss charge until boss 11. Changing it
+is a horde-pressure change that would confound this release's attribution, so it is pinned by test
+instead.
+
+
 ### Cleanup Crew, ship survivability and the Plasma Wake trail (`endless-2.7.0` Test Center candidate)
 
 **Aegis HUD placement.** The floating shield readout was a *sibling* of the command deck positioned

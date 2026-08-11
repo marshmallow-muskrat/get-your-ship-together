@@ -22,6 +22,9 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.8.0-repair-economy | competent | 96 | 9:59 | 6:20 | 23:57 | 30:17 | 3.3 | 16.6% | 25.7 |
 | endless-2.8.0-boss-fairness | competent | 96 | 14:38 | 6:48 | 27:04 | 33:53 | 3.9 | 17.1% | 25.9 |
 | endless-2.8.0-combined-candidate | competent | 96 | 13:11 | 6:31 | 26:17 | 32:48 | 3.4 | 16.6% | 25.1 |
+| endless-2.8.0-final | competent | 96 | 9:23 | 7:20 | 26:00 | 33:20 | 3.3 | 16.2% | 25.9 |
+| endless-2.8.0-final-novice | novice | 64 | 4:56 | 4:34 | 15:34 | 20:09 | 2.3 | 13.0% | 18.0 |
+| endless-2.8.0-final-expert | expert | 64 | 11:55 | 7:07 | 27:12 | 34:20 | 3.7 | 17.9% | 25.1 |
 
 ## Per-hero medians
 
@@ -44,6 +47,9 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.8.0-repair-economy (competent) | 11:50 | 5:42 | 13:49 | 9:37 |
 | endless-2.8.0-boss-fairness (competent) | 18:55 | 7:43 | 16:10 | 10:54 |
 | endless-2.8.0-combined-candidate (competent) | 15:09 | 10:48 | 18:20 | 10:41 |
+| endless-2.8.0-final (competent) | 12:05 | 4:48 | 9:33 | 12:45 |
+| endless-2.8.0-final-novice (novice) | 4:51 | 4:19 | 5:55 | 3:40 |
+| endless-2.8.0-final-expert (expert) | 19:51 | 4:59 | 13:12 | 11:19 |
 
 ## Interpretation guardrail
 
