@@ -1081,7 +1081,13 @@ describe('§11 boss phase transitions', () => {
 // ---------------------------------------------------------------- §22 balance version
 
 describe('§22 release metadata', () => {
-  it('stamps endless-2.7.0 after the Cleanup Crew release', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.7.0');
+  /*
+   * This is the balance partition marker the deployment verifier greps out of the served
+   * bundle, so it has to move with the release rather than at promotion time. While it
+   * lagged, a 2.8.0 Test Center build could not be told apart from production 2.7.0 by
+   * the one check that exists to catch a mis-publish.
+   */
+  it('stamps endless-2.8.0 for the boss-fairness and control-field release', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.8.0');
   });
 });

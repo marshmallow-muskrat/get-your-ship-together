@@ -98,12 +98,29 @@ describe('§2 ordinary repair supply is earned by killing', () => {
    */
   const OLD_ORB_CAP = 4;
   const SEEDS = [0x5eed, 0x5eed + 7919];
+  const SEED_SET = [0, 1, 2, 3, 4, 5].map((i) => 0x5eed + i * 7919);
 
   it('puts more than the old four-orb cap on the field at once', () => {
-    const scenario = repairScenario('late-20min');
-    const peaks = SEEDS.map((seed) => runRepairWindow(scenario, seed).repairStats.activePeak);
-    for (const peak of peaks) expect(peak).toBeGreaterThan(OLD_ORB_CAP);
-  });
+    /*
+     * Asserted on the maximum across a seed set, not per seed, because the cap was a
+     * *ceiling*: under endless-2.7.0 no seed could exceed four however the run went, and
+     * the late window measured exactly 4,4,4,4. Demonstrating its removal means showing
+     * the economy can go past it, which a single run legitimately may not — a run that
+     * dies early kills less and earns less, and that is the economy working rather than
+     * the cap returning. An earlier draft asserted per seed on two seeds and broke when
+     * the Phase 7 ship changes made those particular runs shorter.
+     *
+     * Measured here: late window 4,5,5,6,4,4 (max 6); dense-late 6,4,10,6,4,5 (max 10).
+     */
+    for (const id of ['late-20min', 'dense-late-26min']) {
+      const scenario = repairScenario(id);
+      const peaks = SEED_SET.map((seed) => runRepairWindow(scenario, seed).repairStats.activePeak);
+      expect(Math.max(...peaks), `${id} peaks ${peaks.join(',')}`).toBeGreaterThan(OLD_ORB_CAP);
+    }
+    // Twelve 120-second production simulation windows, so it needs an explicit budget
+    // like the other CPU-bound benchmark tests. The seed set is the point — see above —
+    // so the cost is inherent to the contract rather than incidental.
+  }, 60_000);
 
   it('keeps earning for a player who is never injured', () => {
     // Under the eligibility gate this window produced no ordinary orbs whatsoever.

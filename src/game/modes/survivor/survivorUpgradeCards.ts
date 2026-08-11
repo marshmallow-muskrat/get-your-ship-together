@@ -31,6 +31,7 @@ import {
   overclockLevel,
   regenFractionAtLevel,
   repairOrbBonusAtLevel,
+  shipDamageTakenMul,
   weaponStatsAtLevel,
   type PassiveId,
   type WeaponId,
@@ -394,6 +395,16 @@ export function passiveCard(
     case 'breach-shielding': {
       stats.push(`Boss damage taken −${round(currentLevel * def.perLevel * 100)}% → −${round(next * def.perLevel * 100)}%`);
       summary = 'Reduces damage from boss attacks only. Ordinary horde contact is unaffected.';
+      break;
+    }
+    case 'reinforced-airframe': {
+      // Quote the resolved mitigation, not the per-level delta: what the player needs to
+      // compare is how survivable the form actually becomes.
+      const at = (lv: number) => round((1 - shipDamageTakenMul(lv)) * 100);
+      stats.push(`Afterburner damage taken −${at(currentLevel)}% → −${at(next)}%`);
+      stats.push(`Afterburner window ${SURVIVOR.ship.duration.toFixed(2)}s`);
+      summary =
+        'Reduces damage taken in Afterburner form only, from 50% baseline up to a hard 75% ceiling at L5. Ordinary and Mech forms are unaffected.';
       break;
     }
   }

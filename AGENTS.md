@@ -84,6 +84,8 @@ slowdown anywhere else still shows up:
 - `weapon combat benchmark > per-level effective gains`
 - `pressure director > never stacks surges`
 - `pressure director > uses a 60-75 second cadence` (added in endless-2.8.0)
+- `early specialist gates > nothing enters play before its own gate` (endless-2.8.0)
+- `ordinary repair supply > puts more than the old four-orb cap` (endless-2.8.0)
 - `renderer resource stability > effect, attack and rail pools`
 
 CI does **not** pass a blanket `--testTimeout`. If one of these fails on time,

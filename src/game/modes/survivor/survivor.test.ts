@@ -1560,8 +1560,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.7.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.7.0');
+  it('is endless-2.8.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.8.0');
   });
 });
 
@@ -2335,7 +2335,13 @@ describe('early specialist gates', () => {
     expect(flankerAt).toBeGreaterThanOrEqual(60 - eps);
     expect(tracker.firstTimeOf('bruiser')!).toBeGreaterThanOrEqual(90 - eps);
     expect(tracker.firstTimeOf('elite')!).toBeGreaterThanOrEqual(90 - eps);
-  });
+    // Drives 200 simulated seconds of the real spawn director and measures ~3.2s alone,
+    // which is thin against vitest's 5s default once the full suite adds worker
+    // contention. Measured at 3196ms without the endless-2.8.0 ship changes and 3172ms
+    // with them, so this budget is contention headroom, not cover for a slowdown. If it
+    // ever times out at 60s the director genuinely regressed; never resolve it by
+    // changing a balance value or an acceptance band.
+  }, 60_000);
 
   it('gates are floors, not bans — each specialist appears once unlocked', () => {
     // One focused window per specialist so the assertion cannot pass vacuously.

@@ -13,8 +13,22 @@ import {
   type EnemyDef,
 } from '../../content/enemies';
 
-/** Balance/game version stamped into local high scores. */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.7.0';
+/**
+ * Balance/game version stamped into local high scores.
+ *
+ * This is also the **balance partition marker** the deployment verification procedure
+ * greps out of the served bundle to prove which partition is live (see AGENTS.md). It
+ * must be bumped as part of the release it names, not at promotion time: while it lagged,
+ * a 2.8.0 Test Center build was indistinguishable from production 2.7.0 by exactly the
+ * check that exists to catch a mis-publish.
+ *
+ * Snapshots preserved before this bump (the Phase 2 repair economy and the Phase 3 boss
+ * fairness A/B) carry `endless-2.7.0` in their `balanceVersion` field. They are still
+ * valid comparisons — experiments are identified by their `label`, and the seeds and
+ * policy are unchanged — but their stamp records the partition that was live when they
+ * were taken rather than the release they belong to.
+ */
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.8.0';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -529,23 +543,30 @@ export const SURVIVOR = {
     effectLife: 0.72,
   },
   ship: {
-    duration: 2.5,
+    /*
+     * Raised from 2.5s in endless-2.8.0.
+     *
+     * Halving baseline mitigation shortens how much the window can accomplish, because
+     * more of it is spent disengaging. A longer window keeps the form's *offensive*
+     * identity intact while the survivability change lands on how much punishment it can
+     * absorb, so the two do not confound each other in the A/B.
+     */
+    duration: 3.25,
     cooldown: 16,
     speedMul: 2.6,
     /**
-     * Ship takes 20% of incoming damage (80% reduction), raised from 0.60 in 2.7.0.
+     * Baseline: ship takes 50% of incoming damage (endless-2.8.0, was 0.20).
      *
-     * Ship form is a short, high-commitment offensive window whose fantasy is flying
-     * *through* danger. At 0.60 it was not survivable enough to do that: the reference
-     * 21:18 run ended in ship form to a 103-damage Mega Body Slam plus Bruiser contact.
-     * This is a survivability change, not a damage change — ship offence is unchanged
-     * apart from the explicit boss ram below.
+     * This is the *baseline* only. Reinforced Airframe carries it back down toward 0.25,
+     * so the 75% ceiling endless-2.7.0 handed out free is now the top of an investment
+     * curve. See `shipDamageTakenMul`, which is the single place the form's mitigation is
+     * resolved — nothing reads this constant directly.
      *
-     * Ship is still not invulnerable, and Breach Shielding continues to apply on top for
-     * boss sources through the established mitigation order (form -> titan -> boss
+     * Ship is still never invulnerable, and Breach Shielding continues to apply on top
+     * for boss sources through the established mitigation order (form -> titan -> boss
      * reduction -> shield -> integrity).
      */
-    damageTakenMul: 0.2,
+    damageTakenMul: 0.5,
     wakeInterval: 0.14,
     wakeLife: 1.25,
     wakeRadius: 1.15,
@@ -928,7 +949,9 @@ export type PassiveId =
    * was worth a card slot on its own.
    */
   | 'overdrive-systems'
-  | 'breach-shielding';
+  | 'breach-shielding'
+  /** Ship survivability passive (endless-2.8.0); see `shipDamageTakenMul`. */
+  | 'reinforced-airframe';
 
 export interface PassiveDef {
   id: PassiveId;
@@ -1005,7 +1028,36 @@ export const PASSIVES: PassiveDef[] = [
     maxLevel: 5,
     perLevel: 0.08,
   },
+  {
+    id: 'reinforced-airframe',
+    name: 'Reinforced Airframe',
+    description:
+      'Afterburner form takes 5% less damage per level, from 50% baseline mitigation up to 75% at L5. Ship survivability is earned by the build rather than granted by the form.',
+    maxLevel: 5,
+    perLevel: 0.05,
+  },
 ];
+
+/**
+ * Ship damage taken, after the Reinforced Airframe passive (endless-2.8.0).
+ *
+ * endless-2.7.0 granted an 80% flat reduction to every ship activation from the first
+ * second of the run. That is what made the form a safe button rather than a commitment,
+ * and it was the identified cause of that release's upper-tail expansion: a player who
+ * could stay in ship form was very hard to kill, so good runs ran away from the pack.
+ *
+ * Baseline mitigation is now 50%, with the remaining 25 points moved behind a passive.
+ * The ceiling is unchanged at 75% — a fully-invested build gets close to what every
+ * build used to get free — but reaching it costs five card slots that could have gone to
+ * damage. That is the trade the form should have been asking for all along.
+ */
+export function shipDamageTakenMul(reinforcedAirframeLevel: number): number {
+  const lv = Math.max(0, Math.min(5, Math.floor(reinforcedAirframeLevel)));
+  return Math.max(SHIP_MITIGATION_FLOOR, SURVIVOR.ship.damageTakenMul - lv * 0.05);
+}
+
+/** Hard floor on ship damage taken: 75% mitigation, never invulnerability. */
+export const SHIP_MITIGATION_FLOOR = 0.25;
 
 /** Hard-capped Thruster Boost movement bonus. */
 export function moveSpeedBonus(level: number): number {

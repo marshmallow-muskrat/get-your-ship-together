@@ -12,7 +12,9 @@ import hudSource from './survivorHud.ts?raw';
 import {
   MEGA_PROTOCOLS,
   PASSIVES,
+  SHIP_MITIGATION_FLOOR,
   SURVIVOR,
+  shipDamageTakenMul,
   WEAPONS,
   heroStarterWeapon,
   isSignatureWeapon,
@@ -166,16 +168,52 @@ describe('§1 Aegis HUD is structurally anchored to the command deck', () => {
  * These assert the *mitigation pipeline* and the *contact bounding*, both measured by
  * running production damage paths, rather than reading the constants back out.
  */
-describe('§3 ship form takes 20% damage and rams bosses', () => {
-  it('applies 80% reduction to ordinary horde contact', () => {
+describe('§3 ship form mitigation is earned, and rams bosses', () => {
+  /*
+   * endless-2.8.0 moved ship survivability behind a passive.
+   *
+   * The 2.7.0 contract asserted a flat 80% reduction on every activation from the first
+   * second of the run. The *pipeline* those tests were really protecting — form applied
+   * first, boss reduction second, multiplicatively, never re-ordered — is unchanged and
+   * still asserted here. What changed is where the form's number comes from: 50%
+   * baseline, rising to the same 75% ceiling only with five levels of Reinforced
+   * Airframe. See `shipDamageTakenMul`.
+   */
+  it('applies the 50% baseline reduction to ordinary horde contact', () => {
     const raw = 40;
-    expect(appliedDamage('ship', raw, HORDE_HIT)).toBeCloseTo(raw * 0.2, 6);
+    expect(appliedDamage('ship', raw, HORDE_HIT)).toBeCloseTo(raw * 0.5, 6);
   });
 
   it('applies the same reduction to boss physical attacks, before Breach Shielding', () => {
     const raw = 100;
     // No Breach Shielding invested: ship mitigation alone.
-    expect(appliedDamage('ship', raw, BOSS_HIT)).toBeCloseTo(raw * 0.2, 6);
+    expect(appliedDamage('ship', raw, BOSS_HIT)).toBeCloseTo(raw * 0.5, 6);
+  });
+
+  it('reaches the 75% ceiling only with a fully invested Reinforced Airframe', () => {
+    const state = createSurvivorState('bee', null, 2709);
+    state.player.form = 'ship';
+    state.player.invuln = 0;
+    state.player.shieldPoints = 0;
+    state.player.shieldTime = 0;
+    state.passives['reinforced-airframe'] = 5;
+    const before = state.player.health;
+    damagePlayer(state, 100, HORDE_HIT);
+    expect(before - state.player.health).toBeCloseTo(100 * SHIP_MITIGATION_FLOOR, 6);
+    // The ceiling is hard: further levels cannot approach invulnerability.
+    expect(shipDamageTakenMul(99)).toBe(SHIP_MITIGATION_FLOOR);
+    expect(shipDamageTakenMul(99)).toBeGreaterThan(0);
+  });
+
+  it('improves monotonically with each invested level', () => {
+    let prev = Infinity;
+    for (let lv = 0; lv <= 5; lv += 1) {
+      const mul = shipDamageTakenMul(lv);
+      expect(mul, `L${lv}`).toBeLessThan(prev);
+      prev = mul;
+    }
+    expect(shipDamageTakenMul(0)).toBeCloseTo(0.5, 6);
+    expect(shipDamageTakenMul(5)).toBeCloseTo(0.25, 6);
   });
 
   it('stacks multiplicatively with Breach Shielding in the established order', () => {
@@ -188,8 +226,8 @@ describe('§3 ship form takes 20% damage and rams bosses', () => {
     const before = state.player.health;
     damagePlayer(state, 100, BOSS_HIT);
     const applied = before - state.player.health;
-    // form (0.20) then boss reduction (1 - 0.40) — not additive, not re-ordered.
-    expect(applied).toBeCloseTo(100 * 0.2 * 0.6, 6);
+    // form (0.50) then boss reduction (1 - 0.40) — not additive, not re-ordered.
+    expect(applied).toBeCloseTo(100 * 0.5 * 0.6, 6);
   });
 
   it('is strictly safer than Mech, which is strictly safer than astronaut', () => {

@@ -121,8 +121,10 @@ writeFileSync('docs/BOSS_DAMAGE_BENCHMARK.md', markdown(result));
 writeFileSync('docs/generated/boss-damage-benchmark.json', `${JSON.stringify(result, null, 2)}\n`);
 if (snapshot) {
   const safe = snapshot.replace(/[^a-zA-Z0-9._-]/g, '-');
-  mkdirSync('docs/generated/baselines', { recursive: true });
-  writeFileSync(`docs/generated/baselines/${safe}.json`, `${JSON.stringify(result, null, 2)}\n`);
+  // Its own directory: `docs/generated/baselines` is globbed by the survival history
+  // generator, which reasonably expects every file there to be a survival snapshot.
+  mkdirSync('docs/generated/boss-damage', { recursive: true });
+  writeFileSync(`docs/generated/boss-damage/${safe}.json`, `${JSON.stringify(result, null, 2)}\n`);
 }
 process.stdout.write(
   `docs/BOSS_DAMAGE_BENCHMARK.md generated from ${result.scaling.length} scaling rows and ${result.census.length} census rows\n`,

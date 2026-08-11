@@ -41,6 +41,7 @@ import {
   breachShieldingReduction,
   BOSS_DAMAGE_BASE,
   computeShieldDuration,
+  shipDamageTakenMul,
   type PassiveId,
   type ProtocolId,
   type TempBuffId,
@@ -917,7 +918,8 @@ export function damagePlayer(state: SurvivorState, amount: number, source: Damag
   if (!p.alive || p.invuln > 0 || p.dodgeActive > 0 || amount <= 0) return;
   let mul = 1;
   if (p.form === 'mech') mul = SURVIVOR.mech.damageTakenMul;
-  else if (p.form === 'ship') mul = SURVIVOR.ship.damageTakenMul;
+  // Ship mitigation is resolved in one place so the passive cannot be missed by a caller.
+  else if (p.form === 'ship') mul = shipDamageTakenMul(state.passives['reinforced-airframe'] ?? 0);
   if (state.megaProtocol.titanActive) mul *= SURVIVOR.megaProtocol.titanDamageTakenMul;
   const isBossSrc = source.kind.startsWith('boss-');
   if (isBossSrc) mul *= 1 - bossDamageReduction(state);

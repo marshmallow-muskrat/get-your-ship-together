@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.7.0` (Test Center candidate)
+**Current balance line:** `endless-2.8.0` (Test Center candidate)
 
 ## Purpose
 
@@ -100,10 +100,11 @@ Normal level-ups are **permanent only** (weapons, Overclocks, passives). Tempora
 - Full-health players do not magnetize or consume repair orbs.
 - Ship form health magnet is at least 9.0.
 - Healing feedback shows actual integrity restored.
-- From 15:00 onward, ordinary repair generation no longer depends on missing health. Floor repairs
-  arrive about every 12s (15–20m), 10s (20–25m), then 8s; up to four may be banked, each lasts 65s,
-  and collection still waits until integrity is actually missing. Guaranteed boss/miniboss repairs
-  remain separate premium rewards.
+- Ordinary repair generation is kill-driven and never depends on missing health; there is no
+  banked-orb cap and no late time-paced schedule. Orbs last 70s and collection still waits until
+  integrity is actually missing, so an uninjured player leaves them standing as a routable field
+  resource. Guaranteed boss/miniboss repairs remain separate premium rewards. See
+  [Kill-driven repair economy](#kill-driven-repair-economy-endless-280).
 
 ## Weapon identity and shared arsenal
 
@@ -268,16 +269,45 @@ contact: it neither consumes nor is gated by the player's `bossContactCd` or i-f
 knockback or positional correction is applied to either party, so pass-through is preserved
 exactly. Ship Wake, Ship Exhaust and Ship Body are unchanged.
 
-### Ship survivability (endless-2.7.0)
+### Ship survivability (endless-2.8.0)
 
-Ship form takes **20% of incoming damage** (80% reduction), raised from 0.60. It applies uniformly
-to horde contact, boss physical attacks and boss hazards through the established mitigation order:
+Ship form takes **50% of incoming damage** at baseline, reduced toward a hard **25% floor** (75%
+mitigation) by the Reinforced Airframe passive at 5% per level. It applies uniformly to horde
+contact, boss physical attacks and boss hazards through the established mitigation order:
 
 ```text
 form multiplier -> Titan multiplier -> Breach Shielding (boss sources) -> Aegis shield -> integrity
 ```
 
-Ship is not invulnerable, and its duration and cooldown are unchanged.
+| Reinforced Airframe | Damage taken | Mitigation |
+|---|---:|---:|
+| L0 (baseline) | 0.50 | 50% |
+| L1 | 0.45 | 55% |
+| L2 | 0.40 | 60% |
+| L3 | 0.35 | 65% |
+| L4 | 0.30 | 70% |
+| L5 | 0.25 | 75% |
+
+Window duration is **3.25s**, raised from 2.5s. Cooldown is unchanged.
+
+`shipDamageTakenMul` is the single place the form's mitigation is resolved; nothing reads the
+baseline constant directly. Ship is never invulnerable — the floor is a hard cap, not an asymptote.
+
+#### Why this changed
+
+endless-2.7.0 granted a flat 80% reduction to every ship activation from the first second of the
+run. That made the form a safe button rather than a commitment, and it was the identified cause of
+that release's upper-tail expansion: a player who could stay in ship form was very hard to kill, so
+strong runs ran away from the pack and the distribution widened at the top.
+
+The ceiling is deliberately unchanged. A fully-invested build reaches what every build used to get
+free — but reaching it costs five card slots that could have been damage. That is the trade the
+form should have been asking for.
+
+Duration rose alongside it because halving baseline mitigation shortens how much the window can
+accomplish, with more of it spent disengaging. Keeping the offensive identity intact while the
+survivability change lands on punishment absorbed is what stops the two from confounding each
+other in the A/B.
 
 ## Protocol Cache
 

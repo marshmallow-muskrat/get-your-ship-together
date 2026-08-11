@@ -44,9 +44,21 @@ if (snapshot) {
 }
 const baselineDir = 'docs/generated/baselines';
 if (existsSync(baselineDir)) {
+  /*
+   * The baselines directory is shared by every benchmark that preserves a snapshot, so
+   * this glob must not assume everything in it is a survival run. endless-2.8.0 added a
+   * boss-damage snapshot with an entirely different shape and the history formatter
+   * crashed on it *after* writing the survival snapshot — which is the worst failure
+   * mode available, because the run looked complete and the exit code did not.
+   */
+  const isSurvivalSnapshot = (entry: unknown): boolean => {
+    const e = entry as { runs?: unknown; policy?: unknown; label?: unknown };
+    return Array.isArray(e?.runs) && typeof e?.policy === 'string' && typeof e?.label === 'string';
+  };
   const history = readdirSync(baselineDir)
     .filter((name) => name.endsWith('.json'))
-    .map((name) => JSON.parse(readFileSync(`${baselineDir}/${name}`, 'utf8')));
+    .map((name) => JSON.parse(readFileSync(`${baselineDir}/${name}`, 'utf8')))
+    .filter(isSurvivalSnapshot);
   // Include the just-generated result even when the caller did not preserve it.
   if (!history.some((entry) => entry.label === result.label && entry.policy === result.policy)) {
     history.push(result);
