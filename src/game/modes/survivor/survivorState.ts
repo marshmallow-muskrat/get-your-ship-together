@@ -194,6 +194,10 @@ export interface SurvivorHazard {
   armTimer: number;
   /** Owning boss for cleanup; 0 = none. */
   sourceBossId: number;
+  /** Optional telemetry source for allied hazards; otherwise inferred from kind. */
+  srcOverride?: string | null;
+  /** Per-hazard boss scaling captured when the hazard is authored. */
+  bossDamageMul?: number;
   /**
    * Entity ids this hazard has already damaged (endless-2.8.0, Gravity Pulse only).
    *

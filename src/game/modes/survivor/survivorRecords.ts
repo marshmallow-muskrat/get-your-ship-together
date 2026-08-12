@@ -1,10 +1,13 @@
 import type { HeroId } from '../../content/heroes';
 import { isHeroId } from '../../content/heroes';
 import { SURVIVOR_BALANCE_VERSION, type PassiveId, type WeaponId } from './survivorContent';
+import { formReport, sourceReport, type RunTelemetry } from './survivorTelemetry';
 
 export const RECORDS_STORAGE_KEY = 'gyst.survivor.records.v1';
 export const LEADERBOARDS_STORAGE_KEY = 'gyst.survivor.leaderboards.v2';
+export const RUN_HISTORY_STORAGE_KEY = 'gyst.survivor.run-history.v1';
 export const MAX_LEADERBOARD_ENTRIES = 10;
+export const MAX_RUN_HISTORY_ENTRIES = 100;
 
 export interface RunSummary {
   id: string;
@@ -17,6 +20,17 @@ export interface RunSummary {
   passives: Array<{ id: string; level: number }>;
   timestamp: number;
   balanceVersion: string;
+  report?: RunReportSnapshot;
+}
+
+export interface RunReportSnapshot {
+  sources: Array<{ id: string; damage: number; bossDamage: number; hits: number; kills: number; maxHit: number }>;
+  forms: Array<{ form: string; damage: number; time: number }>;
+  healedByOrbs: number;
+  healedByRegen: number;
+  shieldAbsorbed: number;
+  eliteKills: number;
+  minibossKills: number;
 }
 
 export interface HeroLeaderboard {
@@ -72,6 +86,33 @@ function normalizeSummary(raw: unknown): RunSummary | null {
   if (!heroId) return null;
   const survivalTime = Number(o.survivalTime);
   if (!Number.isFinite(survivalTime) || survivalTime < 0) return null;
+  const reportRaw = o.report as Record<string, unknown> | undefined;
+  const report: RunReportSnapshot | undefined = reportRaw && Array.isArray(reportRaw.sources) && Array.isArray(reportRaw.forms)
+    ? {
+        sources: reportRaw.sources
+          .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
+          .map((s) => ({
+            id: String(s.id ?? 'unknown'),
+            damage: Math.max(0, Number(s.damage) || 0),
+            bossDamage: Math.max(0, Number(s.bossDamage) || 0),
+            hits: Math.max(0, Math.floor(Number(s.hits) || 0)),
+            kills: Math.max(0, Math.floor(Number(s.kills) || 0)),
+            maxHit: Math.max(0, Number(s.maxHit) || 0),
+          })),
+        forms: reportRaw.forms
+          .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object')
+          .map((f) => ({
+            form: String(f.form ?? 'astronaut'),
+            damage: Math.max(0, Number(f.damage) || 0),
+            time: Math.max(0, Number(f.time) || 0),
+          })),
+        healedByOrbs: Math.max(0, Number(reportRaw.healedByOrbs) || 0),
+        healedByRegen: Math.max(0, Number(reportRaw.healedByRegen) || 0),
+        shieldAbsorbed: Math.max(0, Number(reportRaw.shieldAbsorbed) || 0),
+        eliteKills: Math.max(0, Math.floor(Number(reportRaw.eliteKills) || 0)),
+        minibossKills: Math.max(0, Math.floor(Number(reportRaw.minibossKills) || 0)),
+      }
+    : undefined;
   return ensureId({
     id: typeof o.id === 'string' ? o.id : '',
     survivalTime,
@@ -97,6 +138,7 @@ function normalizeSummary(raw: unknown): RunSummary | null {
       : [],
     timestamp: Math.floor(Number(o.timestamp) || Date.now()),
     balanceVersion: String(o.balanceVersion ?? 'unknown'),
+    report,
   });
 }
 
@@ -110,6 +152,51 @@ function sortRuns(runs: RunSummary[]): RunSummary[] {
 
 function trim(runs: RunSummary[]): RunSummary[] {
   return sortRuns(runs).slice(0, MAX_LEADERBOARD_ENTRIES);
+}
+
+/** Every recent completed run, newest first. Existing top-ten records seed migration. */
+export function loadRunHistory(): RunSummary[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(RUN_HISTORY_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map(normalizeSummary)
+          .filter((x): x is RunSummary => !!x)
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, MAX_RUN_HISTORY_ENTRIES);
+      }
+    }
+    const seeded = HEROES.flatMap((h) => loadLeaderboards().heroes[h])
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, MAX_RUN_HISTORY_ENTRIES);
+    localStorage.setItem(RUN_HISTORY_STORAGE_KEY, JSON.stringify(seeded));
+    return seeded;
+  } catch {
+    return [];
+  }
+}
+
+function recordRunHistory(summary: RunSummary): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const history = loadRunHistory();
+    if (history.some((r) => r.id === summary.id)) return;
+    history.unshift(ensureId(summary));
+    localStorage.setItem(
+      RUN_HISTORY_STORAGE_KEY,
+      JSON.stringify(history.slice(0, MAX_RUN_HISTORY_ENTRIES)),
+    );
+  } catch {
+    // quota / private mode
+  }
+}
+
+export function getRunHistory(heroId?: HeroId): RunSummary[] {
+  const history = loadRunHistory();
+  return heroId ? history.filter((r) => r.heroId === heroId) : history;
 }
 
 /** Migrate v1 bests into v2 boards if needed. */
@@ -233,6 +320,7 @@ export function makeRunSummary(input: {
   heroId: HeroId;
   weapons: Array<{ weaponId: WeaponId; level: number }>;
   passives: Partial<Record<PassiveId, number>>;
+  telemetry?: RunTelemetry;
 }): RunSummary {
   const timestamp = Date.now();
   return {
@@ -249,11 +337,25 @@ export function makeRunSummary(input: {
     })),
     timestamp,
     balanceVersion: SURVIVOR_BALANCE_VERSION,
+    report: input.telemetry
+      ? {
+          sources: sourceReport(input.telemetry).map(({ id, damage, bossDamage, hits, kills, maxHit }) => ({
+            id, damage, bossDamage, hits, kills, maxHit,
+          })),
+          forms: formReport(input.telemetry).map(({ form, damage, time }) => ({ form, damage, time })),
+          healedByOrbs: input.telemetry.healedByOrbs,
+          healedByRegen: input.telemetry.healedByRegen,
+          shieldAbsorbed: input.telemetry.shieldAbsorbed,
+          eliteKills: input.telemetry.eliteKills,
+          minibossKills: input.telemetry.minibossKills,
+        }
+      : undefined,
   };
 }
 
 /** Insert a completed run into that hero's top-10. Prevents duplicate ids. */
 export function recordRun(summary: RunSummary): RecordResult {
+  recordRunHistory(summary);
   const boards = loadLeaderboards();
   const heroRuns = boards.heroes[summary.heroId] ?? [];
   const previousBest = heroRuns[0]?.survivalTime ?? 0;

@@ -50,7 +50,6 @@ import {
 import {
   livingBosses,
   nearestBoss,
-  leadTargetPosition,
   selectWeaponTarget,
   targetPosition,
 } from './survivorTargeting';
@@ -621,6 +620,21 @@ function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number, weigh
   const eco = state.repairEconomy;
   eco.credit += weight;
 
+  const healthFraction = state.player.maxHealth > 0 ? state.player.health / state.player.maxHealth : 1;
+  if (
+    healthFraction <= SURVIVOR.repair.criticalFraction &&
+    eco.sinceDrop >= k.criticalDroughtSeconds &&
+    !state.pickups.some(
+      (p) =>
+        p.active &&
+        p.kind === 'repair' &&
+        (p.x - state.player.x) ** 2 + (p.z - state.player.z) ** 2 <= k.criticalNearbyRadius ** 2,
+    )
+  ) {
+    emitRepairOrb(state, x, z);
+    return true;
+  }
+
   if (k.model === 'accumulator') {
     // Credit banks toward a threshold that is re-rolled with seeded variance on
     // every drop, so the cadence is readable without being metronomic.
@@ -864,6 +878,7 @@ function projSrc(proj: SurvivorProjectile): string {
 
 /** Telemetry bucket id for a player-owned hazard. */
 function hazardSrc(h: SurvivorHazard): string {
+  if (h.srcOverride) return h.srcOverride;
   if (h.kind === 'wake') return 'ship-wake';
   if (h.kind === 'plasma-wake') return weaponSrc('plasma-wake');
   if (h.kind === 'puddle') return weaponSrc('bioplasma');
@@ -1102,6 +1117,8 @@ function acquireHazard(state: SurvivorState): SurvivorHazard | null {
     tickCd: 0,
     armTimer: 0,
     sourceBossId: 0,
+    srcOverride: null,
+    bossDamageMul: 1,
     scaleX: 1,
     scaleZ: 1,
     facingX: 0,
@@ -1124,7 +1141,7 @@ function spawnHazard(
   opts?: Partial<
     Pick<
       SurvivorHazard,
-      'owner' | 'armTimer' | 'tickCd' | 'sourceBossId' | 'scaleX' | 'scaleZ' | 'facingX' | 'facingZ' | 'x1' | 'z1' | 'capsule'
+      'owner' | 'armTimer' | 'tickCd' | 'sourceBossId' | 'srcOverride' | 'bossDamageMul' | 'scaleX' | 'scaleZ' | 'facingX' | 'facingZ' | 'x1' | 'z1' | 'capsule'
     >
   >,
 ): SurvivorHazard | null {
@@ -1148,6 +1165,8 @@ function spawnHazard(
   h.tickCd = opts?.tickCd ?? 0;
   h.armTimer = opts?.armTimer ?? 0;
   h.sourceBossId = opts?.sourceBossId ?? 0;
+  h.srcOverride = opts?.srcOverride ?? null;
+  h.bossDamageMul = opts?.bossDamageMul ?? 1;
   h.scaleX = opts?.scaleX ?? 1;
   h.scaleZ = opts?.scaleZ ?? 1;
   h.facingX = opts?.facingX ?? 0;
@@ -1730,7 +1749,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         resetProj(proj, state, 'boomerang', 'boomerang', p.x, p.z, Math.sin(ang) * spd, Math.cos(ang) * spd, {
           damage: dmg,
           radius: (def.radius ?? 0.5) * area,
-          visualRadius: (def.radius ?? 0.5) * area * 1.25,
+          visualRadius: (def.radius ?? 0.5) * area * SURVIVOR.boomerang.visualRadiusMul,
           life: def.life ?? 2.6,
           color: WEAPONS.boomerang.color,
           originX: p.x,
@@ -1945,6 +1964,7 @@ export function updatePlasmaTrails(state: SurvivorState, dt: number): void {
       z1: ez,
       facingX: ex - ax,
       facingZ: ez - az,
+      bossDamageMul: cfg.bossDamageMul * (ship ? cfg.shipBossDamageMul : 1),
     });
     // Continuity is structural: the next segment begins where this one ended, whether
     // or not the pool could satisfy this request.
@@ -2197,7 +2217,7 @@ function fireArcConductor(
 
 function fireOrbitalLance(
   state: SurvivorState,
-  slot: SurvivorWeaponSlot,
+  _slot: SurvivorWeaponSlot,
   def: ReturnType<typeof wdef>,
   area: number,
   mech: boolean,
@@ -2206,31 +2226,54 @@ function fireOrbitalLance(
   const strikes = def.count;
   const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
   for (let i = 0; i < strikes; i += 1) {
-    // Each lance acquires independently. Judgment Array no longer wastes its second
-    // strike on a fixed global-X offset unrelated to the encounter geometry.
-    const aim = selectWeaponTarget(state, slot, p.x, p.z, 32, { forceBoss: true });
-    let pos = leadTargetPosition(aim, (def.life ?? 0.8) + i * 0.12);
-    if (!pos) pos = densestPoint(state, p.x, p.z);
+    // Explicit tactical hierarchy: bosses, then elite/miniboss bodies, then the densest
+    // ordinary pack. Damage resolves now; the beam is impact feedback, not a warning.
+    const boss = nearestBoss(state, p.x, p.z, 32);
+    const elite = state.enemies
+      .filter(
+        (e) =>
+          e.alive &&
+          (e.isElite || e.isMiniboss) &&
+          (e.x - p.x) ** 2 + (e.z - p.z) ** 2 <= 32 ** 2,
+      )
+      .sort(
+        (a, b) =>
+          (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2),
+      )[0];
+    const pos = boss ? { x: boss.x, z: boss.z } : elite ? { x: elite.x, z: elite.z } : densestPoint(state, p.x, p.z);
     const tx = pos.x;
     const tz = pos.z;
-    const arm = (def.life ?? 0.8) + i * 0.12;
     const radius = (def.radius ?? 2.1) * area;
-    pushEffect(state, 'orbital', tx, tz, arm, WEAPONS.orbital.color, radius, { radius });
-    pushEffect(state, 'telegraph', tx, tz, arm, '#ffd46a', radius, { radius });
-    // Delayed damage via armed rocket-like projectile
-    const proj = acquireProjectile(state);
-    if (!proj) continue;
-    resetProj(proj, state, 'orbital-marker', 'orbital', tx, tz, 0, 0, {
-      damage: dmg,
-      radius: radius * 0.85,
-      life: arm + 0.05,
-      armTimer: arm,
-      color: WEAPONS.orbital.color,
-      explodeRadius: radius,
-      // `splash` carries the outer shockwave radius for the two-zone detonation.
-      // Reusing the existing pooled field keeps the projectile struct fixed-size.
-      splash: radius * SURVIVOR.orbital.shockwaveRadiusMul,
-    });
+    resolveOrbitalImpact(state, tx, tz, dmg, radius);
+  }
+}
+
+/** Resolve Orbital Lance damage and its truthful two-zone impact presentation immediately. */
+function resolveOrbitalImpact(state: SurvivorState, x: number, z: number, damage: number, coreRadius: number): void {
+  const shockRadius = coreRadius * SURVIVOR.orbital.shockwaveRadiusMul;
+  const shockMul = SURVIVOR.orbital.shockwaveDamageMul;
+  pushEffect(state, 'orbital-strike', x, z, 0.22, WEAPONS.orbital.color, coreRadius, { radius: coreRadius });
+  pushEffect(state, 'pulse', x, z, 0.3, '#fff4c8', coreRadius, { radius: coreRadius });
+  pushEffect(state, 'orbital-shock', x, z, 0.72, '#ffd46a', shockRadius, { radius: shockRadius });
+  pushEffect(state, 'orbital-scorch', x, z, 1.35, '#ff9a3c', coreRadius, { radius: coreRadius });
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    const d2 = (e.x - x) ** 2 + (e.z - z) ** 2;
+    const dealt = d2 <= (coreRadius + e.radius) ** 2
+      ? damage
+      : d2 <= (shockRadius + e.radius) ** 2
+        ? damage * shockMul
+        : 0;
+    if (dealt > 0) damageEnemy(state, e, dealt, { src: weaponSrc('orbital') });
+  }
+  for (const b of livingBosses(state)) {
+    const d2 = (b.x - x) ** 2 + (b.z - z) ** 2;
+    const dealt = d2 <= (coreRadius + b.colliderRadius) ** 2
+      ? damage * 1.1
+      : d2 <= (shockRadius + b.colliderRadius) ** 2
+        ? damage * 1.1 * shockMul
+        : 0;
+    if (dealt > 0) damageBoss(state, dealt, { boss: b, src: weaponSrc('orbital') });
   }
 }
 
@@ -2314,6 +2357,7 @@ function fireBioGlob(
 }
 
 function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number, hitZ: number): void {
+  const src = projSrc(proj);
   pushEffect(state, 'impact', hitX, hitZ, 0.25, proj.color, proj.splash || 1);
   if (proj.splash > 0) {
     for (const e of state.enemies) {
@@ -2321,7 +2365,7 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
       const dx = e.x - hitX;
       const dz = e.z - hitZ;
       if (dx * dx + dz * dz <= (proj.splash + e.radius) ** 2) {
-        damageEnemy(state, e, proj.damage * 0.8, { src: weaponSrc('bioplasma') });
+        damageEnemy(state, e, proj.damage * 0.8, { src });
       }
     }
     for (const b of state.bosses) {
@@ -2329,7 +2373,7 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
       const dx = b.x - hitX;
       const dz = b.z - hitZ;
       if (dx * dx + dz * dz <= (proj.splash + b.colliderRadius) ** 2) {
-        damageBoss(state, proj.damage * 0.45, { boss: b, src: weaponSrc('bioplasma') });
+        damageBoss(state, proj.damage * 0.45, { boss: b, src });
       }
     }
   }
@@ -2343,6 +2387,7 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
       proj.puddleLife,
       proj.puddleDamage,
       WEAPONS.bioplasma.color,
+      { srcOverride: src },
     );
   }
   if (proj.splitOnHit > 0) {
@@ -2362,6 +2407,7 @@ function bioImpact(state: SurvivorState, proj: SurvivorProjectile, hitX: number,
         puddleDamage: proj.puddleDamage * 0.7,
         bounceLeft: 0,
         splitOnHit: 0,
+        srcOverride: proj.srcOverride,
       });
     }
   }
@@ -2374,7 +2420,7 @@ function toxicKillBurst(state: SurvivorState, proj: SurvivorProjectile, x: numbe
   pushEffect(state, 'toxic-burst', x, z, 0.46, '#76ff68', radius, { radius });
   for (const e of state.enemies) {
     if (!e.alive || (e.x - x) ** 2 + (e.z - z) ** 2 > (radius + e.radius) ** 2) continue;
-    damageEnemy(state, e, damage, { kind: 'ability', pop: 0.7, src: weaponSrc('bioplasma') });
+    damageEnemy(state, e, damage, { kind: 'ability', pop: 0.7, src: projSrc(proj) });
   }
 }
 
@@ -3085,7 +3131,7 @@ function updateHazards(state: SurvivorState, dt: number): void {
       for (const b of state.bosses) {
         if (!b.active || b.state === 'dead' || b.hitFlash > 0.02) continue;
         if (hazardHitsPoint(h, b.x, b.z, b.colliderRadius)) {
-          const bossMul = h.kind === 'plasma-wake' ? 0.65 : 0.7;
+          const bossMul = h.kind === 'plasma-wake' ? (h.bossDamageMul ?? 1) : 0.7;
           damageBoss(state, h.damage * bossMul * potency, { boss: b, src: hazardSrc(h) });
         }
       }
@@ -4151,6 +4197,12 @@ function chooseAllyEngagement(state: SurvivorState, a: SurvivorAlly): void {
   let ex = bestX + (px / plen) * standoff;
   let ez = bestZ + (pz / plen) * standoff;
 
+  // Keep the squad readable when all three correctly select the same high-value pack.
+  // Stable slot bearings spread their standoff points without changing target choice.
+  const spread = 1.9;
+  ex += (-pz / plen) * Math.sin(a.slotAngle) * spread;
+  ez += (px / plen) * Math.sin(a.slotAngle) * spread;
+
   // Clamp back inside the leash, then inside the arena.
   const ldx = ex - p.x;
   const ldz = ez - p.z;
@@ -4260,6 +4312,20 @@ function updateCleanupCrew(state: SurvivorState, dt: number): void {
       const step = Math.min(d, cfg.followSpeed * dt);
       a.x += (dx / d) * step;
       a.z += (dz / d) * step;
+    }
+    // A small deterministic personal-space correction prevents identical paths from
+    // collapsing the three silhouettes into one model.
+    for (const other of state.allies) {
+      if (other === a || !other.active || other.phase !== 'active') continue;
+      const sx = a.x - other.x;
+      const sz = a.z - other.z;
+      const sd = Math.hypot(sx, sz);
+      const minSpacing = 2.1;
+      if (sd > 0.001 && sd < minSpacing) {
+        const push = Math.min((minSpacing - sd) * 0.5, cfg.followSpeed * dt * 0.45);
+        a.x += (sx / sd) * push;
+        a.z += (sz / sd) * push;
+      }
     }
     const clamped = clampArena(a.x, a.z, 1.2);
     a.x = clamped.x;

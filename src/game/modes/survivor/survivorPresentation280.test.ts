@@ -474,7 +474,7 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
       expect(disc, `no disc at field ${field}`).toBeTruthy();
       expect(disc!.radius, 'collision radius ignores the field').toBeCloseTo(want, 6);
       // Decorative radius stays a fixed multiple of the collision radius.
-      expect(disc!.visualRadius).toBeCloseTo(want * 1.25, 6);
+      expect(disc!.visualRadius).toBeCloseTo(want * SURVIVOR.boomerang.visualRadiusMul, 6);
       // Turn distance is contracted to scale too, so a wider field also throws further.
       const life = weaponStatsAtLevel('boomerang', 5).life!;
       expect(disc!.turnDistance).toBeCloseTo(
@@ -549,7 +549,7 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
     }
   });
 
-  it('Orbital Lance: telegraph, core and shockwave all derive from one effective radius', () => {
+  it('Orbital Lance: immediate core and shockwave derive from one effective radius', () => {
     for (const { field, haste } of MATRIX) {
       const state = armed('orbital', 5, field, haste, 'survivor-orbital');
       const core = effectiveRadius('orbital', 5, field);
@@ -565,8 +565,9 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
         }
         if (seen.has('orbital-shock')) break;
       }
-      // Marker, telegraph, beam, core flash and scorch all show the core boundary.
-      for (const kind of ['orbital', 'telegraph', 'orbital-strike', 'pulse', 'orbital-scorch']) {
+      // Beam, core flash and scorch all show the core boundary. There is no delayed
+      // marker or telegraph because damage resolves on acquisition.
+      for (const kind of ['orbital-strike', 'pulse', 'orbital-scorch']) {
         const r = seen.get(kind);
         expect(r, `${kind} missing at field ${field}`).toBeDefined();
         expect(r!, `${kind} radius at field ${field}`).toBeCloseTo(core, 6);
@@ -756,10 +757,10 @@ describe('§5 the Cosmic Boomerang is a boomerang that actually spins', () => {
     const [disc] = throwUntil(renderer, state, 1);
     expect(disc).toBeTruthy();
     const proj = state.projectiles.find((p) => p.active && p.kind === 'boomerang')!;
-    // `visualRadius` is authored at 1.25x the collision radius. The torus reached
+    // `visualRadius` is deliberately larger than the collision radius.
     // 1.39x by accident of its own tube thickness.
     expect(disc!.scale.x).toBeCloseTo(proj.visualRadius, 6);
-    expect(proj.visualRadius / proj.radius).toBeCloseTo(1.25, 6);
+    expect(proj.visualRadius / proj.radius).toBeCloseTo(SURVIVOR.boomerang.visualRadiusMul, 6);
     renderer.dispose();
   });
 

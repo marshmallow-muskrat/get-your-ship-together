@@ -1108,6 +1108,12 @@ describe('§5 Cleanup Crew replaces Starbreaker Array', () => {
     const rows = cleanupCrewRows(state.telemetry);
     expect(rows.length).toBe(3);
     for (const r of rows) expect(r.damage).toBeGreaterThan(0);
+    const fortunato = rows.find((r) => r.id.endsWith(':frog'))!;
+    const peerMean = rows.filter((r) => r !== fortunato).reduce((n, r) => n + r.damage, 0) / 2;
+    // Splash, toxic bursts and residue must remain attributed to Fortunato. The
+    // playtest report showed ~30% only because those child effects were filed under
+    // the generic weapon bucket.
+    expect(fortunato.damage).toBeGreaterThan(peerMean * 0.5);
     const total = cleanupCrewTotal(state.telemetry)!;
     expect(total.damage).toBeCloseTo(rows.reduce((n, r) => n + r.damage, 0), 6);
     expect(total.hits).toBe(rows.reduce((n, r) => n + r.hits, 0));

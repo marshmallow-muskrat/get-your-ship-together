@@ -6,6 +6,7 @@ import { AssetLibrary } from '../game/assets/AssetLibrary';
 import {
   formatSurvivalTime,
   getHeroLeaderboard,
+  getRunHistory,
 } from '../game/modes/survivor/survivorRecords';
 
 export type CrewSelectHandlers = {
@@ -33,6 +34,7 @@ export class CrewSelectScreen {
   private selectionScale = 1;
   private raf = 0;
   private disposed = false;
+  private leaderboardHistory = false;
   private clock = new THREE.Clock();
   private hud: HTMLElement | null = null;
   private loading: HTMLElement | null = null;
@@ -172,6 +174,7 @@ export class CrewSelectScreen {
         <div class="crew-lb-panel">
           <p class="eyebrow">LOCAL RECORDS</p>
           <h2>Leaderboards</h2>
+          <div id="crew-lb-view-tabs" class="crew-lb-tabs"></div>
           <div id="crew-lb-tabs" class="crew-lb-tabs"></div>
           <div id="crew-lb-list" class="crew-lb-list"></div>
           <button type="button" id="crew-lb-close" class="select-hero-button">BACK</button>
@@ -216,8 +219,23 @@ export class CrewSelectScreen {
   }
 
   private renderCrewLeaderboard(heroId: HeroId): void {
+    const viewTabs = this.hud?.querySelector('#crew-lb-view-tabs');
     const tabs = this.hud?.querySelector('#crew-lb-tabs');
     const list = this.hud?.querySelector('#crew-lb-list');
+    if (viewTabs) {
+      viewTabs.replaceChildren();
+      for (const [history, label] of [[false, 'TOP SCORES'], [true, 'RUN HISTORY']] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `crew-lb-tab${this.leaderboardHistory === history ? ' active' : ''}`;
+        btn.textContent = label;
+        btn.addEventListener('click', () => {
+          this.leaderboardHistory = history;
+          this.renderCrewLeaderboard(heroId);
+        });
+        viewTabs.appendChild(btn);
+      }
+    }
     if (tabs) {
       tabs.innerHTML = HERO_LIST.map(
         (h) =>
@@ -228,7 +246,7 @@ export class CrewSelectScreen {
       });
     }
     if (list) {
-      const runs = getHeroLeaderboard(heroId);
+      const runs = this.leaderboardHistory ? getRunHistory(heroId) : getHeroLeaderboard(heroId);
       if (runs.length === 0) {
         list.innerHTML = '<p class="crew-lb-empty">No runs recorded yet for this hero.</p>';
       } else {
@@ -237,7 +255,7 @@ export class CrewSelectScreen {
             const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
             const date = new Date(r.timestamp).toLocaleDateString();
             return `<div class="crew-lb-row">
-              <strong>#${i + 1}</strong>
+              <strong>${this.leaderboardHistory ? `RUN ${runs.length - i}` : `#${i + 1}`}</strong>
               <span>${formatSurvivalTime(r.survivalTime)}</span>
               <span>K ${r.kills}</span>
               <span>L${r.level}</span>

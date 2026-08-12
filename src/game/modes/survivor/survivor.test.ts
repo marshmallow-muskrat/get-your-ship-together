@@ -105,9 +105,11 @@ import {
 import {
   LEADERBOARDS_STORAGE_KEY,
   MAX_LEADERBOARD_ENTRIES,
+  MAX_RUN_HISTORY_ENTRIES,
   RECORDS_STORAGE_KEY,
   formatSurvivalTime,
   getHeroLeaderboard,
+  getRunHistory,
   loadLeaderboards,
   loadRecords,
   makeRunSummary,
@@ -524,6 +526,26 @@ describe('per-hero leaderboards', () => {
       );
     }
     expect(getHeroLeaderboard('flamingo').length).toBe(MAX_LEADERBOARD_ENTRIES);
+    expect(getRunHistory('flamingo').length).toBe(12);
+  });
+
+  it('keeps recent non-record runs in bounded chronological history', () => {
+    for (let i = 0; i < MAX_RUN_HISTORY_ENTRIES + 3; i += 1) {
+      const run = makeRunSummary({
+        survivalTime: i,
+        kills: i,
+        level: 1,
+        bossesDefeated: 0,
+        heroId: 'frog',
+        weapons: [],
+        passives: {},
+      });
+      run.timestamp += i;
+      recordRun(run);
+    }
+    const history = getRunHistory('frog');
+    expect(history).toHaveLength(MAX_RUN_HISTORY_ENTRIES);
+    expect(history[0]!.timestamp).toBeGreaterThanOrEqual(history.at(-1)!.timestamp);
   });
 
   it('migrates v1 and handles malformed', () => {

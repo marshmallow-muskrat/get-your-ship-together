@@ -238,10 +238,10 @@ export class SurvivorRenderer {
     if (!this.boomerangGeo) {
       this.boomerangGeo = {
         // Tapered arms: thick at the elbow, thin at the tip.
-        arm: new THREE.CylinderGeometry(0.06, 0.17, 0.84, 6),
+        arm: new THREE.CylinderGeometry(0.07, 0.2, 1.0, 6),
         // The gold leading edge rides slightly proud of the arm it belongs to.
-        edge: new THREE.CylinderGeometry(0.035, 0.075, 0.8, 5),
-        elbow: new THREE.CylinderGeometry(0.26, 0.26, 0.15, 12),
+        edge: new THREE.CylinderGeometry(0.04, 0.09, 0.96, 5),
+        elbow: new THREE.CylinderGeometry(0.3, 0.3, 0.16, 12),
         chevron: new THREE.ConeGeometry(0.2, 0.5, 4),
       };
     }
@@ -263,12 +263,12 @@ export class SurvivorRenderer {
 
     const body = share(new THREE.Mesh(geo.arm, this.effectMat(bodyColor, 0.96)));
     body.rotation.x = Math.PI / 2;
-    body.position.set(0, 0, 0.42);
+    body.position.set(0, 0, 0.5);
 
     // Gold sits on the outer face of the arm — the edge that leads through the cut.
     const edge = share(new THREE.Mesh(geo.edge, this.effectMat('#ffd24a', 0.95)));
     edge.rotation.x = Math.PI / 2;
-    edge.position.set(Math.sign(sweep) * 0.11, 0.055, 0.42);
+    edge.position.set(Math.sign(sweep) * 0.13, 0.06, 0.5);
 
     pivot.add(body, edge);
     return pivot;
@@ -764,7 +764,7 @@ export class SurvivorRenderer {
         mesh.userData.spin = spin;
         if (spinner) spinner.rotation.y = spin;
         if (wake) wake.rotation.y = Math.atan2(p.vx, p.vz);
-        // Drawn at exactly the authored decorative radius (1.25x collision), rather
+        // Drawn at exactly the authored decorative radius (1.55x collision), rather
         // than the 1.39x the old torus happened to reach.
         mesh.scale.setScalar(Math.max(0.3, p.visualRadius || p.radius));
       }

@@ -342,7 +342,7 @@ describe('endless-2.6.1 identity and late repair contracts', () => {
    * future tuning pass could quietly undo.
    */
   it('produces no ordinary repair orbs without kills, however long it waits', () => {
-    const state = quietRun(2601, SURVIVOR.lateRepairStart + 1);
+    const state = quietRun(2601, 15 * 60 + 1);
     state.nextBossTime = 1e9;
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;

@@ -156,8 +156,10 @@ white. Depth testing is on, render order sits in the floor band, and additive is
 thin filament and the ignition sparks. The plasma body is a deep violet-magenta composited
 normally; the ramps run magenta -> violet -> out for the filament and ember -> near-black for the
 outer shell. Presentation cooling starts at 18% of life rather than 45%, with a brief ignition
-flash keeping the point of emission readable. **No gameplay change**: damage, lifetime, cadence,
-capsule geometry and `hazardPotency`'s 45% ember start are untouched, and the outer shell is still
+flash keeping the point of emission readable. The presentation pass left damage untouched; the
+later playtest follow-up reduces boss-only damage to 0.50x, and ship-authored segments by another
+0.72x, while horde damage, lifetime, cadence, capsule geometry and `hazardPotency`'s 45% ember start
+remain unchanged. The outer shell is still
 drawn at exactly `h.radius` — the half-width `hazardHitsPoint` tests. A per-level
 integrated-damage normalization (`SURVIVOR.plasmaTrail.damageNorm`) re-bases the weapon so L4–L5
 stay within ~3% of the 2.6.1 measured output while L1 gains; see [`WEAPON_BENCHMARK.md`](WEAPON_BENCHMARK.md).
@@ -186,7 +188,7 @@ purple with gold leading edges. Spin and heading are separate transforms on sepa
 blade spins about its own axis at 11 rad/s while a restrained gold chevron that does not spin
 trails the elbow along the velocity. At Twin Orbit the pair counter-rotates and takes slightly
 different purples so two discs on diverging bearings cannot read as one. The actor is drawn at
-exactly `visualRadius` (the authored 1.25x decorative radius); collision still uses `radius`.
+exactly `visualRadius` (the authored 1.55x decorative radius); collision still uses `radius`.
 
 The 2.8.0 disc was a white additive torus, and its rotational symmetry hid a bug: `syncProjectiles`
 assigns `rotation.y` from the velocity for every Group actor, so the boomerang's `rotation.y +=
@@ -232,8 +234,9 @@ there made L5 an 8% damage *loss* against exactly the encounter a prototype is t
 ### Orbital Lance two-zone strike (endless-2.7.0)
 
 Orbital hit hard in 2.6.1 (304 maximum hit) but covered almost nothing: 34,393 damage, 2.6% of a
-21:18 run. The identity — boss preference, motion-leading, delayed telegraph, one heavy impact — is
-unchanged; what changed is reach.
+21:18 run. After playtesting, damage resolves on acquisition instead of waiting behind its own
+telegraph; the beam is impact confirmation rather than a warning other weapons can invalidate.
+Targeting is explicit: **bosses → elites/minibosses → densest ordinary pack**.
 
 | Level | Core radius (2.6.1 → 2.7.0) | Shockwave radius |
 |---:|---:|---:|
@@ -254,7 +257,7 @@ is unchanged at 3.05.
 0.98-opacity white core, held for 0.4s — longer than anything on the ground. The weapon named for
 an orbital strike read as a column of light, and the player never saw the area that resolved.
 
-1. Targeting marker at the core radius.
+1. Damage resolves immediately in the core and shockwave zones.
 2. A **thin** beam and a small contact flash, gone in `0.22s`. A tenth of the damage radius
    wide, not most of it.
 3. Core blast at exactly the core damage radius.
@@ -496,7 +499,7 @@ Signature identities are preserved: Boswell's directional Drone Formation, Fitzw
 piercing Rail Lance lines, Fortunato's bursting Bio-Plasma globs with corrosive residue, and
 Rutherford's distributed cluster-leading proximity-fused mini-rockets — the same projectile kinds,
 effects and mechanics the player's versions use. Damage and cadence are re-based by Titan
-coefficients (`damageMul` 0.33, `cadenceMul` 1.28) and scaled by the shared bounded
+coefficients (`damageMul` 0.29, `cadenceMul` 1.28) and scaled by the shared bounded
 `playerPowerScale`, so the squad is not three extra maxed players.
 
 Telemetry keeps one bucket per ally (`titan-cleanup:<heroId>`) so individual contribution is
@@ -622,6 +625,7 @@ wall clock, and not capped at a handful of orbs on the field.
 | Model | Threat credit banks toward a re-rolled threshold (`accumulator`) |
 | Credit per kill | fodder 1, elite 3, miniboss 8 |
 | Threshold | mean 40 credit, ±25% seeded variance per drop |
+| Critical drought guard | At ≤45% integrity, next kill after 12s dry emits if no repair is within 14 units |
 | Ordinary orb | 16 |
 | Orb lifetime | 70s, with an 8s expiry warning |
 | Miniboss / boss | 45 / 55 (+30 Mega), guaranteed, premium, outside the ordinary economy |
@@ -634,6 +638,10 @@ windows is 47.0 / 42.8 / 41.0 / 43.0, against 45.9 / 86.8 / 53.7 / 50.3 under th
 A second `probability` model — a per-kill roll with escalating bad-luck protection and a hard
 guarantee — is implemented and selectable via `SURVIVOR.repair.killDriven.model`, so the two can be
 compared on identical seeds rather than argued about.
+
+The critical guard remains kill-driven: it never creates a timed or passive heal and is
+suppressed when a nearby repair already exists. It ends the observed failure case where a
+low-integrity player keeps killing while every banked orb is across the arena.
 
 ### What this replaced, and why
 
@@ -797,6 +805,9 @@ gyst.survivor.leaderboards.v2
 ```
 
 Records rank by survival time, then kills and bosses defeated as tie-breakers. Abandoned runs are not recorded.
+The same screen exposes a chronological **Run History** containing the most recent 100 completed
+runs, including runs that miss the top ten. It is local-only under
+`gyst.survivor.run-history.v1`; existing top-ten entries seed migration.
 
 ## Run Report
 
@@ -818,7 +829,7 @@ approximately, and overkill remains excluded under the existing contract. The ma
 | Regions | Grid rows: head (category + level), title, body, reserved footer |
 | Keybind | Owns the footer row; copy can never reach it |
 | Level badge | One gold badge on every card that has levels |
-| Upgrade Numbers | Setting, **default off**, persisted; gates the raw stat lines |
+| Upgrade Numbers | Setting, **default on**, persisted; gates the raw stat lines |
 | Display names | Centralised on `displayName`; authored Title Case, shouting is CSS |
 
 ### Card regions and the level badge (endless-2.8.0 presentation pass)
@@ -872,10 +883,9 @@ The slot counter excludes prototypes (Arc Conductor, Orbital Lance) because they
 an ordinary slot. Counting them would tell the player they are fuller than they are, at exactly
 the moment the readout exists to inform: the choice between a new weapon and an upgrade.
 
-Upgrade Numbers defaults off because the cards lead with what an upgrade *does*; the numbers are
-for players who want to compare precisely, and showing them by default turns a choice about
-identity into a spreadsheet. Settings written before endless-2.8.0 have no such key and read as
-the default rather than as enabled. Toggling it while a level-up is open invalidates the card
+Upgrade Numbers defaults on after playtesting showed the compact values make comparisons easier.
+An explicit off preference remains persisted; settings without the key receive the new default.
+Toggling it while a level-up is open invalidates the card
 cache, so the change is visible immediately rather than at the next level.
 
 ### UI scale reflows
@@ -899,7 +909,7 @@ the scale (the crew-select lower HUD nudge) are expressed in px deliberately.
   is absolutely positioned, so it can never resize or reflow the deck.
 - Responsive level-up choice presentation
 - UI Scale setting that does not scale the Three.js world
-- Per-hero leaderboards available from crew selection and the run shell
+- Per-hero leaderboards and chronological run history available from crew selection and the run shell
 
 ## Development fixtures
 

@@ -130,7 +130,7 @@ Full matrix — base, field only, overclock only, both — driven per weapon:
 | Weapon | Field scales | Verified |
 |---|---|---|
 | Pulsar Core | discharge radius | drawn ring is the damage radius; Echo Pulsar's second ring is a clean `0.82x` of the same effective value |
-| Cosmic Boomerang | collision radius, decorative radius, turn distance | collision `= radius x field`; drawn `= 1.25x` collision; reach scales so a wider field also throws further |
+| Cosmic Boomerang | collision radius, decorative radius, turn distance | collision `= radius x field`; drawn `= 1.55x` collision; reach scales so a wider field also throws further |
 | Plasma Wake | trail half-width | capsule half-width `= radius x widthMul x field`; lifetime is authored and does **not** move |
 | Arc Conductor | chain reach | every chain jump inside the effective reach; the initial arc uses the separate 16-unit acquisition range by design |
 | Orbital Lance | core radius | marker, telegraph, beam, core flash and scorch all at the core radius; only the shockwave shows the outer radius, because only it damages there |

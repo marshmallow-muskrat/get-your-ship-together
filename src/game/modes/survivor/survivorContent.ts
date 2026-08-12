@@ -140,10 +140,6 @@ export const SURVIVOR = {
   collapseStep: 120,
   /** Ordinary repair orbs expire so full-health players cannot fill the pool forever. */
   repairPickupLife: 70,
-  /** After the late-game transition, repairs become bankable map resources. */
-  lateRepairStart: 15 * 60,
-  lateRepairPickupLife: 70,
-  lateRepairActiveCap: 4,
   repairPickupWarnLife: 8,
   /** Keep XP from packing against perimeter walls. */
   pickupSafeInset: 2.75,
@@ -222,6 +218,10 @@ export const SURVIVOR = {
       threshold: 40,
       /** Accumulator: seeded +/- fraction applied to each next threshold. */
       thresholdVariance: 0.25,
+      /** Critical, kill-driven drought guard; never emits without an eligible kill. */
+      criticalDroughtSeconds: 12,
+      /** Existing repair inside this radius suppresses the critical drought guard. */
+      criticalNearbyRadius: 14,
       /** Probability model: chance per unit of threat weight. */
       baseChancePerWeight: 1 / 40,
       /**
@@ -432,7 +432,7 @@ export const SURVIVOR = {
        * damage lands at parity with Carrier Wing, which the release brief holds fixed as
        * the reference "already feels good" armament.
        */
-      damageMul: 0.33,
+      damageMul: 0.29,
       cadenceMul: 1.28,
       /** Boss damage multiplier applied on top, matching ordinary weapon boss ratios. */
       bossMul: 0.8,
@@ -505,12 +505,16 @@ export const SURVIVOR = {
      * 3.0-4.2 bounds how far L1 can rise while L5 stays at baseline.
      */
     damageNorm: [0.88, 0.92, 0.96, 1.02, 1.194] as readonly number[],
+    /** Bosses do not take full horde-clearing trail damage from every swept segment. */
+    bossDamageMul: 0.5,
+    /** Ship's long, wide wake gets an additional boss-only reduction. */
+    shipBossDamageMul: 0.72,
   },
   /**
    * Orbital Lance two-zone strike (2.7.0).
    *
-   * The identity — boss preference, motion-leading, delayed telegraph, one heavy
-   * impact — is unchanged. What changes is *coverage*: every strike now also lays down
+   * The identity — tactical priority and one heavy impact — is unchanged. Damage now
+   * resolves immediately. What changes is *coverage*: every strike also lays down
    * a wider shockwave ring. A target is damaged by exactly one zone, the core taking
    * precedence, so a single enemy can never be double-counted and the single-boss
    * benchmark scenario is unaffected by the ring.
@@ -615,6 +619,8 @@ export const SURVIVOR = {
    */
   boomerang: {
     turnDistancePerLife: 4.2,
+    /** Decorative silhouette only; collision remains the authored projectile radius. */
+    visualRadiusMul: 1.55,
     /** Diverging bearing between the pair at Twin Orbit, in radians. */
     twinSpread: 0.42,
     bossDamageMul: 0.75,

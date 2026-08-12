@@ -178,6 +178,66 @@ describe('§2 ordinary repair supply is earned by killing', () => {
     expect(k.weightMiniboss).toBeGreaterThan(k.weightElite);
     expect(k.model).toBe('accumulator');
   });
+
+  it('ends a critical-health drought on the next eligible kill when no repair is nearby', () => {
+    const state = createSurvivorState('bee', null, 0xc11);
+    state.enemyCap = 20;
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.player.health = state.player.maxHealth * 0.4;
+    state.repairEconomy.sinceDrop = SURVIVOR.repair.killDriven.criticalDroughtSeconds + 0.1;
+    state.repairEconomy.credit = 0;
+    state.repairEconomy.nextThreshold = SURVIVOR.repair.killDriven.threshold;
+    state.weapons = [{ weaponId: 'pulse', level: 5, cooldown: 0, focusDebt: 0, prototype: false }];
+    const enemy = spawnEnemyForTest(state, 'basic', 1.5, 0)!;
+    enemy.health = 1;
+    enemy.maxHealth = 1;
+    for (let i = 0; i < 30 && enemy.alive; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    }
+    expect(enemy.alive).toBe(false);
+    expect(state.repairStats.ordinarySpawned).toBe(1);
+    expect(state.pickups.some((p) => p.active && p.kind === 'repair')).toBe(true);
+  });
+});
+
+describe('playtest follow-up: Orbital Lance resolves immediately with tactical priority', () => {
+  function orbitalState(seed: number): SurvivorState {
+    const state = createSurvivorState('bee', null, seed);
+    state.enemyCap = 20;
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.player.invuln = 1e9;
+    state.weapons = [{ weaponId: 'orbital', level: 1, cooldown: 0, focusDebt: 0, prototype: true }];
+    return state;
+  }
+
+  it('damages a boss on the firing step without creating an armed marker', () => {
+    const state = orbitalState(0x0b17);
+    const boss = bossOnPlayer(state);
+    boss.x = 8;
+    boss.z = 0;
+    state.bosses.push(boss);
+    const before = boss.health;
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    expect(boss.health).toBeLessThan(before);
+    expect(state.projectiles.some((p) => p.active && p.kind === 'orbital-marker')).toBe(false);
+    expect(state.effects.some((e) => e.kind === 'orbital-strike')).toBe(true);
+  });
+
+  it('chooses an elite before a denser ordinary pack when no boss exists', () => {
+    const state = orbitalState(0xe117e);
+    const elite = spawnEnemyForTest(state, 'basic', 9, 0)!;
+    elite.isElite = true;
+    elite.health = elite.maxHealth = 10_000;
+    for (let i = 0; i < 8; i += 1) {
+      const ordinary = spawnEnemyForTest(state, 'basic', -6 + i * 0.2, 0)!;
+      ordinary.health = ordinary.maxHealth = 10_000;
+    }
+    const before = elite.health;
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    expect(elite.health).toBeLessThan(before);
+  });
 });
 
 // --------------------------------------------------------------- §5 UI scale reflows
@@ -306,14 +366,14 @@ describe('§5 upgrade cards', () => {
 });
 
 describe('§5 Upgrade Numbers setting', () => {
-  it('defaults off and survives a round trip', () => {
-    expect(UPGRADE_NUMBERS_DEFAULT).toBe(false);
-    expect(clampUpgradeNumbers(undefined)).toBe(false);
+  it('defaults on and preserves an explicit preference', () => {
+    expect(UPGRADE_NUMBERS_DEFAULT).toBe(true);
+    expect(clampUpgradeNumbers(undefined)).toBe(true);
     expect(clampUpgradeNumbers(true)).toBe(true);
-    // Anything that is not exactly `true` reads as off, so a corrupted or older payload
-    // cannot silently enable it.
+    expect(clampUpgradeNumbers(false)).toBe(false);
+    // Malformed and older payloads receive the new default.
     for (const v of [null, 0, 1, 'true', 'on', {}, []]) {
-      expect(clampUpgradeNumbers(v), String(v)).toBe(false);
+      expect(clampUpgradeNumbers(v), String(v)).toBe(true);
     }
   });
 

@@ -106,18 +106,17 @@ export interface StoredSettings {
   /**
    * Show raw numbers on upgrade cards (endless-2.8.0).
    *
-   * Defaults **off**. The cards lead with what an upgrade does; the numbers are for
-   * players who want to compare precisely, and showing them by default turns a choice
-   * about identity into a spreadsheet. Persisted so the preference survives a reload.
+   * Defaults **on** after playtesting showed the compact values make comparisons easier.
+   * Persisted so players who prefer the cleaner cards can still turn them off.
    */
   upgradeNumbers: boolean;
 }
 
-export const UPGRADE_NUMBERS_DEFAULT = false;
+export const UPGRADE_NUMBERS_DEFAULT = true;
 
 /** Unknown/missing values fall back to the default rather than to `true`. */
 export function clampUpgradeNumbers(v: unknown): boolean {
-  return v === true;
+  return typeof v === 'boolean' ? v : UPGRADE_NUMBERS_DEFAULT;
 }
 
 export function clampUiScale(v: unknown): number {

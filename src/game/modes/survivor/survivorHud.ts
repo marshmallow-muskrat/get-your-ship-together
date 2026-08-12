@@ -29,6 +29,7 @@ import {
 import {
   formatSurvivalTime,
   getHeroLeaderboard,
+  getRunHistory,
   makeRunSummary,
   recordRun,
 } from './survivorRecords';
@@ -64,8 +65,8 @@ export class SurvivorHud {
   private onResetKeybinds: () => void;
   private onUiScale: (s: number) => void;
   private onUpgradeNumbers: (on: boolean) => void;
-  /** Whether upgrade cards show raw stat lines; persisted, default off. */
-  private upgradeNumbers = false;
+  /** Whether upgrade cards show raw stat lines; persisted, default on. */
+  private upgradeNumbers = true;
   private onOpenLeaderboard: () => void;
   private getKeybinds: () => KeybindMap;
   private projectWorld: (x: number, z: number) => { x: number; y: number } | null;
@@ -252,6 +253,7 @@ export class SurvivorHud {
       <div id="sv-leaderboard-modal" class="sv-modal sv-leaderboard hidden">
         <p class="eyebrow">LOCAL RECORDS</p>
         <h2>Leaderboards</h2>
+        <div id="sv-lb-view-tabs" class="sv-lb-tabs"></div>
         <div id="sv-lb-tabs" class="sv-lb-tabs"></div>
         <div id="sv-lb-list" class="sv-lb-list"></div>
         <div class="sv-end-actions">
@@ -371,11 +373,27 @@ export class SurvivorHud {
   }
 
   private _lbHero: import('../../content/heroes').HeroId = 'bee';
+  private _lbHistory = false;
 
   private renderLeaderboard(hero: HeroId): void {
     this._lbHero = hero;
+    const viewTabs = this.root.querySelector('#sv-lb-view-tabs');
     const tabs = this.root.querySelector('#sv-lb-tabs');
     const list = this.root.querySelector('#sv-lb-list');
+    if (viewTabs) {
+      viewTabs.replaceChildren();
+      for (const [history, label] of [[false, 'TOP SCORES'], [true, 'RUN HISTORY']] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `sv-lb-tab${this._lbHistory === history ? ' active' : ''}`;
+        btn.textContent = label;
+        btn.addEventListener('click', () => {
+          this._lbHistory = history;
+          this.renderLeaderboard(this._lbHero);
+        });
+        viewTabs.appendChild(btn);
+      }
+    }
     if (tabs) {
       const names: Record<HeroId, string> = {
         bee: 'Bee',
@@ -396,7 +414,7 @@ export class SurvivorHud {
     if (list) {
       // Sanitize via textContent builders — never interpolate untrusted strings into HTML.
       list.replaceChildren();
-      const runs = getHeroLeaderboard(hero);
+      const runs = this._lbHistory ? getRunHistory(hero) : getHeroLeaderboard(hero);
       if (runs.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'sv-lb-empty';
@@ -412,7 +430,7 @@ export class SurvivorHud {
             el.textContent = text;
             row.appendChild(el);
           };
-          add('strong', `#${i + 1}`);
+          add('strong', this._lbHistory ? `RUN ${runs.length - i}` : `#${i + 1}`);
           add('span', formatSurvivalTime(r.survivalTime));
           add('span', `K ${r.kills}`);
           add('span', `L${r.level}`);
@@ -424,6 +442,36 @@ export class SurvivorHud {
           );
           const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
           add('span', build, 'sv-lb-build');
+          if (this._lbHistory) {
+            row.classList.add('history');
+            const detail = document.createElement('div');
+            detail.className = 'sv-lb-detail hidden';
+            if (r.report) {
+              const totalDamage = r.report.sources.reduce((n, s) => n + s.damage, 0);
+              const top = r.report.sources
+                .slice(0, 5)
+                .map((s) => `${sourceLabel(s.id, (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id)} ${Math.round(s.damage).toLocaleString()}`)
+                .join(' · ');
+              detail.textContent = `Damage ${Math.round(totalDamage).toLocaleString()} · Elites ${r.report.eliteKills} · Minibosses ${r.report.minibossKills} · Orb healing ${Math.round(r.report.healedByOrbs).toLocaleString()} · Regen ${Math.round(r.report.healedByRegen).toLocaleString()} · Shielded ${Math.round(r.report.shieldAbsorbed).toLocaleString()}${top ? ` · Top sources: ${top}` : ''}`;
+            } else {
+              detail.textContent = 'Detailed telemetry was not stored for this older run.';
+            }
+            row.setAttribute('role', 'button');
+            row.setAttribute('tabindex', '0');
+            row.setAttribute('aria-expanded', 'false');
+            const toggle = () => {
+              const open = !detail.classList.toggle('hidden');
+              row.setAttribute('aria-expanded', String(open));
+            };
+            row.addEventListener('click', toggle);
+            row.addEventListener('keydown', (ev) => {
+              if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                toggle();
+              }
+            });
+            row.appendChild(detail);
+          }
           list.appendChild(row);
         });
       }
@@ -1102,6 +1150,7 @@ export class SurvivorHud {
           heroId: state.heroId,
           weapons: state.weapons,
           passives: state.passives,
+          telemetry: state.telemetry,
         });
         const result = recordRun(summary);
         state.runRecorded = true;
