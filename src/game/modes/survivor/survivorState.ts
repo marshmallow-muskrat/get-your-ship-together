@@ -1264,6 +1264,22 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;
     seedFixtureHorde(state, 22, 9);
+  } else if (fixture === 'survivor-boomerang') {
+    /*
+     * Twin Orbit in isolation.
+     *
+     * The endless-2.8.0 presentation pass replaced a white additive torus with a real
+     * boomerang silhouette, and the two things worth looking at — whether the blade reads
+     * as spinning, and whether the two diverging discs read as two — are both invisible
+     * in a crowded run. Sparse horde on purpose: this is about following one object.
+     */
+    state.time = 300;
+    grantBuild(state, [{ id: 'boomerang', level: 5 }], { area: 2 }, 12);
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 10, 12);
     // ------------------------------------------------------------ endless-2.7.0
   } else if (fixture === 'survivor-plasma-l1') {
     /*

@@ -24,7 +24,7 @@ if (shotDir) mkdirSync(shotDir, { recursive: true });
 const SCENES = [
   { id: 'plasma-l1', fixture: 'survivor-plasma-l1', hero: 'bee', settle: 9 },
   { id: 'plasma-ship', fixture: 'survivor-plasma-ship', hero: 'bee', settle: 9 },
-  { id: 'boomerang', fixture: 'survivor-start', hero: 'bee', settle: 9 },
+  { id: 'boomerang', fixture: 'survivor-boomerang', hero: 'bee', settle: 9 },
   { id: 'orbital', fixture: 'survivor-orbital', hero: 'red-panda', settle: 12 },
   { id: 'arc', fixture: 'survivor-arc', hero: 'bee', settle: 10 },
   { id: 'boss', fixture: 'survivor-boss', hero: 'frog', settle: 12 },

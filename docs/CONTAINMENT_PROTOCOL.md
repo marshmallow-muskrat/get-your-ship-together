@@ -919,6 +919,7 @@ the scale (the crew-select lower HUD nudge) are expressed in px deliberately.
 | `survivor-miniboss` | Miniboss melee slam |
 | `survivor-gunship` | Gunship lethal corridor |
 | `survivor-stress` | Worst-case presentation load for the GPU procedure (now includes L5 Twin Wake) |
+| `survivor-boomerang` | L5 Twin Orbit in isolation — spin and two diverging lanes |
 | `survivor-plasma-l1` | Level-1 Plasma Wake trail in isolation |
 | `survivor-plasma-ship` | L5 Twin Wake in ship form — widest, brightest trail |
 | `survivor-ship-ram` | Ship mitigation and the boss ram |

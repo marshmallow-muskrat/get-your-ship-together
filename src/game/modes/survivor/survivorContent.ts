@@ -2400,6 +2400,7 @@ export type SurvivorFixture =
   | 'survivor-gunship'
   | 'survivor-identity'
   | 'survivor-rotary'
+  | 'survivor-boomerang'
   | 'survivor-plasma-l1'
   | 'survivor-plasma-ship'
   | 'survivor-ship-ram'
@@ -2432,6 +2433,7 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-gunship',
   'survivor-identity',
   'survivor-rotary',
+  'survivor-boomerang',
   'survivor-plasma-l1',
   'survivor-plasma-ship',
   'survivor-ship-ram',

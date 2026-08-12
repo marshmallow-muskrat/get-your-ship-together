@@ -20,7 +20,8 @@ for. Fixtures are listed where a thing is hard to reach in a normal run.
 
 ## 2. Cosmic Boomerang — shape, colour, readability
 
-Take Cosmic Boomerang; take it to L5 for Twin Orbit.
+`/?mode=survivor&fixture=survivor-boomerang&hero=bee` (L5 Twin Orbit, sparse horde),
+and in a real run.
 
 - [ ] Does it read as a boomerang rather than a disc or a halo?
 - [ ] Can you see it spinning?
