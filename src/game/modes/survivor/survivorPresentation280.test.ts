@@ -47,6 +47,7 @@ import {
 import {
   EMPTY_SURVIVOR_INPUT,
   forceBossIntoPattern,
+  forceStartProtocol,
   stepSurvivor,
 } from './survivorSim';
 import {
@@ -1075,5 +1076,113 @@ describe('§9 Arc Conductor L5 forks instead of adding a fifth jump', () => {
     const { arcs } = volley(state);
     const initial = arcs.filter((a) => Math.hypot(a.x - p.x, a.z - p.z) < 1e-6);
     expect(initial.length, 'L4 forked').toBe(1);
+  });
+});
+
+/* --------------------------------- §10 Cleanup Crew flies under its own power */
+
+describe('§10 Cleanup Crew allies show their propulsion', () => {
+  /**
+   * A deployed squad. The fixtures seed the arena; `SurvivorMode` normally starts the
+   * protocol after construction, so the test drives the same real activation path.
+   */
+  function crewScene(seed: number, fixture: SurvivorFixture = 'survivor-cleanup-combat') {
+    const renderer = new SurvivorRenderer(new AssetLibrary());
+    const state = createSurvivorState('bee', fixture, seed);
+    state.player.invuln = 1e9;
+    state.nextCacheTime = 1e9;
+    forceStartProtocol(state, 'cleanup-crew', 1.5);
+    expect(state.allies.length, 'the squad never arrived').toBe(3);
+    for (let i = 0; i < 1200; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      renderer.sync(state, DT);
+      if (state.allies.filter((a) => a.active && a.phase === 'active').length === 3) break;
+    }
+    return { renderer, state };
+  }
+
+  function jets(renderer: SurvivorRenderer): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    renderer.root.traverse((o) => {
+      if (o.name === 'ally-jet') out.push(o);
+    });
+    return out;
+  }
+
+  it('gives every deployed ally exactly two bounded thruster plumes', () => {
+    const { renderer, state } = crewScene(9960);
+    const deployed = state.allies.filter((a) => a.active).length;
+    expect(deployed, 'the squad never deployed').toBeGreaterThan(0);
+    const found = jets(renderer);
+    // Bounded by construction: two per ally, and nothing accumulates per frame.
+    expect(found.length).toBe(deployed * 2);
+    for (const jet of found) {
+      // A plume and a bright core, and nothing else.
+      expect(jet.children.length).toBe(2);
+    }
+    renderer.dispose();
+  });
+
+  it('burns harder while moving and idles while holding station', () => {
+    const { renderer, state } = crewScene(9961);
+    const ally = state.allies.find((a) => a.active && a.phase === 'active');
+    expect(ally).toBeTruthy();
+
+    // Hold the ally still for long enough for the damping to settle.
+    for (let i = 0; i < 90; i += 1) {
+      ally!.x = 4;
+      ally!.z = 4;
+      renderer.sync(state, DT);
+    }
+    const idle = jets(renderer)[0]!.children[0]! as THREE.Mesh;
+    const idleLen = idle.scale.y;
+    const idleNozzle = idle.position.y + (idle.scale.y * 0.55) / 2;
+
+    // Now drive it across the arena at speed.
+    for (let i = 0; i < 90; i += 1) {
+      ally!.x = 4 + i * 0.12;
+      renderer.sync(state, DT);
+    }
+    const burning = jets(renderer)[0]!.children[0]! as THREE.Mesh;
+    expect(burning.scale.y, 'moving does not burn harder than hovering').toBeGreaterThan(idleLen);
+    // Idle is a real burn, not nothing: the ally is holding itself up.
+    expect(idleLen).toBeGreaterThan(0);
+    // The nozzle stays put; the plume grows downward from it.
+    const burnNozzle = burning.position.y + (burning.scale.y * 0.55) / 2;
+    expect(burnNozzle).toBeCloseTo(idleNozzle, 5);
+    renderer.dispose();
+  });
+
+  it('hides the jets while the transport is flying the hero in', () => {
+    const renderer = new SurvivorRenderer(new AssetLibrary());
+    const state = createSurvivorState('bee', 'survivor-cleanup-arrival', 9962);
+    state.player.invuln = 1e9;
+    state.nextCacheTime = 1e9;
+    forceStartProtocol(state, 'cleanup-crew', 1.5);
+    let sawTransit = false;
+    for (let i = 0; i < 400; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      renderer.sync(state, DT);
+      const deployed = state.allies.filter((a) => a.active && a.phase === 'active').length;
+      const arriving = state.allies.filter((a) => a.active && a.phase !== 'active').length;
+      if (arriving > 0) sawTransit = true;
+      // The ship has its own landing streak; the Mech's jets belong to the Mech, so a
+      // burning jet always implies a deployed ally.
+      const burning = jets(renderer).filter((j) => j.visible).length;
+      expect(burning, `${burning} jets burning for ${deployed} deployed allies`).toBe(
+        deployed * 2,
+      );
+    }
+    expect(sawTransit, 'the arrival fixture never showed a transport').toBe(true);
+    renderer.dispose();
+  });
+
+  it('releases every jet mesh when the squad leaves', () => {
+    const { renderer, state } = crewScene(9963);
+    expect(jets(renderer).length).toBeGreaterThan(0);
+    for (const a of state.allies) a.active = false;
+    renderer.sync(state, DT);
+    expect(jets(renderer).length, 'jets outlived their ally').toBe(0);
+    renderer.dispose();
   });
 });

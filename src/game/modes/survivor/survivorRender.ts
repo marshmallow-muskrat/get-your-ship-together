@@ -10,6 +10,19 @@ import { AttackShapeMesh } from './survivorShapeMesh';
 
 type Animator = ReturnType<typeof createAnimator>;
 
+/** Cleanup Crew thruster plume: unit height before the per-frame burn scale. */
+const ALLY_JET_HEIGHT = 0.55;
+/** Nozzle height. The plume grows downward from here and never moves up. */
+const ALLY_JET_NOZZLE_Y = 0.5;
+/** Idle burn floor — a hovering astronaut is still holding itself up. */
+const ALLY_JET_IDLE = 0.22;
+/** Ground speed treated as full thrust, near an ally's own top speed. */
+const ALLY_JET_FULL_SPEED = 7;
+/** Thrust smoothing rate; allies re-target on a timer and would otherwise strobe. */
+const ALLY_JET_DAMPING = 6;
+/** Maximum forward lean, in radians. Restrained: this is a cue, not an animation. */
+const ALLY_JET_MAX_TILT = 0.16;
+
 interface ActorVis {
   root: THREE.Object3D;
   animator: Animator | null;
@@ -29,6 +42,25 @@ interface AllyVis {
   ship: THREE.Object3D | null;
   trail: THREE.Mesh;
   glow: THREE.Mesh;
+  /**
+   * Astronaut propulsion (endless-2.8.0).
+   *
+   * Two downward thruster plumes with bright cores, at fixed offsets under the Mech.
+   * Bounded by construction — four meshes per ally, three allies — and torn down with
+   * the ally, so there is no particle system to cap.
+   */
+  jets: THREE.Object3D[];
+  /**
+   * Previous ground position, for measuring speed.
+   *
+   * The simulation gives an ally a position and a facing but no velocity, and it is not
+   * getting one for a visual: how hard the jets are burning is a presentation question,
+   * so the renderer answers it from what it can already see.
+   */
+  prevX: number;
+  prevZ: number;
+  /** Smoothed thrust in [0,1]; damped so the plumes do not strobe on a jittery step. */
+  thrust: number;
 }
 
 /**
@@ -1043,6 +1075,19 @@ export class SurvivorRenderer {
         this.allies.set(a.id, vis);
         this.root.add(vis.root);
       }
+      /*
+       * Measure how hard this ally is moving before the transform is overwritten.
+       * Speed is converted to a 0-1 thrust against the ally's own top speed and damped,
+       * so a squadmate crossing the arena burns hard and one holding station idles.
+       */
+      const moved = Math.hypot(a.x - vis.prevX, a.z - vis.prevZ);
+      vis.prevX = a.x;
+      vis.prevZ = a.z;
+      const speed = dt > 0 ? moved / dt : 0;
+      const want = Math.min(1, speed / ALLY_JET_FULL_SPEED);
+      const k = Math.min(1, dt * ALLY_JET_DAMPING);
+      vis.thrust += (want - vis.thrust) * k;
+
       vis.root.position.set(a.x, 0, a.z);
       vis.root.rotation.y = Math.atan2(a.facingX, a.facingZ);
 
@@ -1057,7 +1102,12 @@ export class SurvivorRenderer {
       if (vis.mech) {
         vis.mech.root.visible = !inTransit;
         vis.mech.animator?.update(dt);
+        // Lean into the burn. Local +Z is the ally's facing, so a positive X rotation
+        // tips it forward along the direction it is actually correcting toward.
+        vis.mech.root.rotation.x = inTransit ? 0 : vis.thrust * ALLY_JET_MAX_TILT;
       }
+      // Jets belong to the Mech, not the transport: the ship has its own trail.
+      this.layoutAllyJets(vis, !inTransit);
       if (vis.trail) {
         vis.trail.visible = inTransit;
         const mat = vis.trail.material as THREE.MeshBasicMaterial;
@@ -1111,7 +1161,69 @@ export class SurvivorRenderer {
     glow.position.y = 0.06;
     root.add(glow);
 
-    return { root, mech, ship, trail, glow };
+    /*
+     * Thruster plumes.
+     *
+     * Allies hover and slide across the floor with nothing holding them up, which reads
+     * as a model being dragged rather than as a squadmate flying. Two small downward
+     * jets under the Mech answer that: a faint idle burn while holding station, a
+     * stronger one while correcting position.
+     *
+     * A cone's apex is at +Y and its base at -Y, which is already the shape of a
+     * downward exhaust — narrow at the nozzle, flaring onto the ground. Scaling it in Y
+     * grows the plume; `layoutAllyJets` moves the mesh to keep the nozzle fixed.
+     */
+    const jets: THREE.Object3D[] = [];
+    for (const side of [-1, 1]) {
+      const jet = new THREE.Group();
+      jet.name = 'ally-jet';
+      const plume = new THREE.Mesh(
+        new THREE.ConeGeometry(0.17, ALLY_JET_HEIGHT, 8, 1, true),
+        this.effectMat(hero.accent, 0.5, true),
+      );
+      plume.userData.ownsGeometry = true;
+      plume.name = 'ally-jet-plume';
+      const core = new THREE.Mesh(
+        new THREE.ConeGeometry(0.075, ALLY_JET_HEIGHT * 0.62, 6, 1, true),
+        this.effectMat('#fff2c8', 0.8, true),
+      );
+      core.userData.ownsGeometry = true;
+      core.name = 'ally-jet-core';
+      jet.add(plume, core);
+      jet.position.set(side * 0.42, 0, 0.02);
+      root.add(jet);
+      jets.push(jet);
+    }
+
+    return { root, mech, ship, trail, glow, jets, prevX: 0, prevZ: 0, thrust: 0 };
+  }
+
+  /**
+   * Burn the plumes in proportion to how hard the ally is correcting its position.
+   *
+   * Thrust is smoothed rather than taken raw: an ally re-targets on a 0.85s timer and
+   * can change heading between steps, and an unsmoothed plume strobes on that. The idle
+   * floor is deliberately non-zero — a hovering astronaut is still holding itself up.
+   */
+  private layoutAllyJets(vis: AllyVis, visible: boolean): void {
+    for (const jet of vis.jets) {
+      jet.visible = visible;
+      if (!visible) continue;
+      const burn = ALLY_JET_IDLE + (1 - ALLY_JET_IDLE) * vis.thrust;
+      // Flicker keeps the flame alive without another moving part to tune.
+      const flicker = 0.9 + Math.sin(performance.now() * 0.021 + jet.position.x * 7) * 0.1;
+      for (const child of jet.children) {
+        if (!(child instanceof THREE.Mesh)) continue;
+        const core = child.name === 'ally-jet-core';
+        const h = ALLY_JET_HEIGHT * (core ? 0.62 : 1);
+        const len = burn * flicker * (core ? 0.8 : 1);
+        child.scale.set(0.85 + burn * 0.3, len, 0.85 + burn * 0.3);
+        // Keep the nozzle pinned while the plume grows downward.
+        child.position.y = ALLY_JET_NOZZLE_Y - (h * len) / 2;
+        const mat = child.material as THREE.MeshBasicMaterial;
+        mat.opacity = (core ? 0.75 : 0.42) * (0.45 + 0.55 * burn);
+      }
+    }
   }
 
   /**
