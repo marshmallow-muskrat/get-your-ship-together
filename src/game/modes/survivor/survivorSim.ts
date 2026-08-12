@@ -643,11 +643,19 @@ function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number, weigh
   eco.credit += weight;
 
   if (k.model === 'accumulator') {
-    // Credit banks toward a threshold that is re-rolled with seeded variance on
-    // every drop, so the cadence is readable without being metronomic.
+    /*
+     * Credit banks toward a threshold re-rolled with seeded variance on every drop.
+     *
+     * A bounded credit ceiling was implemented here and then removed on the evidence. The
+     * structural argument was sound — this model has no bad-luck protection where
+     * endless-2.7.0 guaranteed an injured player an orb within 18 seconds — but adding one
+     * moved the under-five-minute death rate by -1.0 points at p=0.80 across 384 matched
+     * runs, and combined with the early-offer invariant it trended worse rather than
+     * better. See `SURVIVAL_EXPERIMENTS.md`; the supply drought is real and is simply not
+     * what kills these runs.
+     */
     if (eco.credit < eco.nextThreshold) return false;
-    emitRepairOrb(state, x, z);
-    return true;
+    return emitRepairOrb(state, x, z);
   }
 
   // Probability model: a per-kill roll whose odds climb once the drought passes
@@ -657,15 +665,22 @@ function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number, weigh
     chance += (eco.credit - k.escalateAfter) * k.escalatePerCredit;
   }
   if (eco.credit >= k.guaranteeAt || rng(state) < chance) {
-    emitRepairOrb(state, x, z);
-    return true;
+    return emitRepairOrb(state, x, z);
   }
   return false;
 }
 
-/** Place one ordinary repair orb and reset the economy timers. */
-function emitRepairOrb(state: SurvivorState, x: number, z: number): void {
-  dropPickup(state, x, z, 'repair', SURVIVOR.repair.value);
+/**
+ * Place one ordinary repair orb and reset the economy timers.
+ *
+ * Returns false when the bounded pickup pool refused the drop. Nothing is counted and no
+ * credit is consumed in that case: an orb that was never created must not appear in
+ * `ordinarySpawned`, and the player must not lose the kill credit that earned it. The
+ * previous version incremented first and dropped second, so a saturated pool broke the
+ * spawn/collect/expire reconciliation by one.
+ */
+function emitRepairOrb(state: SurvivorState, x: number, z: number): boolean {
+  if (!dropPickup(state, x, z, 'repair', SURVIVOR.repair.value)) return false;
   const rs = state.repairStats;
   // Close out the drought that this orb ends, before the counters reset.
   rs.longestTimeDryStreak = Math.max(rs.longestTimeDryStreak, state.repairEconomy.sinceDrop);
@@ -681,6 +696,7 @@ function emitRepairOrb(state: SurvivorState, x: number, z: number): void {
   // remaining fully deterministic for a given seed.
   const k = SURVIVOR.repair.killDriven;
   eco.nextThreshold = k.threshold * (1 + (rng(state) * 2 - 1) * k.thresholdVariance);
+  return true;
 }
 
 /**
@@ -763,6 +779,14 @@ function reclaimPickupSlot(state: SurvivorState, preferKind: SurvivorPickup['kin
   return null;
 }
 
+/**
+ * Place one pickup. Returns whether a slot was actually claimed.
+ *
+ * The bounded pool can legitimately refuse a drop when it is saturated, and callers that
+ * keep their own accounting have to know. `emitRepairOrb` previously incremented
+ * `ordinarySpawned` regardless, so saturated windows counted orbs that were never created
+ * and the repair reconciliation identity silently broke by one.
+ */
 function dropPickup(
   state: SurvivorState,
   x: number,
@@ -770,7 +794,7 @@ function dropPickup(
   kind: SurvivorPickup['kind'],
   value: number,
   opts?: { premium?: boolean },
-): void {
+): boolean {
   const pos = safePickupPosition(x, z);
   // Light deterministic de-stack: nudge if another active pickup shares the exact cell.
   let px = pos.x;
@@ -802,7 +826,7 @@ function dropPickup(
     }
     if (best) {
       best.value += value;
-      return;
+      return true;
     }
   }
 
@@ -837,12 +861,12 @@ function dropPickup(
         }
         if (worst) {
           worst.value += value;
-          return;
+          return true;
         }
-        return;
+        return false;
       }
       slot = reclaimPickupSlot(state, kind);
-      if (!slot) return;
+      if (!slot) return false;
     } else {
       slot = {
         id: 0,
@@ -870,6 +894,7 @@ function dropPickup(
     ? SURVIVOR.repairPickupLife
     : Infinity;
   slot.premium = !!opts?.premium;
+  return true;
 }
 
 /** Telemetry bucket id for a weapon. */
@@ -3377,7 +3402,15 @@ function updatePickups(state: SurvivorState, dt: number): void {
         // Delivered and overheal are tracked separately so a faucet cannot hide
         // behind face value: `delivered + overheal` always equals orb potency.
         const rs = state.repairStats;
-        rs.collected += 1;
+        /*
+         * Ordinary and premium are counted apart because they are separate economies:
+         * `ordinarySpawned` never counted the guaranteed boss/miniboss rewards, so folding
+         * their collection into the same total made spawn/collect/expire reconciliation
+         * unsound by exactly the number of premium orbs picked up. It happened to balance
+         * in earlier windows and broke as soon as build paths changed.
+         */
+        if (pk.premium) rs.premiumCollected += 1;
+        else rs.collected += 1;
         rs.healingDelivered += restored;
         rs.overheal += Math.max(0, potency - restored);
         // Fixed seven-element band array; index 6 absorbs everything past 30min,
@@ -3559,17 +3592,29 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     return bag;
   };
 
-  // Mixed-category offers so endless Overclocks never starve passives.
-  // Card 1: offensive (new weapon / authored upgrade / overclock / free prototype)
-  // Card 2: passive/defensive whenever eligible
-  // Card 3: wildcard from remaining
-  // Forced prototype may occupy one card but never all three.
-  const offensivePool = shuffle([
-    ...shuffle(newWeapons),
-    ...shuffle(authored),
-    ...shuffle(overclocks),
-    ...shuffle(freePrototypes),
-  ]);
+  /*
+   * Mixed-category offers so endless Overclocks never starve passives.
+   *   Card 1: offensive — progression preferred early, see below
+   *   Card 2: passive/defensive whenever eligible
+   *   Card 3: wildcard from remaining
+   * Forced prototype may occupy one card but never all three.
+   *
+   * The offensive category is split into **progression** (an upgrade to something already
+   * equipped, which improves the build this instant) and **acquisition** (a weapon not yet
+   * owned, which is a bet on a future build). The original implementation flattened both
+   * into one bag, so "guarantee an offensive card" did not guarantee an offensive
+   * *improvement* — and the odds degraded automatically as the shared pool grew. Early in
+   * a run the player owns one weapon, so the bag held roughly ten acquisitions against one
+   * or two progressions and card 1 was overwhelmingly an unowned weapon.
+   *
+   * That is an extensibility defect, not a Cosmic Boomerang problem: adding an eleventh
+   * shared weapon raised the under-five-minute death rate by about ten points even in a
+   * variant where the policy was forbidden from ever selecting it. Any twelfth weapon
+   * would have done the same. Repairing the category intent fixes the whole class.
+   */
+  const progression = shuffle([...shuffle(authored), ...shuffle(overclocks)]);
+  const acquisition = shuffle([...shuffle(newWeapons), ...shuffle(freePrototypes)]);
+  const offensivePool = shuffle([...progression, ...acquisition]);
   const passivePool = shuffle(passives);
   const forcedPool = shuffle(forcedPrototypes);
 
@@ -3589,6 +3634,8 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     return true;
   };
 
+  // `used` de-duplicates across pools, so draining one pool cannot re-offer a card that
+  // another pool also holds — progression and acquisition are views onto the same options.
   const takeFrom = (pool: UpgradeChoice[]): boolean => {
     while (pool.length > 0) {
       if (tryAdd(pool.shift())) return true;
@@ -3600,8 +3647,17 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
   const forced = forcedPool[0];
   if (forced) tryAdd(forced);
 
-  // Card 1: offensive (if forced already filled, skip)
-  if (choices.length < 1) takeFrom(offensivePool);
+  /*
+   * Card 1: offensive. Before the early-offer horizon, prefer a progression option so at
+   * least one card is an immediate, measurable improvement to the current build. It is
+   * only a preference for *what fills one slot* — the option is never auto-selected, the
+   * other two cards still draw normally, and acquisition fills in when no progression is
+   * eligible (a fresh build whose only weapon is already L5, for instance).
+   */
+  if (choices.length < 1) {
+    const earlyOffer = state.time < SURVIVOR.earlyOfferHorizon;
+    if (!earlyOffer || !takeFrom(progression)) takeFrom(offensivePool);
+  }
 
   // Card 2: passive whenever eligible
   if (choices.length < 2) {

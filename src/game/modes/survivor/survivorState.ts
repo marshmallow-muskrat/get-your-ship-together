@@ -639,7 +639,9 @@ export interface SurvivorState {
     ordinarySpawned: number;
     /** Guaranteed boss/miniboss orbs placed; never drawn from the ordinary budget. */
     premiumSpawned: number;
+    /** Ordinary orbs collected. Premium boss/miniboss rewards are counted separately. */
     collected: number;
+    premiumCollected: number;
     /** Reached end of world lifetime without being collected. */
     expired: number;
     /** Evicted by pool pressure rather than lifetime; should stay at zero. */
@@ -1043,6 +1045,7 @@ export function createSurvivorState(
       ordinarySpawned: 0,
       premiumSpawned: 0,
       collected: 0,
+      premiumCollected: 0,
       expired: 0,
       evicted: 0,
       healingDelivered: 0,

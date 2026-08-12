@@ -555,6 +555,14 @@ export const SURVIVOR = {
   /** Gravity Pulse boss damage rate, unchanged from endless-2.7.0. */
   gravityBossDamageMul: 0.7,
   /**
+   * Seconds during which an upgrade offer guarantees a progression option (endless-2.8.0).
+   *
+   * Matches the Arc Conductor unlock so the two pool events do not compound: Arc becomes
+   * eligible at 5:00 and would otherwise land one more acquisition into the pool at the
+   * exact moment the guarantee stops.
+   */
+  earlyOfferHorizon: 300,
+  /**
    * Cosmic Boomerang flight (endless-2.8.0).
    *
    * `turnDistance` is how far the disc carves before reversing; it scales with the

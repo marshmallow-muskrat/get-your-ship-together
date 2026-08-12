@@ -28,6 +28,7 @@ import {
   bossDamageScale,
   displayName,
   isSignatureWeapon,
+  sharedWeaponIds,
   bossDifficultyFor,
   isMegaBossIndex,
   type BossDamageCategory,
@@ -50,6 +51,7 @@ import {
   applyBossBodyContact,
   forceBossIntoPattern,
   forceStartProtocol,
+  generateChoices,
   spawnEnemyForTest,
   spawnGravityWellForTest,
   stepSurvivor,
@@ -507,6 +509,89 @@ describe('§8 Cosmic Boomerang', () => {
 
   it('is a shared weapon rather than anyone\'s signature', () => {
     expect(isSignatureWeapon('boomerang')).toBe(false);
+  });
+});
+
+// ------------------------------------------- §9 stabilization: early offers and supply
+
+describe('§9 early offers keep a progression option however large the pool grows', () => {
+  /*
+   * The extensibility defect this pins.
+   *
+   * "Card 1: offensive" used to draw from a single bag holding both acquisitions (weapons
+   * not yet owned) and progressions (upgrades to something equipped). Early in a run the
+   * player owns one weapon, so that bag held roughly ten acquisitions against one or two
+   * progressions, and the odds degraded automatically every time a weapon was added to the
+   * shared pool. Making Cosmic Boomerang offerable raised the under-five-minute death rate
+   * by about ten points even when the policy was forbidden from ever selecting it, so this
+   * is a property of pool size rather than of any one weapon.
+   */
+  function earlyState(seed: number, level = 3): SurvivorState {
+    const state = createSurvivorState('flamingo', null, seed);
+    state.phase = 'playing';
+    state.time = 60;
+    state.level = level;
+    return state;
+  }
+
+  const isProgression = (c: { kind: string }) => c.kind === 'weapon';
+
+  it('offers at least one immediate progression option before the horizon', () => {
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const state = earlyState(seed);
+      const choices = generateChoices(state);
+      expect(choices.length).toBe(3);
+      expect(
+        choices.some(isProgression),
+        `seed ${seed} offered no progression: ${choices.map((c) => c.id).join(', ')}`,
+      ).toBe(true);
+    }
+  });
+
+  it('still leaves room for discovery rather than offering three upgrades', () => {
+    let allProgression = 0;
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const choices = generateChoices(earlyState(seed));
+      if (choices.every(isProgression)) allProgression += 1;
+    }
+    // The invariant fills one card, never the whole hand.
+    expect(allProgression).toBe(0);
+  });
+
+  it('cannot be starved by growing the shared weapon pool', () => {
+    // The regression in miniature: every unowned shared weapon competes for card 1.
+    // Six shared weapons with Boomerang, five without — and every unowned one competes
+    // for card 1 against the one or two upgrades an early build can actually offer.
+    const shared = sharedWeaponIds();
+    expect(shared.length).toBeGreaterThanOrEqual(6);
+    expect(shared).toContain('boomerang');
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const state = earlyState(seed);
+      const choices = generateChoices(state);
+      expect(choices.some(isProgression), `seed ${seed}`).toBe(true);
+    }
+  });
+
+  it('keeps offers varied rather than repeating one card', () => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 40; seed += 1) {
+      for (const c of generateChoices(earlyState(seed))) seen.add(c.id);
+    }
+    // A guarantee that collapsed to the same card every time would be worse than the bug.
+    expect(seen.size).toBeGreaterThan(6);
+  });
+
+  it('does not apply after the horizon, so late offers stay fully mixed', () => {
+    expect(SURVIVOR.earlyOfferHorizon).toBe(300);
+    // Matches the Arc Conductor unlock so the two pool events cannot compound.
+    let sawNonProgressionFirstCard = false;
+    for (let seed = 1; seed <= 60 && !sawNonProgressionFirstCard; seed += 1) {
+      const state = earlyState(seed);
+      state.time = SURVIVOR.earlyOfferHorizon + 60;
+      const choices = generateChoices(state);
+      if (choices[0] && !isProgression(choices[0])) sawNonProgressionFirstCard = true;
+    }
+    expect(sawNonProgressionFirstCard).toBe(true);
   });
 });
 
