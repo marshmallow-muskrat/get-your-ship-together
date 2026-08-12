@@ -55,6 +55,7 @@ import {
   targetPosition,
 } from './survivorTargeting';
 import { updateAttacks } from './survivorAttacks';
+import { sampleDiagnostics } from './survivorDiagnostics';
 import {
   updateOneBoss as updateOneBossPatterns,
   forceBossPattern,
@@ -1343,8 +1344,40 @@ function segmentHit(
 }
 
 /**
+ * Weighted value of firing a rail of `length`/`width` from (x,z) along (fx,fz).
+ *
+ * Extracted so the shipping search and the diagnostic sweep score a bearing identically;
+ * a diagnostic that measured "headroom" against a different scale would measure itself.
+ */
+function railLineScore(
+  state: SurvivorState,
+  x: number,
+  z: number,
+  fx: number,
+  fz: number,
+  length: number,
+  width: number,
+): number {
+  const x1 = x + fx * length;
+  const z1 = z + fz * length;
+  let score = 0;
+  for (const e of state.enemies) {
+    if (!e.alive || !segmentHit(x, z, x1, z1, e.x, e.z, e.radius + width * 0.5)) continue;
+    score += e.isMiniboss ? 6 : e.isElite ? 3 : 1;
+  }
+  for (const b of livingBosses(state)) {
+    if (segmentHit(x, z, x1, z1, b.x, b.z, b.colliderRadius + width * 0.5)) score += 4;
+  }
+  return score;
+}
+
+/**
  * Fitzwilliam aims through the most valuable current line, rather than at one body.
  * Candidate count is bounded so this remains cheap at the 160-enemy cap.
+ *
+ * `bossOverride` reports that a live boss took the bearing without any line scoring at
+ * all. It is returned rather than recomputed by the caller because the override is the
+ * single most consequential branch in the weapon and the diagnostic must not guess at it.
  */
 function bestRailDirection(
   state: SurvivorState,
@@ -1353,11 +1386,15 @@ function bestRailDirection(
   z: number,
   length: number,
   width: number,
-): { fx: number; fz: number } {
+): { fx: number; fz: number; bossOverride: boolean } {
   const preferred = selectWeaponTarget(state, slot, x, z, length + 2);
   if (preferred?.kind === 'boss') {
     const d = Math.hypot(preferred.boss.x - x, preferred.boss.z - z) || 1;
-    return { fx: (preferred.boss.x - x) / d, fz: (preferred.boss.z - z) / d };
+    return {
+      fx: (preferred.boss.x - x) / d,
+      fz: (preferred.boss.z - z) / d,
+      bossOverride: true,
+    };
   }
   const candidates = state.enemies
     .filter((e) => e.alive && (e.x - x) ** 2 + (e.z - z) ** 2 <= (length + 2) ** 2)
@@ -1366,26 +1403,42 @@ function bestRailDirection(
   if (preferred?.kind === 'enemy' && !candidates.some((e) => e.id === preferred.enemy.id)) {
     candidates.unshift(preferred.enemy);
   }
-  let best = { fx: state.player.facingX, fz: state.player.facingZ };
+  let best = { fx: state.player.facingX, fz: state.player.facingZ, bossOverride: false };
   let bestScore = -1;
   for (const candidate of candidates) {
     const d = Math.hypot(candidate.x - x, candidate.z - z) || 1;
     const fx = (candidate.x - x) / d;
     const fz = (candidate.z - z) / d;
-    const x1 = x + fx * length;
-    const z1 = z + fz * length;
-    let score = 0;
-    for (const e of state.enemies) {
-      if (!e.alive || !segmentHit(x, z, x1, z1, e.x, e.z, e.radius + width * 0.5)) continue;
-      score += e.isMiniboss ? 6 : e.isElite ? 3 : 1;
-    }
-    for (const b of livingBosses(state)) {
-      if (segmentHit(x, z, x1, z1, b.x, b.z, b.colliderRadius + width * 0.5)) score += 4;
-    }
+    const score = railLineScore(state, x, z, fx, fz, length, width);
     if (score > bestScore) {
       bestScore = score;
-      best = { fx, fz };
+      best = { fx, fz, bossOverride: false };
     }
+  }
+  return best;
+}
+
+/**
+ * Diagnostic-only: the best bearing a deterministic angular sweep can find.
+ *
+ * A far more complete search than the shipping nearest-24 candidate list, and much too
+ * expensive to fire every shot in a real run. It exists to answer one question — how much
+ * value the shipping search leaves on the table — and is never consulted for combat.
+ */
+const RAIL_SWEEP_BEARINGS = 180;
+
+function sweepBestRailScore(
+  state: SurvivorState,
+  x: number,
+  z: number,
+  length: number,
+  width: number,
+): number {
+  let best = 0;
+  for (let i = 0; i < RAIL_SWEEP_BEARINGS; i += 1) {
+    const a = (i / RAIL_SWEEP_BEARINGS) * Math.PI * 2;
+    const score = railLineScore(state, x, z, Math.cos(a), Math.sin(a), length, width);
+    if (score > best) best = score;
   }
   return best;
 }
@@ -1607,7 +1660,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       for (let i = 0; i < count; i += 1) {
         const length = (def.length ?? 14) * (mech ? 1.15 : 1);
         const width = (def.width ?? 0.5) * area;
-        const { fx, fz } = bestRailDirection(state, slot, p.x, p.z, length, width);
+        const { fx, fz, bossOverride } = bestRailDirection(state, slot, p.x, p.z, length, width);
         const off = (i - (count - 1) / 2) * 0.35;
         const ox = -fz * off;
         const oz = fx * off;
@@ -1628,9 +1681,25 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           width,
         });
         const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+        const diag = state.diag;
+        // Both scores must be read before any body dies, or the measurement grades the
+        // search on the wreckage it just made. Chosen and sweep therefore see the same
+        // pre-shot geometry the bearing search saw.
+        const chosenScore = diag ? railLineScore(state, p.x + ox, p.z + oz, fx, fz, length, width) : 0;
+        const sweepScore = diag ? sweepBestRailScore(state, p.x + ox, p.z + oz, length, width) : 0;
+        let hits = 0;
+        let kills = 0;
+        let overkill = 0;
         for (const e of state.enemies) {
           if (!e.alive) continue;
           if (segmentHit(p.x + ox, p.z + oz, x1, z1, e.x, e.z, e.radius + width * 0.5)) {
+            if (diag) {
+              hits += 1;
+              if (e.health <= dmg) {
+                kills += 1;
+                overkill += dmg - e.health;
+              }
+            }
             damageEnemy(state, e, dmg, { src: weaponSrc('rail') });
             if (e.alive) {
               const push = e.isMiniboss ? 0.8 : e.isElite ? 2.2 : 5.5;
@@ -1651,7 +1720,26 @@ function fireWeapons(state: SurvivorState, dt: number): void {
               b.colliderRadius + width * 0.5,
             )
           ) {
+            if (diag) hits += 1;
             damageBoss(state, dmg * 0.85, { boss: b, src: weaponSrc('rail') });
+          }
+        }
+        if (diag) {
+          const chosen = chosenScore;
+          const sweep = sweepScore;
+          const r = diag.rail;
+          r.shots += 1;
+          if (hits === 0) r.emptyShots += 1;
+          r.intersections += hits;
+          r.kills += kills;
+          r.damage += dmg * hits;
+          r.overkill += overkill;
+          r.chosenScore += chosen;
+          r.sweepBestScore += sweep;
+          r.totalLost += Math.max(0, sweep - chosen);
+          if (bossOverride) {
+            r.bossOverrides += 1;
+            r.bossOverrideLost += Math.max(0, sweep - chosen);
           }
         }
       }
@@ -3797,10 +3885,42 @@ function grantNewWeaponFromChoice(state: SurvivorState, weaponId: WeaponId): boo
   return true;
 }
 
+/**
+ * Diagnostic-only: record what was on the table and what was taken.
+ *
+ * Called before the choice is applied so `state.weapons` still describes the build the
+ * decision was made against — the whole point is to separate "was breadth offered" from
+ * "was breadth chosen".
+ */
+function recordOffer(
+  state: SurvivorState,
+  offered: readonly UpgradeChoice[],
+  selected: UpgradeChoice | undefined,
+): void {
+  const diag = state.diag;
+  if (!diag) return;
+  const equipped = (id: WeaponId | undefined): boolean =>
+    id != null && state.weapons.some((w) => w.weaponId === id);
+  diag.offers.push({
+    time: state.time,
+    level: state.level,
+    offered: offered.map((c) => c.id),
+    offeredKinds: offered.map((c) =>
+      c.kind === 'weapon' ? 'progression' : c.kind === 'new-weapon' ? 'acquisition' : c.kind,
+    ),
+    selected: selected?.id ?? null,
+    selectedKind: selected?.kind ?? null,
+    selectedIsProgression: selected?.kind === 'weapon' && equipped(selected.weaponId),
+    selectedIsAcquisition: selected?.kind === 'new-weapon',
+    weaponsHeld: state.weapons.filter((w) => !w.prototype && !isPrototypeWeapon(w.weaponId)).length,
+  });
+}
+
 export function applyChoice(state: SurvivorState, index: number): void {
   // Consume the choice set immediately so high-refresh double-input cannot apply twice.
   const choice = state.choices[index];
   const choices = state.choices;
+  if (state.diag) recordOffer(state, choices, choice);
   state.choices = [];
   if (!choice || state.phase !== 'levelup') {
     state.phase = 'playing';
@@ -5751,6 +5871,7 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
   state.time += dt;
   // Form uptime is the denominator for every "by form" figure in the run report.
   recordFormTime(state.telemetry, state.player.form, dt);
+  if (state.diag) sampleDiagnostics(state);
   // Hit feedback decays fast: strong but brief, never leaving the screen unreadable.
   const pf = state.player;
   if (pf.hitVignette > 0) pf.hitVignette = Math.max(0, pf.hitVignette - dt * 2.2);

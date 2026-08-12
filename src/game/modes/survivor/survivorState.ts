@@ -11,6 +11,7 @@ import {
   heroStarterWeapon,
   xpForLevel,
 } from './survivorContent';
+import type { SurvivorDiagnostics } from './survivorDiagnostics';
 import { createTelemetry } from './survivorTelemetry';
 
 export type SurvivorPhase = 'playing' | 'levelup' | 'protocol' | 'victory' | 'defeat' | 'paused';
@@ -506,6 +507,12 @@ export interface SurvivorState {
   accent: string;
   time: number;
   seed: number;
+  /**
+   * Optional benchmark-only recorder. Absent in every shipping code path, so the game
+   * allocates nothing and the hot loops carry one null check. Reading it never changes
+   * simulation behaviour: a diagnosed run is bit-identical to an undiagnosed one.
+   */
+  diag?: SurvivorDiagnostics;
   /**
    * World-simulation random stream.
    *

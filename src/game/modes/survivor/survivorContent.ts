@@ -723,12 +723,39 @@ export interface WeaponLevelDef {
   split?: number;
 }
 
+/**
+ * How much of the space around the player a weapon can threaten in one firing cycle.
+ *
+ *   line     — a narrow bearing chosen per shot. Answers one approach at a time.
+ *   lane     — a bearing that is traversed twice, or travels and returns.
+ *   seeking  — finds its own targets, so coverage follows the threat rather than a bearing.
+ *   area     — resolves over a footprint around a point, so several approaches at once.
+ *   radial   — resolves around the player, so every approach at once.
+ *
+ * This is a classification of the geometry already authored in `levels`, not a second
+ * balance axis: nothing in combat reads it. It exists so a portfolio can be described as
+ * covered or uncovered without any code naming a specific weapon, which is what the
+ * endless-2.8.0 stabilization needed to ask whether Fitzwilliam's problem is breadth.
+ */
+export type WeaponCoverage = 'line' | 'lane' | 'seeking' | 'area' | 'radial';
+
+/** Fraction of the surrounding neighbourhood a coverage class can answer in one cycle. */
+export const COVERAGE_BREADTH: Record<WeaponCoverage, number> = {
+  line: 0.12,
+  lane: 0.2,
+  seeking: 0.35,
+  area: 0.55,
+  radial: 1,
+};
+
 export interface WeaponFamily {
   id: WeaponId;
   name: string;
   description: string;
   color: string;
   levels: WeaponLevelDef[];
+  /** Geometric coverage class. See `WeaponCoverage`. Combat never reads it. */
+  coverage: WeaponCoverage;
   /** Time-gated prototype weapon; does not consume ordinary slots. */
   prototype?: boolean;
   unlockTime?: number;
@@ -737,6 +764,7 @@ export interface WeaponFamily {
 export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   pulse: {
     id: 'pulse',
+    coverage: 'seeking',
     name: 'Pulse Blaster',
     description: 'Auto-locks nearest hostiles with rapid bolts.',
     color: '#88d4ff',
@@ -752,6 +780,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   microdrone: {
     id: 'microdrone',
+    coverage: 'seeking',
     name: 'Microdrone Swarm',
     description: 'A broad formation of drones fired in one committed direction.',
     color: '#f5ae42',
@@ -765,6 +794,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   rail: {
     id: 'rail',
+    coverage: 'line',
     name: 'Rail Lance',
     description: 'Piercing line that cuts through dense packs.',
     color: '#ff7ab8',
@@ -779,6 +809,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   gravity: {
     id: 'gravity',
+    coverage: 'radial',
     name: 'Gravity Pulse',
     description: 'Collapsing well that damages once, then holds what it caught.',
     color: '#6a2fb5',
@@ -806,6 +837,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   boomerang: {
     id: 'boomerang',
+    coverage: 'lane',
     name: 'Cosmic Boomerang',
     description: 'Thrown disc that carves out, turns, and cuts back through the same lane.',
     color: '#7ce8ff',
@@ -830,6 +862,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   rocket: {
     id: 'rocket',
+    coverage: 'area',
     name: 'Rocket Barrage',
     description: 'Visible mini-rockets launch from the hero and burst on impact.',
     color: '#ff8a4a',
@@ -846,6 +879,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   bioplasma: {
     id: 'bioplasma',
+    coverage: 'area',
     name: 'Bio-Plasma Glob',
     description: 'Toxic green globs that splash and leave corrosive residue.',
     color: '#5dff6a',
@@ -928,6 +962,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
 
   rotary: {
     id: 'rotary',
+    coverage: 'seeking',
     name: 'Rotary Cannon',
     description: 'Rapid machine-gun fire for sustained priority-target damage.',
     color: '#ffe28a',
@@ -941,6 +976,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   'plasma-wake': {
     id: 'plasma-wake',
+    coverage: 'area',
     name: 'Plasma Wake',
     description: 'Movement leaves a burning energy trail that punishes pursuit.',
     color: '#ff6f4d',
@@ -961,6 +997,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   pulsar: {
     id: 'pulsar',
+    coverage: 'radial',
     name: 'Pulsar Core',
     description: 'A periodic radial discharge centered on the hero.',
     color: '#b899ff',
@@ -975,6 +1012,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
 
   arc: {
     id: 'arc',
+    coverage: 'seeking',
     name: 'Arc Conductor',
     description: 'Chain lightning that jumps between hostiles and bosses.',
     color: '#88eeff',
@@ -991,6 +1029,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   },
   orbital: {
     id: 'orbital',
+    coverage: 'area',
     name: 'Orbital Lance',
     description: 'Delayed orbital strike that prefers bosses and dense elites.',
     color: '#ffd46a',

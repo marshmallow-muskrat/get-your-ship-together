@@ -6,7 +6,8 @@
  * so the delta is attributable instead of anecdotal.
  */
 import type { HeroId } from '../../content/heroes';
-import { SURVIVOR, WEAPONS } from './survivorContent';
+import { COVERAGE_BREADTH, SURVIVOR, WEAPONS } from './survivorContent';
+import { createDiagnostics, type SurvivorDiagnostics } from './survivorDiagnostics';
 import {
   EMPTY_SURVIVOR_INPUT,
   stepSurvivor,
@@ -69,6 +70,8 @@ const POLICY: Record<SurvivalPolicyId, PolicyTuning> = {
 };
 
 export interface SurvivalRunResult {
+  /** Present only when the run was asked for diagnostics. Never serialized by default. */
+  diag?: SurvivorDiagnostics;
   heroId: HeroId;
   policy: SurvivalPolicyId;
   seed: number;
@@ -203,15 +206,73 @@ function livingThreatsWithin(state: SurvivorState, radius: number): number {
   return score;
 }
 
-function upgradeScore(state: SurvivorState, choice: UpgradeChoice): number {
+/**
+ * Experimental policy levers (endless-2.8.0 stabilization).
+ *
+ * These change how the *simulated player* decides, never what the game offers. Keeping
+ * them here rather than in the shipping offer system is the point: a benchmark that fails
+ * because its policy is incompetent must be fixed in the policy, not by distorting the
+ * cards a human sees.
+ */
+export interface PolicyExperiments {
+  /**
+   * Value acquiring a complementary coverage class over further depth in a weapon whose
+   * geometry the build already has. Bounded to the early game and to builds that are
+   * genuinely narrow; a build that already spans classes scores exactly as before.
+   */
+  coverageAware?: boolean;
+  /**
+   * Upper-bound control: take the first offered acquisition that adds a coverage class the
+   * build lacks, once per run. Deliberately cruder than `coverageAware` — it exists to
+   * bound how much of the gap breadth can possibly close, and is not a shipping candidate.
+   */
+  forceEarlyAcquisition?: boolean;
+}
+
+const NO_EXPERIMENTS: PolicyExperiments = {};
+
+/**
+ * How much of the surrounding neighbourhood the current build can answer, combining the
+ * equipped coverage classes as independent partial cover rather than summing them.
+ */
+function portfolioBreadth(state: SurvivorState): number {
+  let uncovered = 1;
+  for (const w of state.weapons) {
+    uncovered *= 1 - COVERAGE_BREADTH[WEAPONS[w.weaponId].coverage];
+  }
+  return 1 - uncovered;
+}
+
+function heldCoverageClasses(state: SurvivorState): Set<string> {
+  return new Set(state.weapons.map((w) => WEAPONS[w.weaponId].coverage));
+}
+
+/** A narrow build is one a single bearing still has to answer. */
+const NARROW_BUILD_BREADTH = 0.4;
+
+function upgradeScore(
+  state: SurvivorState,
+  choice: UpgradeChoice,
+  experiments: PolicyExperiments = NO_EXPERIMENTS,
+): number {
   const hp = state.player.health / Math.max(1, state.player.maxHealth);
+  const narrowEarly =
+    experiments.coverageAware === true &&
+    state.time < SURVIVOR.earlyOfferHorizon &&
+    portfolioBreadth(state) < NARROW_BUILD_BREADTH;
   if (choice.kind === 'weapon' && choice.weaponId) {
     const owned = state.weapons.find((w) => w.weaponId === choice.weaponId);
     const authored = owned && owned.level < WEAPONS[choice.weaponId].levels.length;
-    return (authored ? 132 : 104) + (owned?.level === 1 ? 12 : 0);
+    const base = (authored ? 132 : 104) + (owned?.level === 1 ? 12 : 0);
+    // Depth in a class the build is already committed to buys no new approach angles.
+    return narrowEarly ? base - 34 : base;
   }
   if (choice.kind === 'new-weapon' && choice.weaponId) {
-    return WEAPONS[choice.weaponId].prototype ? 145 : state.weapons.length < 3 ? 116 : 88;
+    if (WEAPONS[choice.weaponId].prototype) return 145;
+    const base = state.weapons.length < 3 ? 116 : 88;
+    if (!narrowEarly) return base;
+    const adds = !heldCoverageClasses(state).has(WEAPONS[choice.weaponId].coverage);
+    return base + (adds ? 26 * COVERAGE_BREADTH[WEAPONS[choice.weaponId].coverage] * 2 : 0);
   }
   if (choice.kind === 'passive') {
     switch (choice.passiveId) {
@@ -235,13 +296,36 @@ function selectUpgrade(
   state: SurvivorState,
   policy: SurvivalPolicyId,
   random: () => number,
+  experiments: PolicyExperiments,
+  forcedAcquisitionSpent: { value: boolean },
 ): number {
   if (policy === 'novice') return Math.floor(random() * Math.max(1, state.choices.length));
+
+  if (
+    experiments.forceEarlyAcquisition === true &&
+    !forcedAcquisitionSpent.value &&
+    state.time < SURVIVOR.earlyOfferHorizon
+  ) {
+    const held = heldCoverageClasses(state);
+    const i = state.choices.findIndex(
+      (c) =>
+        c.kind === 'new-weapon' &&
+        c.weaponId != null &&
+        !WEAPONS[c.weaponId].prototype &&
+        !held.has(WEAPONS[c.weaponId].coverage),
+    );
+    if (i >= 0) {
+      forcedAcquisitionSpent.value = true;
+      return i;
+    }
+  }
+
   const noise = POLICY[policy].upgradeNoise;
   let best = 0;
   let bestScore = -Infinity;
   for (let i = 0; i < state.choices.length; i += 1) {
-    const score = upgradeScore(state, state.choices[i]!) + (random() * 2 - 1) * noise;
+    const score =
+      upgradeScore(state, state.choices[i]!, experiments) + (random() * 2 - 1) * noise;
     if (score > bestScore) {
       bestScore = score;
       best = i;
@@ -278,9 +362,12 @@ export class SurvivalPolicyController {
   private decisionIn = 0;
   private heldMove = { x: 0, y: 1 };
 
+  private readonly forcedAcquisitionSpent = { value: false };
+
   constructor(
     private readonly id: SurvivalPolicyId,
     seed: number,
+    private readonly experiments: PolicyExperiments = NO_EXPERIMENTS,
   ) {
     this.tuning = POLICY[id];
     this.random = policyRandom(seed);
@@ -288,7 +375,16 @@ export class SurvivalPolicyController {
 
   input(state: SurvivorState, dt: number): SurvivorInput {
     if (state.phase === 'levelup') {
-      return { ...EMPTY_SURVIVOR_INPUT, choiceIndex: selectUpgrade(state, this.id, this.random) };
+      return {
+        ...EMPTY_SURVIVOR_INPUT,
+        choiceIndex: selectUpgrade(
+          state,
+          this.id,
+          this.random,
+          this.experiments,
+          this.forcedAcquisitionSpent,
+        ),
+      };
     }
     if (state.phase === 'protocol') {
       return { ...EMPTY_SURVIVOR_INPUT, choiceIndex: selectProtocol(state, this.id) };
@@ -411,11 +507,20 @@ export function runSurvivalSimulation(opts: {
   policy: SurvivalPolicyId;
   seed: number;
   maxMinutes?: number;
+  /**
+   * Attach the benchmark-only recorder. Off by default and off in every shipping path.
+   * A diagnosed run is bit-identical to an undiagnosed one — the recorder only reads —
+   * so a diagnostic sweep and a survival snapshot on the same seed describe the same run.
+   */
+  diagnostics?: boolean;
+  /** Experimental policy levers. Default (absent) reproduces the shipping policy exactly. */
+  experiments?: PolicyExperiments;
 }): SurvivalRunResult {
   const maxMinutes = opts.maxMinutes ?? 60;
   const maxSeconds = maxMinutes * 60;
   const state = createSurvivorState(opts.heroId, null, opts.seed);
-  const controller = new SurvivalPolicyController(opts.policy, opts.seed);
+  if (opts.diagnostics) state.diag = createDiagnostics();
+  const controller = new SurvivalPolicyController(opts.policy, opts.seed, opts.experiments);
   let peakLivingElites = 0;
   let eliteSampleSum = 0;
   let eliteSamples = 0;
@@ -462,6 +567,7 @@ export function runSurvivalSimulation(opts: {
   const elapsed = Math.max(0.001, state.telemetry.elapsed);
   const gunship = state.telemetry.bySource.get('gunship');
   return {
+    diag: state.diag,
     heroId: opts.heroId,
     policy: opts.policy,
     seed: opts.seed,
