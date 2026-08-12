@@ -2553,23 +2553,38 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
        */
       const sr = proj.kind === 'orbital-marker' ? proj.splash : 0;
       const shockMul = SURVIVOR.orbital.shockwaveDamageMul;
+      /*
+       * Orbital Lance impact sequence (endless-2.8.0 presentation pass).
+       *
+       * The beam establishes where the strike came from; the *ground* says how much of
+       * it landed. 2.7.0 gave the beam 0.4s at nearly the full damage width and drew the
+       * core flash at 1.15x the true core radius, so the weapon read as a column of
+       * light and the only ring wider than the beam was 15% of a lie.
+       *
+       * Ordered by what the player needs to read, shortest first:
+       *   1. a thin beam and contact flash, out of the way in a fifth of a second
+       *   2. the core blast, at exactly the core damage radius
+       *   3. the shockwave, expanding to exactly the outer damage radius
+       *   4. a floor scorch on the core footprint
+       *
+       * Every radius here is the value the damage loop below uses. No effect is authored
+       * at a multiple of a damaging radius any more.
+       */
       pushEffect(
         state,
         proj.kind === 'orbital-marker' ? 'orbital-strike' : 'impact',
         proj.x,
         proj.z,
-        0.4,
+        proj.kind === 'orbital-marker' ? 0.22 : 0.4,
         proj.color,
-        er * 1.4,
+        er,
         { radius: er },
       );
       if (proj.kind === 'rocket') {
         pushEffect(state, 'pulse', proj.x, proj.z, 0.28, '#fff6d0', er * 0.9, { radius: er * 0.9 });
       } else if (proj.kind === 'orbital-marker') {
-        // Core flash, then the expanding shockwave ring at its true damage radius, then
-        // a short-lived floor scorch. All three are pooled effects — no new geometry.
-        pushEffect(state, 'pulse', proj.x, proj.z, 0.42, '#fff4c8', er * 1.15, { radius: er * 1.15 });
-        pushEffect(state, 'orbital-shock', proj.x, proj.z, 0.62, '#ffd46a', sr, { radius: sr });
+        pushEffect(state, 'pulse', proj.x, proj.z, 0.3, '#fff4c8', er, { radius: er });
+        pushEffect(state, 'orbital-shock', proj.x, proj.z, 0.72, '#ffd46a', sr, { radius: sr });
         pushEffect(state, 'orbital-scorch', proj.x, proj.z, 1.35, '#ff9a3c', er, { radius: er });
       }
       for (const e of state.enemies) {

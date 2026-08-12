@@ -1693,8 +1693,6 @@ export class SurvivorRenderer {
         obj.scale.setScalar((0.35 + Math.min(1, t * 2.8) * 0.65) * pulse);
         const ring = obj.getObjectByName('singularity-ring');
         if (ring) ring.rotation.z = t * 7.5;
-      } else if (e.kind === 'arc' || e.kind === 'orbital' || e.kind === 'orbital-strike' || e.kind === 'titan-deploy') {
-        obj.scale.setScalar(1);
       } else {
         obj.scale.setScalar(groundEffectScale(e.kind, t));
       }
@@ -1821,21 +1819,33 @@ export class SurvivorRenderer {
     }
     if (e.kind === 'orbital-strike') {
       /*
-       * The descending lance. 2.7.0 makes it substantially more authoritative: a wider
-       * outer column, a thicker white core, and an extra inner shaft, so the strike is
-       * unmistakable in a dense late-game fight without hiding what is underneath it.
+       * The beam establishes the orbital origin. The *impact* is what says how much
+       * ground was hit, and that is `orbital-shock`.
+       *
+       * 2.7.0 inverted this. The lance was a 22-unit column nearly as wide as the whole
+       * damage radius, with a 0.98-opacity white core, held for 0.4s — so the weapon
+       * named for an orbital strike read as a giant beam of light and the player never
+       * saw the area that actually resolved. It is now thin and brief: a narrow shaft
+       * that connects sky to ground, a small bright flash at the point of contact, and
+       * then it is gone and the shockwave owns the frame.
        */
       const r = e.radius ?? e.scale ?? 1.6;
-      const glow = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.98, 22, 24, 1, true), this.effectMat('#ffd46a', 0.5, true)));
-      glow.position.y = 11;
-      const shaft = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.46, 20, 18, 1, true), this.effectMat('#ffe9a8', 0.7, true)));
-      shaft.position.y = 10;
-      const core = this.ownMesh(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.17, r * 0.28, 20, 16), this.effectMat('#ffffff', 0.98, true)));
-      core.position.y = 10;
-      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.35, r * 1.05, 56), this.effectMat('#fff0a0', 0.7, true)));
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.08;
-      g.add(glow, shaft, core, ring);
+      const beam = this.ownMesh(
+        new THREE.Mesh(new THREE.CylinderGeometry(r * 0.1, r * 0.2, 22, 12, 1, true), this.effectMat('#ffd46a', 0.42, true)),
+      );
+      beam.position.y = 11;
+      const core = this.ownMesh(
+        new THREE.Mesh(new THREE.CylinderGeometry(r * 0.045, r * 0.1, 21, 10), this.effectMat('#fff0c0', 0.8, true)),
+      );
+      core.position.y = 10.5;
+      // Contact flash: bright, small, and over almost immediately. It marks the point
+      // of impact without claiming to be the damaged area.
+      const flash = this.ownMesh(
+        new THREE.Mesh(new THREE.SphereGeometry(r * 0.34, 14, 10), this.effectMat('#fff4d0', 0.9, true)),
+      );
+      flash.scale.y = 0.55;
+      flash.position.y = r * 0.2;
+      g.add(beam, core, flash);
       g.position.set(e.x, 0, e.z);
       g.traverse((o) => {
         if (o instanceof THREE.Mesh) {
@@ -1847,19 +1857,50 @@ export class SurvivorRenderer {
     }
     if (e.kind === 'orbital-shock') {
       /*
-       * The shockwave is drawn at exactly the outer damage radius so the ring the
-       * player sees is the ring that actually dealt the reduced damage. It is scaled
-       * from the centre outward in `syncEffects`, so the geometry is authored at full
-       * size here.
+       * The impact. This is the part of the sequence that communicates the damaged area,
+       * so it carries both of the strike's real boundaries.
+       *
+       * Orbital resolves in two concentric zones — a heavy core and a wider shockwave at
+       * 37.5% — and a target is damaged by exactly one of them. Both are drawn: the
+       * leading ring expands to the outer radius `r`, and a second ring marks the core
+       * boundary at `1 / shockwaveRadiusMul` of it. The player can see which zone they
+       * or a boss were standing in.
+       *
+       * `syncEffects` expands the whole group from the centre out to exactly `r` under
+       * the shared ground-effect contract, so the geometry is authored full size here
+       * and never over-draws the damaging radius.
        */
       const r = e.radius ?? e.scale ?? 2.5;
-      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.74, r, 64), this.effectMat('#ffd46a', 0.62, true)));
+      const coreFrac = 1 / SURVIVOR.orbital.shockwaveRadiusMul;
+      const ring = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.82, r, 64), this.effectMat('#ffd46a', 0.72, true)));
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.09;
-      const inner = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.5, r * 0.76, 64), this.effectMat('#ff9a3c', 0.3, true)));
-      inner.rotation.x = -Math.PI / 2;
-      inner.position.y = 0.085;
-      g.add(ring, inner);
+      const coreEdge = this.ownMesh(
+        new THREE.Mesh(new THREE.RingGeometry(r * coreFrac * 0.9, r * coreFrac, 64), this.effectMat('#ff9a3c', 0.5, true)),
+      );
+      coreEdge.rotation.x = -Math.PI / 2;
+      coreEdge.position.y = 0.088;
+      const wash = this.ownMesh(
+        new THREE.Mesh(new THREE.CircleGeometry(r * coreFrac, 48), this.effectMat('#ff7a3c', 0.22, true)),
+      );
+      wash.rotation.x = -Math.PI / 2;
+      wash.position.y = 0.082;
+      g.add(wash, coreEdge, ring);
+      /*
+       * Ejecta. Eight shards, fixed at construction and carried outward by the group's
+       * own expansion — no per-frame allocation, no particle system, and bounded by
+       * construction rather than by a cap that has to be enforced.
+       */
+      for (let i = 0; i < 8; i += 1) {
+        const shard = this.ownMesh(
+          new THREE.Mesh(new THREE.ConeGeometry(r * 0.05, r * 0.22, 4), this.effectMat(i % 2 ? '#ffd46a' : '#ff9a3c', 0.75, true)),
+        );
+        const a = (i / 8) * Math.PI * 2 + 0.19;
+        shard.position.set(Math.sin(a) * r * 0.88, 0.22, Math.cos(a) * r * 0.88);
+        shard.rotation.z = Math.PI * 0.5;
+        shard.rotation.y = -a;
+        g.add(shard);
+      }
       g.position.set(e.x, 0, e.z);
       g.traverse((o) => {
         if (o instanceof THREE.Mesh) {

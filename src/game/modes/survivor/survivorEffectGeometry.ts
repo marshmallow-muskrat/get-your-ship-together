@@ -38,6 +38,15 @@ export type GroundEffectMotion = 'static' | 'expanding' | 'settling' | 'decorati
 const MOTION: Record<string, GroundEffectMotion> = {
   // Warnings. The edge is the instruction; it must not move.
   telegraph: 'static',
+  // The Orbital Lance targeting marker is a warning too: it shows the core radius for
+  // the whole arming delay and must show the same one at the end that it showed at the
+  // start. Same for the descending beam it resolves into.
+  orbital: 'static',
+  'orbital-strike': 'static',
+  // Authored-length shapes: the arc's own geometry is built at the true jump length,
+  // and the Titan deploy column at its true footprint. Neither is a ramp.
+  arc: 'static',
+  'titan-deploy': 'static',
   // Resolved blasts. They expand to the boundary and stop there.
   pulse: 'expanding',
   impact: 'expanding',

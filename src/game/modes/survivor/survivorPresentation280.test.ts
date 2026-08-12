@@ -663,3 +663,72 @@ describe('§5 the Cosmic Boomerang is a boomerang that actually spins', () => {
     renderer.dispose();
   });
 });
+
+/* ---------------------------------- §6 Orbital Lance reads as an impact */
+
+describe('§6 the Orbital Lance impact communicates its damaged area', () => {
+  /** Fire one lance and collect the effects its detonation pushed, by kind. */
+  function detonate(seed: number, level: number, field = 0) {
+    const state = quietArena(seed, 'survivor-orbital');
+    state.passives['area'] = field;
+    state.weapons = [
+      { weaponId: 'orbital', level, cooldown: 0, prototype: true, focusDebt: 0 },
+    ];
+    state.player.invuln = 1e9;
+    const seen = new Map<string, { radius: number; life: number }>();
+    for (let i = 0; i < 1200; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      for (const e of state.effects) {
+        if (e.radius == null || seen.has(e.kind)) continue;
+        if (!e.kind.startsWith('orbital') && e.kind !== 'pulse') continue;
+        seen.set(e.kind, { radius: e.radius, life: e.maxLife });
+      }
+      if (seen.has('orbital-shock')) break;
+    }
+    return { state, seen };
+  }
+
+  it('draws the core blast at the core damage radius and the shockwave at the outer one', () => {
+    for (const field of [0, 5]) {
+      const { seen } = detonate(9970 + field, 5, field);
+      const core = weaponStatsAtLevel('orbital', 5).radius! * (1 + field * 0.055);
+      const outer = core * SURVIVOR.orbital.shockwaveRadiusMul;
+
+      const strike = seen.get('orbital-strike');
+      const flash = seen.get('pulse');
+      const shock = seen.get('orbital-shock');
+      const scorch = seen.get('orbital-scorch');
+      expect(strike, 'no lance impact').toBeTruthy();
+      expect(shock, 'no shockwave').toBeTruthy();
+      expect(scorch, 'no scorch').toBeTruthy();
+
+      // 2.7.0 drew the core flash at 1.15x the true core radius and the beam at 1.4x.
+      expect(strike!.radius).toBeCloseTo(core, 6);
+      expect(flash!.radius).toBeCloseTo(core, 6);
+      expect(shock!.radius).toBeCloseTo(outer, 6);
+      expect(scorch!.radius).toBeCloseTo(core, 6);
+    }
+  });
+
+  it('gets the beam out of the way before the shockwave resolves', () => {
+    const { seen } = detonate(9975, 5);
+    const strike = seen.get('orbital-strike')!;
+    const shock = seen.get('orbital-shock')!;
+    // The beam establishes the origin; the ground says how much landed. The beam must
+    // not still be on screen dominating the frame while it does.
+    expect(strike.life).toBeLessThan(shock.life);
+    expect(strike.life).toBeLessThanOrEqual(0.25);
+  });
+
+  it('never draws any part of the impact wider than the region that damaged', () => {
+    const { seen } = detonate(9976, 5);
+    const outer = weaponStatsAtLevel('orbital', 5).radius! * SURVIVOR.orbital.shockwaveRadiusMul;
+    for (const [kind, e] of seen) {
+      for (let k = 0; k <= 10; k += 1) {
+        const drawn = e.radius * groundEffectScale(kind, k / 10);
+        expect(drawn, `${kind} drew ${drawn} past the outer damage radius ${outer}`)
+          .toBeLessThanOrEqual(outer + 1e-6);
+      }
+    }
+  });
+});
