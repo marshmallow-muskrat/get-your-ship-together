@@ -562,3 +562,104 @@ describe('§4 the Plasma Wake trail is drawn under the actors standing in it', (
     renderer.dispose();
   });
 });
+
+/* ------------------------------------- §5 the Cosmic Boomerang looks like one */
+
+describe('§5 the Cosmic Boomerang is a boomerang that actually spins', () => {
+  function boomerangScene(seed: number, level: number) {
+    const renderer = new SurvivorRenderer(new AssetLibrary());
+    const state = quietArena(seed, 'survivor-start');
+    state.player.invuln = 1e9;
+    state.weapons = [
+      { weaponId: 'boomerang', level, cooldown: 0, prototype: false, focusDebt: 0 },
+    ];
+    return { renderer, state };
+  }
+
+  /** Step until at least `n` boomerang actors exist, returning them. */
+  function throwUntil(
+    renderer: SurvivorRenderer,
+    state: SurvivorState,
+    n: number,
+  ): THREE.Object3D[] {
+    const found: THREE.Object3D[] = [];
+    for (let i = 0; i < 900; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      renderer.sync(state, DT);
+      found.length = 0;
+      renderer.root.traverse((o) => {
+        if (o.name === 'projectile-boomerang') found.push(o);
+      });
+      if (found.length >= n) return found.slice();
+    }
+    return found.slice();
+  }
+
+  it('spins about its own axis instead of being pinned to its heading', () => {
+    const { renderer, state } = boomerangScene(9950, 3);
+    const [disc] = throwUntil(renderer, state, 1);
+    expect(disc, 'no boomerang was thrown').toBeTruthy();
+    const spinner = disc!.getObjectByName('boomerang-spin')!;
+    expect(spinner).toBeTruthy();
+    const first = spinner.rotation.y;
+    for (let i = 0; i < 12; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      renderer.sync(state, DT);
+    }
+    // 11 rad/s over 12 steps at 60Hz is ~2.2 rad of real rotation. The old actor
+    // re-derived rotation.y from the velocity every frame and never turned at all.
+    expect(Math.abs(spinner.rotation.y - first)).toBeGreaterThan(1);
+    renderer.dispose();
+  });
+
+  it('carries a separate non-spinning wake that reads the travel lane', () => {
+    const { renderer, state } = boomerangScene(9951, 3);
+    const [disc] = throwUntil(renderer, state, 1);
+    expect(disc).toBeTruthy();
+    const wake = disc!.getObjectByName('boomerang-wake')!;
+    const spinner = disc!.getObjectByName('boomerang-spin')!;
+    const proj = state.projectiles.find((p) => p.active && p.kind === 'boomerang')!;
+    expect(proj).toBeTruthy();
+    expect(wake.rotation.y).toBeCloseTo(Math.atan2(proj.vx, proj.vz), 6);
+    // Heading and spin are different transforms, on different nodes.
+    expect(wake).not.toBe(spinner);
+    renderer.dispose();
+  });
+
+  it('draws at exactly the authored decorative radius, not past it', () => {
+    const { renderer, state } = boomerangScene(9952, 3);
+    const [disc] = throwUntil(renderer, state, 1);
+    expect(disc).toBeTruthy();
+    const proj = state.projectiles.find((p) => p.active && p.kind === 'boomerang')!;
+    // `visualRadius` is authored at 1.25x the collision radius. The torus reached
+    // 1.39x by accident of its own tube thickness.
+    expect(disc!.scale.x).toBeCloseTo(proj.visualRadius, 6);
+    expect(proj.visualRadius / proj.radius).toBeCloseTo(1.25, 6);
+    renderer.dispose();
+  });
+
+  it('gives the Twin Orbit pair opposite spin so two discs never read as one', () => {
+    const { renderer, state } = boomerangScene(9953, 5);
+    const discs = throwUntil(renderer, state, 2);
+    expect(discs.length, 'Twin Orbit did not put two discs in the air').toBeGreaterThanOrEqual(2);
+    const signs = discs.map((d) => d.userData.spinSign as number);
+    expect(new Set(signs).size, 'both discs spin the same way').toBe(2);
+    renderer.dispose();
+  });
+
+  it('holds no white additive halo — the body composites normally', () => {
+    const { renderer, state } = boomerangScene(9954, 5);
+    const discs = throwUntil(renderer, state, 1);
+    expect(discs.length).toBeGreaterThan(0);
+    let bodyMeshes = 0;
+    discs[0]!.getObjectByName('boomerang-spin')!.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      bodyMeshes += 1;
+      const mat = o.material as THREE.MeshBasicMaterial;
+      expect(mat.blending, 'boomerang body is additive').toBe(THREE.NormalBlending);
+    });
+    // Elbow plus two arms, each an arm body and a gold edge.
+    expect(bodyMeshes).toBe(5);
+    renderer.dispose();
+  });
+});

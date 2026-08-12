@@ -188,25 +188,122 @@ export class SurvivorRenderer {
     return m;
   }
 
+  /**
+   * Shared Cosmic Boomerang geometry.
+   *
+   * Two discs can be in the air at Twin Orbit and a throw lands every ~1.4s, so the
+   * silhouette is built once and reused. Marked `sharedGeometry` on every mesh so
+   * per-projectile teardown releases materials but never these.
+   */
+  private boomerangGeo: {
+    arm: THREE.CylinderGeometry;
+    edge: THREE.CylinderGeometry;
+    elbow: THREE.CylinderGeometry;
+    chevron: THREE.ConeGeometry;
+  } | null = null;
+
+  private boomerangGeometry(): NonNullable<SurvivorRenderer['boomerangGeo']> {
+    if (!this.boomerangGeo) {
+      this.boomerangGeo = {
+        // Tapered arms: thick at the elbow, thin at the tip.
+        arm: new THREE.CylinderGeometry(0.06, 0.17, 0.84, 6),
+        // The gold leading edge rides slightly proud of the arm it belongs to.
+        edge: new THREE.CylinderGeometry(0.035, 0.075, 0.8, 5),
+        elbow: new THREE.CylinderGeometry(0.26, 0.26, 0.15, 12),
+        chevron: new THREE.ConeGeometry(0.2, 0.5, 4),
+      };
+    }
+    return this.boomerangGeo;
+  }
+
+  /** One swept arm: purple body with a gold leading edge, tip pointing along +Z. */
+  private boomerangArm(sweep: number, bodyColor: string): THREE.Group {
+    const geo = this.boomerangGeometry();
+    const pivot = new THREE.Group();
+    pivot.rotation.y = sweep;
+
+    const share = (mesh: THREE.Mesh): THREE.Mesh => {
+      mesh.userData.sharedGeometry = true;
+      mesh.userData.ownsGeometry = false;
+      mesh.userData.ownsMaterial = true;
+      return mesh;
+    };
+
+    const body = share(new THREE.Mesh(geo.arm, this.effectMat(bodyColor, 0.96)));
+    body.rotation.x = Math.PI / 2;
+    body.position.set(0, 0, 0.42);
+
+    // Gold sits on the outer face of the arm — the edge that leads through the cut.
+    const edge = share(new THREE.Mesh(geo.edge, this.effectMat('#ffd24a', 0.95)));
+    edge.rotation.x = Math.PI / 2;
+    edge.position.set(Math.sign(sweep) * 0.11, 0.055, 0.42);
+
+    pivot.add(body, edge);
+    return pivot;
+  }
+
   /** Distinct readable silhouettes for signature projectiles. */
-  private createProjectileActor(kind: import('./survivorState').ProjectileKind, color: string): THREE.Object3D {
+  private createProjectileActor(
+    kind: import('./survivorState').ProjectileKind,
+    color: string,
+    variant = 0,
+  ): THREE.Object3D {
     if (kind === 'boomerang') {
       /*
-       * A flat spinning disc with a bright rim, so the outbound and return legs read as
-       * the same object travelling a lane rather than as two separate shots. Spin is
-       * applied in the sync pass; the geometry is owned so teardown releases it.
+       * A boomerang, not a disc.
+       *
+       * The 2.8.0 actor was a white additive torus with a pale core: rotationally
+       * symmetric, so it could not show spin, and bright enough to read as a halo rather
+       * than a thrown object. It also concealed a bug — the generic Group branch below
+       * assigns `rotation.y` from the velocity every frame, so the disc's "spin" was
+       * overwritten each frame and amounted to a fixed offset. Nothing rotated. A
+       * symmetric silhouette is the only reason that was invisible.
+       *
+       * The silhouette is now two swept arms meeting at a thicker elbow, deep purple
+       * with a gold leading edge, and it genuinely spins about its own axis while a
+       * separate non-spinning wake marks which way it is travelling. Those are two
+       * different questions in a crowded fight and they need two different answers.
        */
       const g = new THREE.Group();
-      const disc = this.ownMesh(
-        new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.11, 8, 20), this.effectMat(color, 0.95, true)),
-      );
-      disc.rotation.x = -Math.PI / 2;
-      const core = this.ownMesh(
-        new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), this.effectMat('#e8fbff', 0.55, true)),
-      );
-      core.rotation.x = -Math.PI / 2;
-      g.add(disc, core);
+      const spinner = new THREE.Group();
+      spinner.name = 'boomerang-spin';
+      // Flattened: this is a thrown blade seen from an isometric camera, not a wing.
+      spinner.scale.set(1, 0.55, 1);
+
+      const bodyColor = variant % 2 === 0 ? '#4d1c96' : '#6a24a8';
+      // ~102 degrees between the arms, opening rearward so the elbow leads.
+      spinner.add(this.boomerangArm(2.25, bodyColor), this.boomerangArm(-2.25, bodyColor));
+
+      const geo = this.boomerangGeometry();
+      const elbow = new THREE.Mesh(geo.elbow, this.effectMat('#8a3fd6', 0.95));
+      elbow.userData.sharedGeometry = true;
+      elbow.userData.ownsGeometry = false;
+      elbow.userData.ownsMaterial = true;
+      spinner.add(elbow);
+
+      /*
+       * Travel marker: a single restrained gold chevron trailing the elbow, aligned to
+       * velocity and deliberately *not* spinning. The old presentation answered
+       * "where is it going" with a large white circular halo, which answered nothing.
+       */
+      const wake = new THREE.Group();
+      wake.name = 'boomerang-wake';
+      const chevron = new THREE.Mesh(geo.chevron, this.effectMat('#ffd24a', 0.5, true));
+      chevron.userData.sharedGeometry = true;
+      chevron.userData.ownsGeometry = false;
+      chevron.userData.ownsMaterial = true;
+      chevron.rotation.x = -Math.PI / 2;
+      chevron.position.z = -0.62;
+      chevron.scale.set(1, 1, 0.45);
+      wake.add(chevron);
+
+      g.add(spinner, wake);
       g.name = 'projectile-boomerang';
+      // Counter-rotating pair at Twin Orbit: two discs on diverging bearings that also
+      // spin opposite ways cannot be mistaken for one disc.
+      g.userData.spinSign = variant % 2 === 0 ? 1 : -1;
+      g.userData.spin = 0;
+      void color;
       return g;
     }
     if (kind !== 'rocket' && kind !== 'drone' && kind !== 'rotary-round') {
@@ -294,7 +391,7 @@ export class SurvivorRenderer {
     this.syncPlayer(state, dt);
     this.syncEnemies(state, dt);
     this.syncBoss(state, dt);
-    this.syncProjectiles(state);
+    this.syncProjectiles(state, dt);
     this.syncHazards(state);
     this.syncAllies(state, dt);
     this.syncPickups(state);
@@ -592,7 +689,7 @@ export class SurvivorRenderer {
     }
   }
 
-  private syncProjectiles(state: SurvivorState): void {
+  private syncProjectiles(state: SurvivorState, dt: number): void {
     const alive = new Set(state.projectiles.filter((p) => p.active).map((p) => p.id));
     for (const [id, mesh] of this.projectiles) {
       if (!alive.has(id)) {
@@ -605,11 +702,12 @@ export class SurvivorRenderer {
       if (!p.active) continue;
       let mesh = this.projectiles.get(p.id);
       if (!mesh) {
-        mesh = this.createProjectileActor(p.kind, p.color);
+        mesh = this.createProjectileActor(p.kind, p.color, p.id);
         this.projectiles.set(p.id, mesh);
         this.root.add(mesh);
       }
-      if (mesh instanceof THREE.Group) {
+      const boomerang = mesh.name === 'projectile-boomerang';
+      if (mesh instanceof THREE.Group && !boomerang) {
         mesh.rotation.y = Math.atan2(p.vx, p.vz);
         const exhaust = mesh.getObjectByName('projectile-exhaust');
         if (exhaust) {
@@ -617,10 +715,26 @@ export class SurvivorRenderer {
           exhaust.scale.set(1, flicker, 1);
         }
       }
-      if (mesh.name === 'projectile-boomerang') {
-        // Spin reads the flight; direction of spin flips on the return leg.
-        mesh.rotation.y += (p.returning ? -1 : 1) * 14 * (1 / 60);
-        mesh.scale.setScalar(Math.max(0.4, (p.visualRadius || p.radius) * 2.1));
+      if (boomerang) {
+        /*
+         * Spin and heading are separate transforms.
+         *
+         * The blade spins about its own axis at a real, frame-rate-independent rate —
+         * the previous code re-assigned `rotation.y` from the velocity every frame and
+         * then added one frame's worth of spin, so the disc never actually turned. The
+         * wake carries the heading instead, so a player can read both the rotation and
+         * the lane at a glance.
+         */
+        const spinner = mesh.getObjectByName('boomerang-spin');
+        const wake = mesh.getObjectByName('boomerang-wake');
+        const sign = ((mesh.userData.spinSign as number | undefined) ?? 1) * (p.returning ? -1 : 1);
+        const spin = ((mesh.userData.spin as number | undefined) ?? 0) + sign * 11 * dt;
+        mesh.userData.spin = spin;
+        if (spinner) spinner.rotation.y = spin;
+        if (wake) wake.rotation.y = Math.atan2(p.vx, p.vz);
+        // Drawn at exactly the authored decorative radius (1.25x collision), rather
+        // than the 1.39x the old torus happened to reach.
+        mesh.scale.setScalar(Math.max(0.3, p.visualRadius || p.radius));
       }
       const s =
         p.kind === 'drone'
@@ -2068,6 +2182,14 @@ export class SurvivorRenderer {
     }
     this.allies.clear();
     this.boltGeo.dispose();
+    // Shared Cosmic Boomerang silhouette: owned by the renderer, not by any disc.
+    if (this.boomerangGeo) {
+      this.boomerangGeo.arm.dispose();
+      this.boomerangGeo.edge.dispose();
+      this.boomerangGeo.elbow.dispose();
+      this.boomerangGeo.chevron.dispose();
+      this.boomerangGeo = null;
+    }
     // Shared Plasma Wake ribbon geometry: owned by the renderer, not by any segment.
     this.plasmaQuad?.dispose();
     this.plasmaQuad = null;
