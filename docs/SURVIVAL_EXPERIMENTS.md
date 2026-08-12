@@ -128,6 +128,69 @@ all runs.
   never an observed survival time; the observed maximum across every 192-run candidate is
   about 26:20.
 
+
+## Five-minute bisect: two causes, each about ten points (endless-2.8.0 stabilization)
+
+Paired analysis on matched hero/seed pairs, 384 runs per step at a five-minute censor.
+The endpoint is binary, so every comparison is McNemar's exact test on discordant pairs
+with a paired risk difference. Comparing two independent confidence intervals — which an
+earlier revision of this document did — is not a test and understates real effects.
+
+| Step | under 5:00 | Wilson 95% | vs previous | vs 2.7.0 |
+| --- | ---: | --- | --- | --- |
+| `endless-2.7.0` | 9.1% | 6.6–12.4% | — | — |
+| Phase 2 repair economy | **19.8%** | 16.1–24.1% | **+10.7, p=5.7e-6** | +10.7 |
+| Phase 3-4 boss fairness | 20.1% | 16.4–24.3% | +0.3, p=1.00 | +10.9 |
+| Phase 5 UI scale | 20.1% | 16.4–24.3% | +0.0, p=1.00 | +10.9 |
+| Phase 7 ship | 19.3% | 15.6–23.5% | −0.8, p=0.85 | +10.2 |
+| Phase 6 ally AI | 19.3% | 15.6–23.5% | +0.0, p=1.00 | +10.2 |
+| Boomerang present, not offered | 19.3% | 15.6–23.5% | +0.0, p=1.00 | +10.2 |
+| Phase 8 final | **29.7%** | 25.3–34.4% | **+10.4, p<0.001** | +20.6, p=5.1e-14 |
+| Stabilization (streams split) | 28.4% | 24.1–33.1% | −1.3, p=0.73 | +19.3 |
+
+Two causes, each roughly ten points, and every other phase contributes exactly nothing.
+Presentation-only changes reproduce identical simulation results, as they must.
+
+### Cause 1: the kill-driven repair economy has no bad-luck protection
+
+| Step | bee | flamingo | frog | red-panda |
+| --- | ---: | ---: | ---: | ---: |
+| `endless-2.7.0` | 4.2% | 17.7% | 3.1% | 11.5% |
+| Phase 2 repair economy | 6.3% | **45.8%** | 7.3% | 19.8% |
+| Phase 8 final | 16.7% | **51.0%** | 14.6% | 36.5% |
+
+Fitzwilliam's early-death rate nearly tripled at the repair commit, before any other
+2.8.0 change existed. The obvious explanation is wrong: measured kill rates are
+146 k/min for Fitzwilliam against 153 for Boswell and 162 for Rutherford, so he is not
+meaningfully slower at generating kill credit.
+
+The real asymmetry is structural. endless-2.7.0 guaranteed an injured player an orb
+within 18 seconds, tightening to 12 below 45% integrity. The live `accumulator` model has
+**no guarantee of any kind** — `guaranteeAt` exists only in the unused `probability`
+model. Credit accrues solely from kills, so supply stops exactly when a player is in
+trouble and kiting instead of killing, and nothing bounds the resulting drought.
+
+### Cause 2: offer dilution, not the weapon
+
+Making Cosmic Boomerang offerable costs ten points whether or not it is ever selected: a
+variant that offered it while forbidding the policy from taking it collapsed just as far,
+and a variant that implemented it without offering it reproduced the previous step
+exactly. Separating the world and offer random streams did not remove the effect either
+(−1.3 points, p=0.73), so this is not stream displacement.
+
+Adding an eleventh shared weapon dilutes a three-card offer. Every slot spent on a new
+option is a slot not offering a strong early pick, and the first five minutes is where
+build quality is least forgiving. This is selection opportunity cost, and it is a
+property of pool size rather than of the weapon.
+
+### Corrections to earlier entries in this document
+
+The previous revision concluded that the median movements were noise because independent
+confidence intervals overlapped. That test was wrong. Paired analysis shows the Phase 7
+mean improvement is significant (+1:13, 95% CI 0:02–2:20); the median movements remain
+non-significant, but by the correct test. The early-death finding stands and is far
+stronger than first reported.
+
 ## Interpretation guardrail
 
 - Candidate deltas are trustworthy only within the same policy and identical seed set.
