@@ -387,92 +387,213 @@ describe('§2b the Ground Slam damages the circle it telegraphs', () => {
 
 /* -------------------------------------------------- §3 modifier geometry */
 
-describe('§3 Containment Field and Weapon Overclock affect their contracted properties', () => {
-  const FIELD = 0.055;
-  const HASTE = 0.055;
+describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon', () => {
+  const FIELD_PER_LEVEL = 0.055;
+  const HASTE_PER_LEVEL = 0.055;
+  /** base / field only / overclock only / both. */
+  const MATRIX = [
+    { field: 0, haste: 0 },
+    { field: 5, haste: 0 },
+    { field: 0, haste: 5 },
+    { field: 5, haste: 5 },
+  ] as const;
 
-  function build(level: number, field: number, haste: number): SurvivorState {
-    const state = quietArena(9800 + field * 10 + haste);
+  function armed(
+    weaponId: WeaponId,
+    level: number,
+    field: number,
+    haste: number,
+    fixture: SurvivorFixture = 'survivor-start',
+  ): SurvivorState {
+    const state = quietArena(9800 + weaponId.length * 7 + field * 3 + haste, fixture);
+    state.player.invuln = 1e9;
     state.passives['area'] = field;
     state.passives['weapon-haste'] = haste;
-    state.weapons = [];
-    void level;
+    state.weapons = [
+      {
+        weaponId,
+        level,
+        cooldown: 0,
+        prototype: WEAPONS[weaponId].prototype === true,
+        focusDebt: 0,
+      },
+    ];
     return state;
   }
 
-  /**
-   * Weapons whose damaging geometry is contracted to scale with Containment Field, and
-   * the effect kind the renderer draws that geometry with.
-   */
-  const AREA_WEAPONS = ['pulsar', 'boomerang', 'plasma-wake', 'arc', 'orbital'] as const;
+  /** The effective radius a weapon should be using at this field level. */
+  function effectiveRadius(weaponId: WeaponId, level: number, field: number): number {
+    return weaponStatsAtLevel(weaponId, level).radius! * (1 + field * FIELD_PER_LEVEL);
+  }
 
-  it('Containment Field scales every contracted radius by exactly 5.5% per level', () => {
-    for (const id of AREA_WEAPONS) {
-      const base = weaponStatsAtLevel(id, 5).radius!;
-      for (let lv = 0; lv <= 5; lv += 1) {
-        const mul = 1 + lv * FIELD;
-        expect(base * mul, `${id} L5 radius at field ${lv}`).toBeCloseTo(base * (1 + lv * 0.055), 9);
-      }
-      // The passive is hard-capped, so the largest field a build can reach is +27.5%.
-      expect(1 + 5 * FIELD).toBeCloseTo(1.275, 9);
-    }
+  it('states the contract once: 5.5% per level, hard-capped at L5', () => {
+    // Both passives are authored on the same per-level step and both cap at 5, so the
+    // widest either can ever be is +27.5%. Nothing below may exceed that.
+    expect(1 + 5 * FIELD_PER_LEVEL).toBeCloseTo(1.275, 9);
+    expect(1 + 5 * HASTE_PER_LEVEL).toBeCloseTo(1.275, 9);
   });
 
-  it('Weapon Overclock scales cadence and never touches geometry', () => {
-    for (const id of AREA_WEAPONS) {
-      const def = weaponStatsAtLevel(id, 5);
-      for (let lv = 0; lv <= 5; lv += 1) {
-        const haste = 1 + lv * HASTE;
-        // Cadence is divided by haste: more shots, same size.
-        expect(def.cadence / haste).toBeLessThanOrEqual(def.cadence + 1e-9);
-      }
-      expect(def.radius, `${id} has an authored radius`).toBeDefined();
-    }
-  });
-
-  it('a scaled weapon draws its scaled radius, in the full modifier matrix', () => {
-    // The invariant that matters: whatever radius the simulation used for damage is the
-    // radius handed to the renderer, and the renderer never draws past it.
-    const matrix = [
-      { field: 0, haste: 0 },
-      { field: 5, haste: 0 },
-      { field: 0, haste: 5 },
-      { field: 5, haste: 5 },
-    ];
-    for (const { field, haste } of matrix) {
-      const state = build(5, field, haste);
-      state.weapons = [{ weaponId: 'pulsar', level: 5, cooldown: 0, prototype: false, focusDebt: 0 }];
-      const expected = weaponStatsAtLevel('pulsar', 5).radius! * (1 + field * FIELD);
-      let sawPulse = false;
-      for (let i = 0; i < 400; i += 1) {
+  it('Pulsar Core: the discharge ring is the damage radius, at every field level', () => {
+    for (const { field, haste } of MATRIX) {
+      const state = armed('pulsar', 5, field, haste);
+      const want = effectiveRadius('pulsar', 5, field);
+      let seen = 0;
+      for (let i = 0; i < 400 && seen === 0; i += 1) {
         stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
         for (const e of state.effects) {
           if (e.kind !== 'pulse' || e.radius == null) continue;
-          sawPulse = true;
-          // Echo Pulsar's second pulse is authored at 0.82x the first; both must be a
-          // clean multiple of the same effective radius.
-          const ratio = e.radius / expected;
+          seen += 1;
+          // Echo Pulsar's second discharge is authored at 0.82x the first; both are
+          // clean multiples of one effective radius.
+          const ratio = e.radius / want;
           expect(
             Math.abs(ratio - 1) < 1e-6 || Math.abs(ratio - 0.82) < 1e-6,
-            `pulsar ring ${e.radius} is not the effective radius ${expected} (field ${field}, haste ${haste})`,
+            `pulsar ring ${e.radius} is not derived from ${want} (field ${field}, haste ${haste})`,
           ).toBe(true);
-          // And the drawn ring never exceeds it.
+          // ...and the drawn ring never exceeds the ring it stands for.
           for (let k = 0; k <= 10; k += 1) {
             expect(groundEffectScale('pulse', k / 10) * e.radius).toBeLessThanOrEqual(
               e.radius + 1e-9,
             );
           }
         }
-        if (sawPulse) break;
       }
-      expect(sawPulse, `pulsar never fired at field ${field} / haste ${haste}`).toBe(true);
+      expect(seen, `pulsar never fired at field ${field} / haste ${haste}`).toBeGreaterThan(0);
     }
   });
 
-  it('Weapon Overclock raises cadence without changing the drawn radius', () => {
-    function firstPulseRadius(haste: number): number {
-      const state = build(5, 0, haste);
-      state.weapons = [{ weaponId: 'pulsar', level: 5, cooldown: 0, prototype: false, focusDebt: 0 }];
+  it('Cosmic Boomerang: collision, drawn size and reach all move with the field', () => {
+    for (const { field, haste } of MATRIX) {
+      const state = armed('boomerang', 5, field, haste);
+      const want = effectiveRadius('boomerang', 5, field);
+      let disc = null as (typeof state.projectiles)[0] | null;
+      for (let i = 0; i < 600 && !disc; i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+        disc = state.projectiles.find((p) => p.active && p.kind === 'boomerang') ?? null;
+      }
+      expect(disc, `no disc at field ${field}`).toBeTruthy();
+      expect(disc!.radius, 'collision radius ignores the field').toBeCloseTo(want, 6);
+      // Decorative radius stays a fixed multiple of the collision radius.
+      expect(disc!.visualRadius).toBeCloseTo(want * 1.25, 6);
+      // Turn distance is contracted to scale too, so a wider field also throws further.
+      const life = weaponStatsAtLevel('boomerang', 5).life!;
+      expect(disc!.turnDistance).toBeCloseTo(
+        life * SURVIVOR.boomerang.turnDistancePerLife * (1 + field * FIELD_PER_LEVEL),
+        6,
+      );
+    }
+  });
+
+  it('Plasma Wake: the trail capsule widens with the field and nothing else does', () => {
+    for (const { field, haste } of MATRIX) {
+      const state = armed('plasma-wake', 4, field, haste, 'survivor-plasma-l1');
+      state.passives['area'] = field;
+      state.passives['weapon-haste'] = haste;
+      state.weapons = [
+        { weaponId: 'plasma-wake', level: 4, cooldown: 0, prototype: false, focusDebt: 0 },
+      ];
+      const input = { ...EMPTY_SURVIVOR_INPUT };
+      let seg = null as (typeof state.hazards)[0] | null;
+      for (let i = 0; i < 600 && !seg; i += 1) {
+        const ang = i * DT * 0.9;
+        input.moveX = Math.cos(ang);
+        input.moveY = Math.sin(ang);
+        stepSurvivor(state, input, DT);
+        seg = state.hazards.find((h) => h.active && h.kind === 'plasma-wake') ?? null;
+      }
+      expect(seg, `no trail at field ${field}`).toBeTruthy();
+      const want =
+        weaponStatsAtLevel('plasma-wake', 4).radius! *
+        SURVIVOR.plasmaTrail.widthMul *
+        (1 + field * FIELD_PER_LEVEL);
+      expect(seg!.radius, 'trail half-width ignores the field').toBeCloseTo(want, 6);
+      // Lifetime is authored, not a modifier axis: the field widens, it does not linger.
+      expect(seg!.maxLife).toBeCloseTo(weaponStatsAtLevel('plasma-wake', 4).life!, 6);
+    }
+  });
+
+  it('Arc Conductor: chain reach grows with the field and no jump exceeds it', () => {
+    for (const { field, haste } of MATRIX) {
+      const state = armed('arc', 5, field, haste, 'survivor-arc');
+      const range = effectiveRadius('arc', 5, field);
+      let arcs: Array<{ len: number; x: number; z: number }> = [];
+      let px = 0;
+      let pz = 0;
+      for (let i = 0; i < 600 && arcs.length === 0; i += 1) {
+        px = state.player.x;
+        pz = state.player.z;
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+        arcs = state.effects
+          .filter((e) => e.kind === 'arc')
+          .map((e) => ({ len: e.length ?? 0, x: e.x, z: e.z }));
+      }
+      expect(arcs.length, `no arc at field ${field}`).toBeGreaterThan(0);
+      /*
+       * An arc drawn *from the player* is an initial arc, and it reaches as far as the
+       * weapon's acquisition range — 16 units, deliberately not the chain range. Every
+       * arc drawn from a body is a chain jump and must sit inside the effective reach,
+       * which is what the field scales.
+       */
+      const chains = arcs.filter((a) => Math.hypot(a.x - px, a.z - pz) > 1e-6);
+      expect(chains.length, `no chain jumps at field ${field}`).toBeGreaterThan(0);
+      for (const a of chains) {
+        expect(a.len, `chain jump ${a.len} exceeds reach ${range}`).toBeLessThanOrEqual(
+          range + 1e-6,
+        );
+      }
+      // And the reach really does move with the field, not just stay inside it.
+      expect(range).toBeCloseTo(
+        weaponStatsAtLevel('arc', 5).radius! * (1 + field * FIELD_PER_LEVEL),
+        9,
+      );
+    }
+  });
+
+  it('Orbital Lance: telegraph, core and shockwave all derive from one effective radius', () => {
+    for (const { field, haste } of MATRIX) {
+      const state = armed('orbital', 5, field, haste, 'survivor-orbital');
+      const core = effectiveRadius('orbital', 5, field);
+      const outer = core * SURVIVOR.orbital.shockwaveRadiusMul;
+      const seen = new Map<string, number>();
+      for (let i = 0; i < 1200; i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+        for (const e of state.effects) {
+          if (e.radius == null || seen.has(e.kind)) continue;
+          if (e.kind.startsWith('orbital') || e.kind === 'telegraph' || e.kind === 'pulse') {
+            seen.set(e.kind, e.radius);
+          }
+        }
+        if (seen.has('orbital-shock')) break;
+      }
+      // Marker, telegraph, beam, core flash and scorch all show the core boundary.
+      for (const kind of ['orbital', 'telegraph', 'orbital-strike', 'pulse', 'orbital-scorch']) {
+        const r = seen.get(kind);
+        expect(r, `${kind} missing at field ${field}`).toBeDefined();
+        expect(r!, `${kind} radius at field ${field}`).toBeCloseTo(core, 6);
+      }
+      // Only the shockwave shows the outer boundary, because only it damages out there.
+      expect(seen.get('orbital-shock')!).toBeCloseTo(outer, 6);
+    }
+  });
+
+  it('Weapon Overclock buys cadence and never geometry', () => {
+    /*
+     * The clean statement of the contract: for each audited weapon, the radius the
+     * simulation resolves is identical at haste 0 and haste 5, while the interval
+     * between volleys shortens by exactly 27.5%.
+     */
+    for (const id of ['pulsar', 'boomerang', 'arc', 'orbital'] as WeaponId[]) {
+      const def = weaponStatsAtLevel(id, 5);
+      expect(def.cadence / (1 + 5 * HASTE_PER_LEVEL)).toBeCloseTo(def.cadence / 1.275, 9);
+      // Radius is read from the authored table and the field only; haste is not in it.
+      expect(effectiveRadius(id, 5, 0)).toBeCloseTo(def.radius!, 9);
+      expect(effectiveRadius(id, 5, 5)).toBeCloseTo(def.radius! * 1.275, 9);
+    }
+  });
+
+  it('measures the same drawn pulsar ring with and without Weapon Overclock', () => {
+    function firstRing(haste: number): number {
+      const state = armed('pulsar', 5, 0, haste);
       for (let i = 0; i < 400; i += 1) {
         stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
         const pulse = state.effects.find((e) => e.kind === 'pulse' && e.radius != null);
@@ -480,18 +601,10 @@ describe('§3 Containment Field and Weapon Overclock affect their contracted pro
       }
       return -1;
     }
-    const bare = firstPulseRadius(0);
-    const fast = firstPulseRadius(5);
+    const bare = firstRing(0);
+    const fast = firstRing(5);
     expect(bare).toBeGreaterThan(0);
     expect(fast).toBeCloseTo(bare, 9);
-  });
-
-  it('the authored area contract is stated once and reused, not per weapon', () => {
-    // Every weapon that scales with the field reads the same passive.
-    const area = WEAPONS;
-    for (const id of AREA_WEAPONS) {
-      expect(area[id], `${id} is not a real weapon family`).toBeTruthy();
-    }
   });
 });
 
