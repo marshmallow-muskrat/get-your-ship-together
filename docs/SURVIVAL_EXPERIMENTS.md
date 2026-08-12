@@ -51,6 +51,42 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.8.0-final-novice (novice) | 4:51 | 4:19 | 5:55 | 3:40 |
 | endless-2.8.0-final-expert (expert) | 19:51 | 4:59 | 13:12 | 11:19 |
 
+
+## Measurement validity guardrail (endless-2.8.0 stabilization)
+
+**A 96-run median cannot resolve a balance change from a resampling artifact.**
+
+Adding Cosmic Boomerang to the shared weapon pool appeared to collapse the competent
+median by 3:48 and to double sub-five-minute deaths. A controlled decomposition showed
+this was not a balance regression:
+
+| Candidate | P25 | Median | <5m deaths |
+| --- | ---: | ---: | ---: |
+| Phase 7 (`2208b3b`) | 7:57 | 13:11 | 16 |
+| Boomerang implemented, **not offered** | 7:57 | 13:11 | 16 |
+| Boomerang offered, **policy forbidden from taking it** | 4:41 | 9:46 | 28 |
+| Full Phase 8 (`088d1a0`) | 4:31 | 9:23 | 31 |
+
+The "not offered" variant reproduces Phase 7 exactly. The "never picked" variant collapses
+almost as hard as the full candidate *while never once selecting the weapon*. The cause was
+therefore neither the weapon's balance nor its selection: enlarging the offer pool consumed
+extra draws from the shared random stream and re-rolled every subsequent build.
+
+The world and upgrade-offer streams are now separate, so content additions can no longer
+displace spawns, boss rolls or drops. That is necessary but not sufficient — adding an
+offerable item still changes the offer *sequence*, which is inherent. Sample size is what
+closes the remaining gap:
+
+| Runs | Without Boomerang | With Boomerang | Apparent effect |
+| ---: | ---: | ---: | ---: |
+| 96 | 12:34 | 8:43 | 3:51 |
+| 192 | 11:26 | 10:55 | 0:31 |
+
+The same unchanged configuration moved 12:34 to 11:26 between the two sample sizes. Treat
+any 96-run median delta under roughly two minutes as noise, and confirm with 192 runs before
+attributing it to a change. Earlier endless-2.8.0 attributions taken at 96 runs — including
+the Phase 3 median movement — should be re-measured before being relied upon.
+
 ## Interpretation guardrail
 
 - Candidate deltas are trustworthy only within the same policy and identical seed set.

@@ -144,6 +144,12 @@ export interface SurvivalBenchmarkResult {
   runsPerHero: number;
   maxMinutes: number;
   generatedAt: string;
+  /**
+   * What produced this snapshot. Optional so snapshots preserved before endless-2.8.0
+   * stabilization still parse — their absence is itself the useful signal that they
+   * predate stream separation and are not directly comparable.
+   */
+  provenance?: SnapshotProvenance;
   runs: SurvivalRunResult[];
   heroes: HeroSurvivalSummary[];
   overall: DistributionSummary;
@@ -565,6 +571,47 @@ export function summarizeHeroRuns(
   };
 }
 
+/**
+ * Snapshot provenance (endless-2.8.0 stabilization).
+ *
+ * A distribution is only comparable to another one produced under identical conditions,
+ * and this release proved how easily that assumption breaks: a content addition displaced
+ * the seeded stream and moved a 96-run median by minutes with no balance change at all.
+ * Recording what produced a snapshot is what lets a future reader tell a real regression
+ * from a differently-sampled one.
+ *
+ * The commit is read from the environment rather than shelling out, so the benchmark has
+ * no dependency on git being present; it records `unknown` rather than guessing.
+ */
+export interface SnapshotProvenance {
+  commit: string;
+  nodeVersion: string;
+  policyVersion: string;
+  seedSet: string;
+  streams: string[];
+}
+
+/** Bumped when policy behaviour changes, so old snapshots are not silently comparable. */
+export const POLICY_VERSION = 'endless-2.8.0-split-streams';
+
+/** Identifies the seed derivation, so a changed seed rule cannot masquerade as balance. */
+export const SEED_SET_ID = 'hero-major-1';
+
+export function snapshotProvenance(): SnapshotProvenance {
+  // Read defensively: this module is imported by the browser build too, where there is
+  // no `process` at all.
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined>; version?: string } })
+    .process;
+  return {
+    commit: env?.env?.GIT_COMMIT ?? env?.env?.GITHUB_SHA ?? 'unknown',
+    nodeVersion: env?.version ?? 'unknown',
+    policyVersion: POLICY_VERSION,
+    seedSet: SEED_SET_ID,
+    // Naming the streams makes a future split visible in the data rather than only in git.
+    streams: ['world', 'offers'],
+  };
+}
+
 export function runSurvivalBenchmark(opts: {
   label: string;
   balanceVersion: string;
@@ -592,6 +639,7 @@ export function runSurvivalBenchmark(opts: {
     runsPerHero,
     maxMinutes,
     generatedAt: new Date().toISOString(),
+    provenance: snapshotProvenance(),
     runs,
     heroes: SURVIVAL_BENCH_HEROES.map((hero) => summarizeHeroRuns(hero, policy, runs)),
     overall: summarizeDistribution(runs.map((r) => r.survivalTime), runs.filter((r) => r.censored).length),

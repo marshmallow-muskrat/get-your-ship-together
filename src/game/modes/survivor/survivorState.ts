@@ -506,7 +506,20 @@ export interface SurvivorState {
   accent: string;
   time: number;
   seed: number;
+  /**
+   * World-simulation random stream.
+   *
+   * Kept separate from the upgrade-offer stream (endless-2.8.0 stabilization). Before the
+   * split, building the level-up card pool drew from this same stream, so *adding one
+   * eligible weapon* shifted every subsequent spawn, boss roll and drop for the rest of
+   * the run. That is not a hypothetical: adding Cosmic Boomerang to the shared pool moved
+   * the 96-run competent median by 3:48 even in a variant where the policy was forbidden
+   * from ever selecting it. Attribution is impossible when a content addition silently
+   * re-rolls the world.
+   */
   rng: number;
+  /** Upgrade-offer stream: which cards are built and in what order. */
+  rngOffers: number;
   phase: SurvivorPhase;
   player: {
     x: number;
@@ -956,6 +969,8 @@ export function createSurvivorState(
     time: 0,
     seed,
     rng: seed,
+    // Decorrelated from the world seed so the two streams cannot march in lockstep.
+    rngOffers: (seed ^ 0x9e3779b9) | 0 || 1,
     phase: 'playing',
     player: {
       x: 0,

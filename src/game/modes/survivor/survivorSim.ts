@@ -164,6 +164,27 @@ function rng(state: SurvivorState): number {
   return ((x >>> 0) % 10000) / 10000;
 }
 
+/**
+ * Upgrade-offer random stream (endless-2.8.0 stabilization).
+ *
+ * Card generation draws from here rather than from the world stream, so changing what is
+ * *offerable* cannot displace spawns, boss rolls or drops. Without this split, adding one
+ * weapon to the shared pool re-rolled every seed's entire run: a variant that offered
+ * Cosmic Boomerang but forbade the policy from ever taking it still moved the 96-run
+ * competent median by 3:25, purely from stream displacement.
+ *
+ * Same generator, independent cursor. Determinism is unchanged — a given seed still
+ * replays exactly — but the two concerns no longer interfere.
+ */
+function rngOffer(state: SurvivorState): number {
+  let x = state.rngOffers | 0;
+  x ^= x << 13;
+  x ^= x >>> 17;
+  x ^= x << 5;
+  state.rngOffers = x;
+  return ((x >>> 0) % 10000) / 10000;
+}
+
 function pushEffect(
   state: SurvivorState,
   kind: SurvivorState['effects'][0]['kind'],
@@ -3527,10 +3548,12 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     });
   }
 
+  // Draws from the offer stream, not the world stream: shuffling a pool whose *size*
+  // depends on what content exists must never move spawns, boss rolls or drops.
   const shuffle = <T,>(arr: T[]): T[] => {
     const bag = [...arr];
     for (let i = bag.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(rng(state) * (i + 1));
+      const j = Math.floor(rngOffer(state) * (i + 1));
       [bag[i], bag[j]] = [bag[j]!, bag[i]!];
     }
     return bag;
