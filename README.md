@@ -25,7 +25,13 @@ Browser QA against a built game, local or deployed:
 npm run build
 python3 -m http.server 8899 --directory dist &
 node scripts/browserQa.mjs http://127.0.0.1:8899 --screenshots qa-shots
+node scripts/cardQa.mjs http://127.0.0.1:8899
 ```
+
+`browserQa.mjs` sweeps the viewport x UI-scale matrix for console errors and
+clipping. `cardQa.mjs` opens the level-up modal and measures the upgrade cards
+themselves — the regions only exist inside that modal, so the general sweep
+never reached them.
 
 Deployment is handled by the Cloudflare Pages Git integration: pushing `main`
 publishes production, and any other branch publishes to

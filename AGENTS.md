@@ -110,6 +110,21 @@ per-edge clipping of interactive elements. It accepts any base URL, so the same
 harness runs against a deployed alias. Narrow/mobile widths are measured but
 non-blocking: this is not currently a mobile game.
 
+Upgrade cards need their own pass, because they only exist inside the level-up
+modal and the sweep above never opens it:
+
+```bash
+node scripts/cardQa.mjs http://127.0.0.1:8899
+```
+
+It injects every card shape the runtime can produce — including the longest
+authored passive copy — across the same viewport x UI-scale matrix and asserts
+geometrically that no copy overlaps the keyboard shortcut and no region
+overflows its card. This is how the endless-2.8.0 shortcut overlap was found:
+the reservation was `padding-bottom` on a three-class selector that
+`#sv-levelup .sv-choice` outranked, so it was discarded in the only place the
+cards appear.
+
 ## Deployment
 
 Deployment is owned by the **Cloudflare Pages Git integration** on the existing

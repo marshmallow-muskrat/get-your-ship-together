@@ -50,13 +50,58 @@ export type CardCategory =
   | 'OVERCLOCK'
   | 'PROTOCOL';
 
+/**
+ * How a card's level step is presented.
+ *
+ * One shape for every card type. Before endless-2.8.0's presentation pass there were
+ * three: weapon upgrades produced `L3 → L4`, passives produced either `L3 → L4` or a
+ * bare `L1` depending on whether they were owned, and new weapons produced an empty
+ * string — and only the literal string `L1 → L2` was given the gold treatment, by a
+ * hard-coded comparison in the HUD. A player could not learn what gold meant, because
+ * gold meant "this is the second level of a weapon" rather than "this is progression".
+ */
+export interface LevelProgression {
+  /** `acquire` for a first pick, `level` for a step, `max` when the step hits a cap. */
+  kind: 'acquire' | 'level' | 'max';
+  /** Badge text: `Acquire · L1`, `L4 → L5`, `L4 → L5 · MAX`. */
+  label: string;
+  /** Level before the choice. 0 for an acquisition. */
+  from: number;
+  /** Level after the choice. */
+  to: number;
+}
+
+/**
+ * The single level/progression formatter.
+ *
+ * Overclocks are deliberately not special-cased: the documented contract is that a
+ * weapon's displayed level simply continues (L5 → L6), with "Overclock I" as secondary
+ * explanatory text carried by the card's `name`. An acquisition reads as `Acquire · L1`
+ * rather than the `L0 → L1` a naive step formatter would produce, because there is no
+ * level 0 to progress from.
+ */
+export function levelProgression(
+  from: number,
+  to: number,
+  opts: { capped?: boolean } = {},
+): LevelProgression {
+  const kind: LevelProgression['kind'] = from <= 0 ? 'acquire' : opts.capped ? 'max' : 'level';
+  const step = from <= 0 ? `Acquire · L${to}` : `L${from} → L${to}`;
+  return { kind, label: opts.capped ? `${step} · MAX` : step, from, to };
+}
+
 /** Fully-described upgrade card. */
 export interface UpgradeCardCopy {
   category: CardCategory;
   /** Parent weapon or passive name in authored Title Case, e.g. "Bio-Plasma Glob". */
   parent: string;
-  /** Level transition, e.g. "L3 → L4". Empty for brand-new picks. */
+  /**
+   * Level transition, e.g. `L3 → L4`. Retained as the flat string several call sites
+   * and fixtures already read; `progression` is the structured form.
+   */
   levels: string;
+  /** Shared level/progression presentation. Every card type produces one. */
+  progression: LevelProgression;
   /** Authored upgrade name, e.g. "Twin Globs". */
   name: string;
   /** One plain-language sentence describing the gameplay change. */
@@ -246,10 +291,12 @@ export function weaponUpgradeCard(
   const authored = next <= fam.levels.length;
   const stats = weaponStatDiff(weaponId, currentLevel, next);
   if (authored) {
+    const progression = levelProgression(currentLevel, next);
     return {
       category: fam.prototype ? 'PROTOTYPE UPGRADE' : 'WEAPON UPGRADE',
       parent: displayName(fam.name),
-      levels: `L${currentLevel} → L${next}`,
+      levels: progression.label,
+      progression,
       name: fam.levels[next - 1]!.label,
       summary: weaponUpgradeSummary(weaponId, currentLevel, next),
       stats,
@@ -257,10 +304,15 @@ export function weaponUpgradeCard(
     };
   }
   const oc = overclockLevel(next);
+  // Overclock keeps the ordinary displayed level step; "Overclock I" is the name, not
+  // the level. `L5 → L6` is the documented contract and the shared formatter produces
+  // it without an Overclock branch of its own.
+  const progression = levelProgression(currentLevel, next);
   return {
     category: 'OVERCLOCK',
     parent: displayName(fam.name),
-    levels: `L${currentLevel} → L${next}`,
+    levels: progression.label,
+    progression,
     name: formatOverclockLabel(oc),
     summary: `Keeps the ${fam.levels[fam.levels.length - 1]!.label} structure and adds flat damage. Overclock damage is additive, so it never compounds.`,
     stats,
@@ -289,10 +341,14 @@ export function newWeaponCard(weaponId: WeaponId): UpgradeCardCopy {
   if (l1.splash != null) stats.push(`Splash ${round(l1.splash, 2)}`);
   if (l1.puddleDamage != null) stats.push(`Puddle ${round(l1.puddleDamage, 1)}/s`);
   if (l1.length != null) stats.push(`Length ${round(l1.length, 1)}`);
+  // An acquisition is progression too, and it now says so: `Acquire · L1` rather than
+  // an empty badge, and certainly not the awkward `L0 → L1` a step formatter implies.
+  const progression = levelProgression(0, 1);
   return {
     category: fam.prototype ? 'NEW PROTOTYPE' : 'NEW WEAPON',
     parent: displayName(fam.name),
-    levels: '',
+    levels: progression.label,
+    progression,
     name: fam.levels[0]!.label,
     summary: fam.prototype
       ? `${fam.description} Prototypes do not use an ordinary weapon slot.`
@@ -413,10 +469,15 @@ export function passiveCard(
   const capped = Number.isFinite(def.maxLevel) && next >= def.maxLevel;
   if (capped) stats.push('Reaches its hard cap at this level');
 
+  // Passives use the same grammar as weapons: they genuinely have levels, so a passive
+  // step reads `L3 → L4` and a first pick reads `Acquire · L1`, exactly as a weapon's
+  // does. It previously produced a bare `L1` for a new passive and nothing marked it.
+  const progression = levelProgression(currentLevel, next, { capped });
   return {
     category: currentLevel > 0 ? 'PASSIVE UPGRADE' : 'NEW PASSIVE',
     parent: displayName(def.name),
-    levels: currentLevel > 0 ? `L${currentLevel} → L${next}` : `L${next}`,
+    levels: progression.label,
+    progression,
     name: def.name,
     summary,
     stats,

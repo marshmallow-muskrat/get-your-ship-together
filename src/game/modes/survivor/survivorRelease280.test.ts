@@ -15,7 +15,7 @@ import {
   clampUiScale,
   clampUpgradeNumbers,
 } from './survivorKeybinds';
-import { passiveCard, weaponUpgradeCard } from './survivorUpgradeCards';
+import { newWeaponCard, passiveCard, weaponUpgradeCard } from './survivorUpgradeCards';
 import {
   BOSS_DAMAGE_BASE,
   BOSS_REFERENCE_RANGED_DAMAGE,
@@ -240,25 +240,60 @@ describe('§5 upgrade cards', () => {
     }
   });
 
-  it('renders the keybind as its own bottom-left affordance', () => {
+  it('gives the keybind a reserved footer row that copy cannot reach', () => {
     // Previously concatenated into the category badge, which read as part of the copy.
     expect(hudSource).toMatch(/className = 'sv-card-bind'/);
     expect(hudSource).not.toMatch(/card\?\.category \?\? fallbackLabel\(c\)\} · \$\{labels/);
-    const at = cssSource.indexOf('.survivor-hud .sv-card-bind {');
-    expect(at).toBeGreaterThan(-1);
-    const body = cssSource.slice(at, cssSource.indexOf('}', at));
-    expect(body).toMatch(/position:\s*absolute/);
-    expect(body).toMatch(/left:\s*[\d.]+rem/);
-    expect(body).toMatch(/bottom:\s*[\d.]+rem/);
-    // The card must reserve room for it rather than letting it overlap the copy.
-    const cardAt = cssSource.indexOf('.survivor-hud .sv-choice.sv-card {');
-    expect(cssSource.slice(cardAt, cssSource.indexOf('}', cardAt))).toMatch(/padding-bottom/);
+    // The bind lives in its own region node, not out of flow in a corner.
+    expect(hudSource).toMatch(/className = 'sv-card-footer'/);
+
+    /*
+     * The reservation used to be `padding-bottom` on `.sv-choice.sv-card` with the bind
+     * absolutely positioned over it — and `#sv-levelup .sv-choice { padding: ... }`
+     * outranks a three-class selector, so inside the level-up modal (the only place
+     * these cards appear) the reservation was discarded and long descriptions ran under
+     * the shortcut. A grid row cannot be overridden away by a padding shorthand.
+     */
+    const cardAt = cssSource.indexOf('.survivor-hud .sv-card {');
+    expect(cardAt).toBeGreaterThan(-1);
+    const card = cssSource.slice(cardAt, cssSource.indexOf('}', cardAt));
+    expect(card).toMatch(/display:\s*grid/);
+    expect(card).toMatch(/grid-template-rows:/);
+
+    const footAt = cssSource.indexOf('.survivor-hud .sv-card-footer {');
+    expect(footAt).toBeGreaterThan(-1);
+    const footer = cssSource.slice(footAt, cssSource.indexOf('}', footAt));
+    expect(footer).toMatch(/min-height:\s*[\d.]+rem/);
+
+    const bindAt = cssSource.indexOf('.survivor-hud .sv-card-bind {');
+    const bind = cssSource.slice(bindAt, cssSource.indexOf('}', bindAt));
+    expect(bind).not.toMatch(/position:\s*absolute/);
   });
 
-  it('marks the first upgrade of a weapon for the gold treatment', () => {
-    expect(weaponUpgradeCard('bioplasma', 1).levels).toBe('L1 → L2');
-    expect(hudSource).toMatch(/dataset\.firstUpgrade/);
-    expect(cssSource).toMatch(/\[data-first-upgrade='true'\]/);
+  it('uses one gold level badge for every card that has levels', () => {
+    // One formatter, one grammar, one colour. Gold means progression — not "this is
+    // literally the string L1 → L2", which is what the old hard-coded HUD check meant.
+    expect(weaponUpgradeCard('bioplasma', 1).progression.label).toBe('L1 → L2');
+    expect(weaponUpgradeCard('bioplasma', 4).progression.label).toBe('L4 → L5');
+    // Overclock keeps the ordinary displayed level step.
+    expect(weaponUpgradeCard('pulse', 5).progression.label).toBe('L5 → L6');
+    expect(weaponUpgradeCard('pulse', 5).progression.kind).toBe('level');
+    // An acquisition is progression into the build, not `L0 → L1`.
+    expect(newWeaponCard('pulsar').progression.label).toBe('Acquire · L1');
+    expect(newWeaponCard('pulsar').progression.kind).toBe('acquire');
+    // Passives share the grammar exactly.
+    expect(passiveCard('area', 0, 120).progression.label).toBe('Acquire · L1');
+    expect(passiveCard('area', 3, 120).progression.label).toBe('L3 → L4');
+    expect(passiveCard('area', 4, 120).progression.label).toBe('L4 → L5 · MAX');
+    expect(passiveCard('area', 4, 120).progression.kind).toBe('max');
+    // Repeatable passives never claim a cap they do not have.
+    expect(passiveCard('max-health', 9, 200).progression.label).toBe('L9 → L10');
+
+    expect(hudSource).toMatch(/className = 'sv-card-level'/);
+    expect(hudSource).toMatch(/dataset\.progression/);
+    expect(hudSource).not.toMatch(/dataset\.firstUpgrade/);
+    expect(cssSource).toMatch(/\.sv-card-level \{/);
+    expect(cssSource).not.toMatch(/data-first-upgrade/);
   });
 
   it('counts ordinary weapon slots and excludes prototypes', () => {

@@ -2109,22 +2109,79 @@ html {
    endless-2.3.0 — upgrade card clarity, pressure director, hit feedback
    --------------------------------------------------------------------------- */
 
-/* Upgrade cards state the decision: category, parent, level step, named upgrade,
-   a plain-language sentence, the numeric diffs, and any tradeoff. */
+/*
+ * Upgrade cards, as four deliberate regions.
+ *
+ *   head    category eyebrow + level badge, on one line
+ *   title   parent weapon/passive, then the authored upgrade name
+ *   body    plain-language sentence, numeric diffs, tradeoff  (absorbs slack)
+ *   footer  the keyboard shortcut, and nothing else
+ *
+ * These are grid rows, not flow content with padding held open underneath it. The
+ * previous layout absolutely positioned the keybind and reserved room for it with
+ * `padding-bottom: 2.1rem` on `.sv-choice.sv-card` — a three-class selector, which
+ * `#sv-levelup .sv-choice { padding: 1.35rem 1.5rem }` outranks on ID specificity. The
+ * reservation was silently discarded inside the level-up modal, which is the only place
+ * these cards appear, and long descriptions ran underneath the 1/2/3 shortcut. A grid
+ * row cannot be overridden out of existence by a padding shorthand.
+ */
 .survivor-hud .sv-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  align-items: start;
+  justify-items: start;
   text-align: left;
   gap: 0.15rem;
 }
 .survivor-hud #sv-levelup .sv-choice.sv-card {
-  min-height: 13.5rem;
+  /* Enough for the shortest card; the body row absorbs everything beyond it. */
+  min-height: 14.5rem;
+}
+.survivor-hud .sv-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
 }
 .survivor-hud .sv-card-badge {
   color: color-mix(in srgb, var(--hud-accent) 82%, white 18%);
   letter-spacing: 0.14em;
   font-weight: 700;
+}
+/*
+ * The level badge. One treatment for every card that has levels — weapon steps,
+ * prototype steps, Overclocks, passive steps and first acquisitions alike.
+ *
+ * Gold previously appeared only where the level string was literally `L1 → L2`, so it
+ * marked "the second level of a weapon" rather than "progression", and a player had no
+ * way to learn what it meant. Now gold always means the card advances something.
+ */
+.survivor-hud .sv-card-level {
+  flex: 0 0 auto;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.3rem;
+  color: #ffd46a;
+  border: 1px solid color-mix(in srgb, #ffd46a 38%, transparent);
+  background: color-mix(in srgb, #ffd46a 10%, rgba(6, 14, 26, 0.7));
+  text-shadow: 0 0 10px color-mix(in srgb, #ffd46a 40%, transparent);
+}
+/* A first pick is progression into the build rather than along a track. */
+.survivor-hud .sv-card-level[data-progression='acquire'] {
+  color: #ffe6a8;
+  border-color: color-mix(in srgb, #ffd46a 55%, transparent);
+  background: color-mix(in srgb, #ffd46a 16%, rgba(6, 14, 26, 0.7));
+}
+/* The last level this line will ever offer. */
+.survivor-hud .sv-card-level[data-progression='max'] {
+  color: #ffb066;
+  border-color: color-mix(in srgb, #ffb066 55%, transparent);
 }
 .survivor-hud .sv-card-parent {
   font-size: 0.78rem;
@@ -2136,32 +2193,25 @@ html {
   text-transform: uppercase;
   opacity: 0.72;
 }
-/*
- * L1 -> L2 is the first upgrade a weapon ever receives, and the point where an authored
- * behavioural tier actually begins. Gold marks it as the step worth noticing.
- */
-.survivor-hud .sv-card-parent[data-first-upgrade='true'] {
-  color: #ffd46a;
-  opacity: 1;
-  font-weight: 700;
-  text-shadow: 0 0 12px color-mix(in srgb, #ffd46a 45%, transparent);
+.survivor-hud .sv-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
 }
-
 /*
- * Keybind affordance, pinned to the card's bottom-left.
- *
- * The card is a column of copy; the bind is not part of that copy, so it sits out of
- * flow in the corner with reserved padding on the card so it can never overlap the
- * tradeoff line at any UI scale.
+ * Reserved footer row. It owns its height whether or not anything is in it, so the
+ * shortcut can never be reached by the copy above it at any UI scale.
  */
-.survivor-hud .sv-choice.sv-card {
-  position: relative;
-  padding-bottom: 2.1rem;
+.survivor-hud .sv-card-footer {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  min-height: 1.7rem;
+  padding-top: 0.4rem;
 }
 .survivor-hud .sv-card-bind {
-  position: absolute;
-  left: 0.85rem;
-  bottom: 0.7rem;
   min-width: 1.5rem;
   padding: 0.1rem 0.4rem;
   border-radius: 0.3rem;

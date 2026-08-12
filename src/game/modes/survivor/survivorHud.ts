@@ -928,25 +928,45 @@ export class SurvivorHud {
             btn.className = 'sv-choice sv-card';
             btn.dataset.i = String(i);
 
+            /*
+             * Four deliberate regions, as grid rows: head (category + level), title
+             * (parent and upgrade name), body (copy, stats, tradeoff), footer (keybind).
+             *
+             * The footer is a real row that reserves its own height. The keybind was
+             * previously absolutely positioned with `padding-bottom` on the card meant
+             * to hold space for it — and that reservation lost to
+             * `#sv-levelup .sv-choice { padding: 1.35rem 1.5rem }`, whose ID selector
+             * outranks it. Long descriptions ran under the shortcut. A grid row cannot
+             * be overridden into non-existence by a padding shorthand.
+             */
+            const head = document.createElement('span');
+            head.className = 'sv-card-head';
+
             const badge = document.createElement('span');
             badge.className = 'eyebrow sv-card-badge';
             badge.textContent = card?.category ?? fallbackLabel(c);
-            btn.appendChild(badge);
+            head.appendChild(badge);
 
-            // Parent weapon/passive and the exact level transition.
+            /*
+             * One level badge for every card type, in one grammar, in one colour.
+             *
+             * `levelProgression` produces `Acquire · L1`, `L4 → L5` and `L5 → L6`
+             * alike, so gold means "this is progression" rather than "this happens to
+             * be the literal string L1 → L2", which is what the previous hard-coded
+             * comparison in this file made it mean.
+             */
+            if (card?.progression) {
+              const level = document.createElement('span');
+              level.className = 'sv-card-level';
+              level.textContent = card.progression.label;
+              level.dataset.progression = card.progression.kind;
+              head.appendChild(level);
+            }
+            btn.appendChild(head);
+
             const parent = document.createElement('span');
             parent.className = 'sv-card-parent';
-            parent.textContent = card
-              ? card.levels
-                ? `${card.parent} · ${card.levels}`
-                : card.parent
-              : '';
-            /*
-             * The first upgrade a weapon ever receives is the one most worth noticing:
-             * it is where an authored behavioural tier actually begins. Flagged as data
-             * so the gold treatment lives in CSS rather than in a hard-coded colour here.
-             */
-            if (card?.levels === 'L1 → L2') parent.dataset.firstUpgrade = 'true';
+            parent.textContent = card?.parent ?? '';
             if (parent.textContent) btn.appendChild(parent);
 
             const name = document.createElement('strong');
@@ -954,10 +974,13 @@ export class SurvivorHud {
             name.textContent = card?.name ?? c.title;
             btn.appendChild(name);
 
+            const body = document.createElement('span');
+            body.className = 'sv-card-body';
+
             const summary = document.createElement('small');
             summary.className = 'sv-card-summary';
             summary.textContent = card?.summary ?? c.body;
-            btn.appendChild(summary);
+            body.appendChild(summary);
 
             if (this.upgradeNumbers && card && card.stats.length > 0) {
               const stats = document.createElement('span');
@@ -968,22 +991,25 @@ export class SurvivorHud {
                 row.textContent = line;
                 stats.appendChild(row);
               }
-              btn.appendChild(stats);
+              body.appendChild(stats);
             }
 
             if (card?.tradeoff) {
               const trade = document.createElement('span');
               trade.className = 'sv-card-tradeoff';
               trade.textContent = card.tradeoff;
-              btn.appendChild(trade);
+              body.appendChild(trade);
             }
+            btn.appendChild(body);
 
-            // Bottom-left, after every content node, so it reads as an affordance on the
-            // card rather than as part of the upgrade's own copy.
+            // Reserved footer. Nothing else is ever placed in this row.
+            const footer = document.createElement('span');
+            footer.className = 'sv-card-footer';
             const bind = document.createElement('kbd');
             bind.className = 'sv-card-bind';
             bind.textContent = labels[i] ?? String(i + 1);
-            btn.appendChild(bind);
+            footer.appendChild(bind);
+            btn.appendChild(footer);
 
             btn.addEventListener('pointerdown', (ev) => {
               ev.preventDefault();
