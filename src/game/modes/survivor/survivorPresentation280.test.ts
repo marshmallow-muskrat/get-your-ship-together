@@ -981,6 +981,19 @@ describe('§8 upgrade naming identifies the weapon being upgraded', () => {
     }
   });
 
+  it('does not print the weapon name twice on a card that headlines with it', () => {
+    // An ordinary level, an acquisition and every passive all headline with the
+    // thing's own name; a parent line there just repeats it. The parent earns its
+    // place on a tier card, where the headline is the transformation.
+    expect(hudSource).toMatch(/card\.parent !== card\.name/);
+    const twin = weaponUpgradeCard('boomerang', 4);
+    expect(twin.name).toBe('Twin Orbit');
+    expect(twin.parent).toBe('Cosmic Boomerang');
+    expect(twin.parent).not.toBe(twin.name);
+    const ordinary = weaponUpgradeCard('boomerang', 2);
+    expect(ordinary.parent).toBe(ordinary.name);
+  });
+
   it('acquiring and overclocking a weapon both name the weapon', () => {
     for (const id of ALL) {
       expect(newWeaponCard(id).name).toBe(WEAPONS[id].name);

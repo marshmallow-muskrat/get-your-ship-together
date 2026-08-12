@@ -1014,10 +1014,22 @@ export class SurvivorHud {
             }
             btn.appendChild(head);
 
-            const parent = document.createElement('span');
-            parent.className = 'sv-card-parent';
-            parent.textContent = card?.parent ?? '';
-            if (parent.textContent) btn.appendChild(parent);
+            /*
+             * The parent line, when it says something the headline does not.
+             *
+             * An ordinary weapon level, an acquisition and every passive all headline
+             * with the thing's own name, so a parent line would just repeat it — three
+             * cards reading "PULSE BLASTER / Pulse Blaster". It earns its place only on
+             * a tier card, where the headline is the transformation ("Twin Orbit") and
+             * the player still needs to know which weapon that is.
+             */
+            const parentText = card && card.parent !== card.name ? card.parent : '';
+            if (parentText) {
+              const parent = document.createElement('span');
+              parent.className = 'sv-card-parent';
+              parent.textContent = parentText;
+              btn.appendChild(parent);
+            }
 
             const name = document.createElement('strong');
             name.className = 'sv-card-name';

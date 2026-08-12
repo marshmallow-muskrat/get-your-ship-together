@@ -77,9 +77,22 @@ for (const scene of SCENES) {
     };
   });
 
-  if (shotDir) await page.screenshot({ path: `${shotDir}/${scene.id}.png` });
+  /*
+   * A screenshot is evidence, not the gate. Playwright blocks on "waiting for fonts to
+   * load" when a sandbox denies the web-font host, and a heavy scene can exceed the
+   * default timeout — neither is a defect in the build, and neither may be allowed to
+   * abandon the console-error report for the scenes that follow.
+   */
+  let shotError = null;
+  if (shotDir) {
+    try {
+      await page.screenshot({ path: `${shotDir}/${scene.id}.png`, timeout: 60000, animations: 'disabled' });
+    } catch (e) {
+      shotError = String(e).split('\n')[0].slice(0, 120);
+    }
+  }
 
-  rows.push({ id: scene.id, canvas: metrics.canvas, overlay: metrics.overlay, errors: errors.length });
+  rows.push({ id: scene.id, canvas: metrics.canvas, overlay: metrics.overlay, errors: errors.length, shotError });
   if (errors.length) allErrors.push(...errors.map((e) => `${scene.id}: ${e}`));
   await page.close();
 }
@@ -90,6 +103,7 @@ console.log(`\n=== Effect QA: ${baseUrl} ===\n`);
 for (const r of rows) {
   console.log(`${r.id.padEnd(18)} canvas=${r.canvas} errors=${r.errors}`);
   if (r.overlay) console.log(`   ${r.overlay}`);
+  if (r.shotError) console.log(`   (screenshot skipped: ${r.shotError})`);
 }
 console.log(`\nconsole/page errors: ${allErrors.length}`);
 for (const e of allErrors.slice(0, 20)) console.log('  ERR ' + e.slice(0, 220));
