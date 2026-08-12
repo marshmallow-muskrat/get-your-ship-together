@@ -5,6 +5,7 @@ import { AssetLibrary, createAnimator } from '../../assets/AssetLibrary';
 import { BOSS_DEFS, HORDE, SURVIVOR, SURVIVOR_BOSS, bossDefForIndex } from './survivorContent';
 import type { SurvivorState } from './survivorState';
 import { shapeToRender } from './survivorAttackShapes';
+import { groundEffectScale, isBoundaryEffect } from './survivorEffectGeometry';
 import { AttackShapeMesh } from './survivorShapeMesh';
 
 type Animator = ReturnType<typeof createAnimator>;
@@ -1071,12 +1072,26 @@ export class SurvivorRenderer {
         continue;
       }
       obj.position.set(h.x, h.kind === 'wake' ? 0.06 : 0.04, h.z);
-      const growth = 0.85 + (1 - t) * 0.2;
-      obj.scale.setScalar(h.radius * growth);
+      /*
+       * The disc is the hazard, at exactly `h.radius`.
+       *
+       * It previously grew 0.85x -> 1.05x across its life, so a boss Contamination pool
+       * authored at 3.4 was drawn at 2.89 for most of the window the player was reading
+       * it. `updateHazards` damages inside `radius + playerRadius`, so the visible edge
+       * sat almost a full unit inside the damaging one, and standing "just outside the
+       * purple" still hurt. One authored radius, drawn and tested.
+       */
+      obj.scale.setScalar(Math.max(0.001, h.radius));
+      /*
+       * An arming hazard has not landed yet. `updateHazards` skips damage entirely while
+       * `armTimer > 0`, so drawing it at full strength shows a live floor that cannot
+       * hurt anyone: the visible dangerous window has to be the damaging window.
+       */
+      const arming = h.armTimer > 0;
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
           const base = (c.userData.baseOpacity as number | undefined) ?? (h.kind === 'wake' ? 0.5 : 0.42);
-          c.material.opacity = Math.max(0.08, t * base);
+          c.material.opacity = Math.max(0.08, t * base * (arming ? 0.45 : 1));
         }
       });
     }
@@ -1489,10 +1504,13 @@ export class SurvivorRenderer {
         this.root.add(obj);
       }
       const t = 1 - e.life / e.maxLife;
-      // Repulsor: expand from ~0.15 → 1.0 of true radius so ring matches gameplay edge
-      if (e.kind === 'repulsor') {
-        const grow = 0.12 + t * 0.95;
-        obj.scale.setScalar(grow);
+      /*
+       * Radius-bearing effects follow the shared ground-effect contract: a telegraph
+       * holds its authored radius, a blast expands to it and stops. Nothing that stands
+       * for a gameplay boundary is ever drawn wider than the region that damages.
+       */
+      if (isBoundaryEffect(e.kind)) {
+        obj.scale.setScalar(groundEffectScale(e.kind, t));
       } else if (e.kind === 'fleet-ship') {
         obj.scale.setScalar(1);
         const fx = e.facingX ?? 0;
@@ -1504,16 +1522,10 @@ export class SurvivorRenderer {
         obj.scale.setScalar((0.35 + Math.min(1, t * 2.8) * 0.65) * pulse);
         const ring = obj.getObjectByName('singularity-ring');
         if (ring) ring.rotation.z = t * 7.5;
-      } else if (e.kind === 'orbital-shock') {
-        // Expand from the core outward to the full outer damage radius.
-        obj.scale.setScalar(0.28 + t * 0.72);
-      } else if (e.kind === 'orbital-scorch') {
-        // Residue does not expand; it settles slightly and fades.
-        obj.scale.setScalar(1.02 - t * 0.06);
       } else if (e.kind === 'arc' || e.kind === 'orbital' || e.kind === 'orbital-strike' || e.kind === 'titan-deploy') {
         obj.scale.setScalar(1);
       } else {
-        obj.scale.setScalar(0.5 + t * 1.4);
+        obj.scale.setScalar(groundEffectScale(e.kind, t));
       }
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {

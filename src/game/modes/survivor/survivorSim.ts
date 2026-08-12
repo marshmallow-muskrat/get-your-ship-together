@@ -3132,10 +3132,21 @@ function updateEnemies(state: SurvivorState, dt: number): void {
       if (e.specialWindup > 0) {
         e.specialWindup -= dt;
         if (e.specialWindup <= 0) {
-          pushEffect(state, 'pulse', e.x, e.z, 0.4, '#ffcc44', MINIBOSS.specialRadius, {
+          /*
+           * Detonate on the committed point, not on wherever the Warden has walked to.
+           *
+           * The telegraph is drawn once at windup start and never moves, but the Warden
+           * kept advancing at a quarter speed for the whole 0.95s windup and the impact
+           * was resolved against its *current* position — so the ring the player was
+           * given to read was up to ~0.6 units away from the ring that actually hit,
+           * and the correct answer to a telegraph was "back away from where it will be"
+           * rather than "leave the marked circle". One authored point, telegraphed,
+           * rendered and damaged.
+           */
+          pushEffect(state, 'pulse', e.specialX, e.specialZ, 0.4, '#ffcc44', MINIBOSS.specialRadius, {
             radius: MINIBOSS.specialRadius,
           });
-          const d = Math.hypot(p.x - e.x, p.z - e.z);
+          const d = Math.hypot(p.x - e.specialX, p.z - e.specialZ);
           if (d <= MINIBOSS.specialRadius + pr) {
             damagePlayer(state, MINIBOSS.specialDamage * e.damageMul, makeHordeSource(e, 'Ground Slam'));
           }
@@ -3143,7 +3154,9 @@ function updateEnemies(state: SurvivorState, dt: number): void {
         }
       } else if (e.specialCd <= 0 && dist < 9) {
         e.specialWindup = MINIBOSS.specialWindup;
-        pushEffect(state, 'telegraph', e.x, e.z, MINIBOSS.specialWindup, '#ffaa33', MINIBOSS.specialRadius, {
+        e.specialX = e.x;
+        e.specialZ = e.z;
+        pushEffect(state, 'telegraph', e.specialX, e.specialZ, MINIBOSS.specialWindup, '#ffaa33', MINIBOSS.specialRadius, {
           radius: MINIBOSS.specialRadius,
         });
       }

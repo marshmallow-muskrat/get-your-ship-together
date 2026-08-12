@@ -56,6 +56,16 @@ export interface SurvivorEnemy {
   /** Miniboss special telegraph timer. */
   specialCd: number;
   specialWindup: number;
+  /**
+   * Ground point the current Ground Slam is committed to (endless-2.8.0).
+   *
+   * The telegraph is placed once, at windup start, and the detonation is resolved
+   * against this same point — so the circle the player is shown is the circle that
+   * damages. The Warden still advances (slowly) during the windup; what it may no
+   * longer do is drag the impact along with it.
+   */
+  specialX: number;
+  specialZ: number;
   /** Elite/hunter lunge state. */
   lungeCd: number;
   lungeTimer: number;
@@ -930,6 +940,8 @@ function emptyEnemy(): SurvivorEnemy {
     gravityPulled: 0,
     specialCd: 0,
     specialWindup: 0,
+    specialX: 0,
+    specialZ: 0,
     lungeCd: 0,
     lungeTimer: 0,
     lungeFx: 0,
