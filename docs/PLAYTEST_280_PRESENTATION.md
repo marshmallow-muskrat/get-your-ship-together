@@ -14,6 +14,10 @@ for. Fixtures are listed where a thing is hard to reach in a normal run.
 - [ ] Standing on your own trail: does the astronaut sit **in front of** it, not behind?
 - [ ] Same for enemies and a boss walking through it.
 - [ ] Is it dangerous residual plasma, or still a glowing ribbon?
+- [ ] **Is L1 now too subtle?** The restraint is deliberate and L1 is the authored
+      weakest tier, but if you cannot find your own trail at L1 while the horde is
+      standing on it, say so — that is a brightness floor we can raise without
+      touching the occlusion fix.
 - [ ] Can you still see where the trail is being laid down?
 - [ ] Does an old segment read as spent rather than as something still throwing light?
 - [ ] Does the visible edge match where enemies start taking damage?
