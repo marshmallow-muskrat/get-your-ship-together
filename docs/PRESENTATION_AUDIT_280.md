@@ -200,3 +200,38 @@ Two knobs, both swept against the real benchmark:
 At parity per hit the gain measured well past the ceiling. `PROGRESSION_BOUNDS` and
 `BREAKPOINT_LEVEL` were not moved, and a test asserts their values so a later change
 cannot quietly widen them to fit this.
+
+## Effect QA, on the final candidate
+
+`scripts/effectQa.mjs` against a local build of the deployed commit. Every fixture that
+exercises an effect this pass changed, run until the effect is on screen, with the F3
+renderer counters read at that moment.
+
+```text
+plasma-l1        errors=0   geo  41 · fx  4 · atk 0 · rail 0
+plasma-ship      errors=0   geo  53 · fx  5 · atk 0 · rail 0
+boomerang        errors=0   geo  32 · fx  1 · atk 0 · rail 0
+orbital          errors=0   geo  79 · fx 16 · atk 0 · rail 0
+arc              errors=0   geo 115 · fx 13 · atk 0 · rail 0
+boss             errors=0   geo  36 · fx  4 · atk 0 · rail 0
+miniboss         errors=0   geo  24 · fx  4 · atk 0 · rail 0
+cleanup-combat   errors=0   geo  67 · fx  8 · atk 0 · rail 2
+cleanup-arrival  errors=0   geo  39 · fx  4 · atk 0 · rail 0
+levelup          errors=0   geo  21 · fx  1 · atk 0 · rail 0
+stress           errors=0   geo 143 · fx 10 · atk 0 · rail 2
+
+console/page errors: 0     RESULT: CLEAN
+```
+
+The worst case — the stress fixture at 91 living enemies, 7 projectiles and 39 pickups —
+holds 143 geometries and 10 live effects. The new geometry is either shared (the
+boomerang silhouette) or fixed at construction (eight ejecta shards per impact, four jet
+meshes per ally), so none of it can grow with load.
+
+### Observed and left for the playtest
+
+At L1 the Plasma Wake trail is almost entirely hidden behind a horde standing on it.
+That is the occlusion fix doing exactly what it was asked to do, and L1 is the authored
+weakest tier — but it is also the shape of a brightness floor that is set too low. It is
+asked as a direct question in the playtest checklist rather than guessed at here, because
+raising a floor is cheap and does not touch the depth-test fix that earned it.
