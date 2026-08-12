@@ -146,7 +146,19 @@ expired after 1.8s before it could matter.
 | Continuity | Each segment starts exactly where the previous ended |
 
 Because segments chain, coverage depends on lifetime and speed rather than emission frequency,
-which is why emission is now much *less* frequent while the trail is *denser*. A per-level
+which is why emission is now much *less* frequent while the trail is *denser*.
+
+**Presentation (endless-2.8.0).** The 2.7.0 ribbon disabled depth testing on every layer and asked
+for render order 18 — an instruction to draw over the whole scene — so the hero laying the trail,
+the horde walking through it and a boss standing in it were all painted *behind* a floor decal.
+Every layer was additive as well, and stacked ember + body + core cannot resolve to anything but
+white. Depth testing is on, render order sits in the floor band, and additive is reserved for the
+thin filament and the ignition sparks. The plasma body is a deep violet-magenta composited
+normally; the ramps run magenta -> violet -> out for the filament and ember -> near-black for the
+outer shell. Presentation cooling starts at 18% of life rather than 45%, with a brief ignition
+flash keeping the point of emission readable. **No gameplay change**: damage, lifetime, cadence,
+capsule geometry and `hazardPotency`'s 45% ember start are untouched, and the outer shell is still
+drawn at exactly `h.radius` — the half-width `hazardHitsPoint` tests. A per-level
 integrated-damage normalization (`SURVIVOR.plasmaTrail.damageNorm`) re-bases the weapon so L4–L5
 stay within ~3% of the 2.6.1 measured output while L1 gains; see [`WEAPON_BENCHMARK.md`](WEAPON_BENCHMARK.md).
 
@@ -169,6 +181,17 @@ The hit list is cleared at the turn, which is what makes the return a genuine se
 rather than a free double-hit outbound or a wasted trip home. The disc is caught on reaching the
 player, and collisions resolve on that frame before it despawns.
 
+The projectile is drawn as a boomerang: two swept, tapering arms meeting at a thicker elbow, deep
+purple with gold leading edges. Spin and heading are separate transforms on separate nodes — the
+blade spins about its own axis at 11 rad/s while a restrained gold chevron that does not spin
+trails the elbow along the velocity. At Twin Orbit the pair counter-rotates and takes slightly
+different purples so two discs on diverging bearings cannot read as one. The actor is drawn at
+exactly `visualRadius` (the authored 1.25x decorative radius); collision still uses `radius`.
+
+The 2.8.0 disc was a white additive torus, and its rotational symmetry hid a bug: `syncProjectiles`
+assigns `rotation.y` from the velocity for every Group actor, so the boomerang's `rotation.y +=
+spin` was overwritten every frame and the disc never turned at all.
+
 Measured progression: L5/L1 **3.78** with per-level gains 37% / 36% / 35% / 49%, the last being
 the declared L5 breakpoint. Within the documented contract on every axis.
 
@@ -181,6 +204,30 @@ the declared L5 breakpoint. Within the documented contract on every axis.
 
 Arc Conductor is intentionally premium at acquisition rather than a weak weapon that asks for
 several later upgrades before paying off. Its L1 mixed-horde benchmark target is at least 130 DPS.
+
+### Forked Conduction (endless-2.8.0)
+
+Arc's L5 was one more chain jump plus a decorative discharge ring — a fifth ordinary level at
+the point every other weapon transforms. It now **forks**: two initial arcs at two distinct
+targets, each continuing into its own shorter chain, sharing one hit set so no body is claimed
+twice. The second target is the nearest unstruck body at least `0.7 rad` off the first's
+bearing, falling back to nearest when the horde really is all in one direction.
+
+| Property | Value |
+|---|---|
+| Fork level | 5 |
+| Initial arcs | 2 |
+| Jumps removed per arm | 2 (primary + 3 jumps each; 8 bodies per volley, against 6) |
+| Per-hit rebase | `0.72`, **only** when a second arm actually fires |
+| Chain damage | 0.75x primary, unchanged |
+
+The rebase is what holds the transformation inside the documented contract: at parity per hit
+the L4 -> L5 effective gain measured well past the 0.52 breakpoint ceiling, because a fork
+covers far more of a mixed horde than one chain walk. Measured after: gain **0.440**, L5/L1
+**3.306**, L1 mixed DPS unchanged at 135.9. The acceptance bands were not moved.
+
+It is priced only when it fires because a lone boss offers no second target — billing the split
+there made L5 an 8% damage *loss* against exactly the encounter a prototype is taken for.
 
 ### Orbital Lance two-zone strike (endless-2.7.0)
 
@@ -199,8 +246,25 @@ unchanged; what changed is reach.
 The shockwave is `1.6×` the core radius and deals `37.5%` of the central damage. **A target is
 damaged by exactly one zone**, the core taking precedence, so nothing is double-counted — which is
 also why the single-boss progression benchmark is unaffected by the ring and Orbital's L5/L1 ratio
-is unchanged at 3.05. Presentation adds a larger, more authoritative descending beam, an expanding
-shockwave ring drawn at the true outer damage radius, and a short-lived floor scorch.
+is unchanged at 3.05.
+
+#### Impact sequence (endless-2.8.0)
+
+2.7.0's presentation was a 22-unit beam nearly as wide as the whole damage radius with a
+0.98-opacity white core, held for 0.4s — longer than anything on the ground. The weapon named for
+an orbital strike read as a column of light, and the player never saw the area that resolved.
+
+1. Targeting marker at the core radius.
+2. A **thin** beam and a small contact flash, gone in `0.22s`. A tenth of the damage radius
+   wide, not most of it.
+3. Core blast at exactly the core damage radius.
+4. Shockwave expanding to exactly the outer damage radius, carrying a second ring at the core
+   boundary — two damage zones, two drawn boundaries.
+5. Eight ejecta shards riding the ring outward, fixed at construction.
+6. Floor scorch on the core footprint.
+
+Every radius in the sequence is a value the damage loop itself uses. The core flash was
+previously authored at `er × 1.15` and the impact effect at `er × 1.4`.
 
 ## Boss targeting
 
@@ -370,6 +434,14 @@ position at *its own weapon's* preferred range.
 | Rocket Barrage | 6.5 |
 | Bio-Plasma Glob | 5.0 |
 | Drone Formation | 4.5 |
+
+Each deployed ally carries two downward thruster plumes under its Mech — a cone flaring from a
+fixed nozzle with a bright inner core — with a real idle burn while holding station, rising with
+how hard the ally is correcting position, plus a restrained forward lean. Thrust is measured in
+the renderer from the ally's own frame-to-frame movement and damped: the simulation gives an ally
+a position and a facing but no velocity, and how hard a plume burns is a presentation question.
+Four meshes per ally, three allies, torn down with the ally — bounded by construction rather than
+by a cap.
 
 Three properties hold this together. The scan is **bounded** — one pass over the enemy pool, no
 allocation. The chosen point is **leashed** to 13.5 units from the player, so independence never
@@ -743,10 +815,58 @@ approximately, and overkill remains excluded under the existing contract. The ma
 | Element | Behaviour |
 |---|---|
 | Slot counter | `x/5 WEAPONS` on the upgrade modal; ordinary slots only |
-| Keybind | Own affordance pinned to the card's bottom-left, not part of the copy |
-| First upgrade | `L1 → L2` rendered gold — where an authored behavioural tier begins |
+| Regions | Grid rows: head (category + level), title, body, reserved footer |
+| Keybind | Owns the footer row; copy can never reach it |
+| Level badge | One gold badge on every card that has levels |
 | Upgrade Numbers | Setting, **default off**, persisted; gates the raw stat lines |
 | Display names | Centralised on `displayName`; authored Title Case, shouting is CSS |
+
+### Card regions and the level badge (endless-2.8.0 presentation pass)
+
+The keybind was absolutely positioned with `padding-bottom: 2.1rem` on
+`.survivor-hud .sv-choice.sv-card` reserving room for it — three classes.
+`.survivor-hud #sv-levelup .sv-choice { padding: 1.35rem 1.5rem }` carries an ID and outranks
+it, so the reservation was discarded inside the level-up modal, which is the only place these
+cards appear, and long descriptions ran underneath the 1/2/3. The card is now a grid whose
+footer is a real row with its own height: a grid row cannot be overridden out of existence by a
+padding shorthand. Verified by `scripts/cardQa.mjs` across 1920/1366/1280/1024 x 75/100/125/150%.
+
+`levelProgression` is the single level formatter and every card type goes through it:
+
+| Card | Badge |
+|---|---|
+| Weapon or prototype step | `L1 → L2`, `L4 → L5` |
+| Overclock | `L5 → L6` — the displayed level simply continues |
+| New weapon or first passive | `Acquire · L1`, never `L0 → L1` |
+| Passive step | `L3 → L4` |
+| Passive hitting its hard cap | `L4 → L5 · MAX` |
+
+Gold previously appeared only where the level string was literally `L1 → L2`, by a hard-coded
+comparison in the HUD, so it marked "the second level of a weapon" rather than "progression" and
+a player had no way to learn what it meant. Gold now always means the card advances something.
+
+### Weapon naming
+
+A weapon's primary name is **stable across ordinary levels**. `WeaponLevelDef.tier` is present
+only where a level changes what the weapon *is* — one projectile becoming two, a glob learning
+to split, a chain learning to fork. Ordinary levels carry the weapon's own name and let the
+card's generated effect sentence say what changed, so a card cannot promise a mechanic the
+tables do not have.
+
+Rocket Barrage used to become `Salvo`, `Cluster` and `Carpet Fire` while doing nothing but firing
+more rockets slightly faster: three renames for a count going up, two of them promising mechanics
+that do not exist. Rocket Barrage and Microdrone Swarm both come out with **no** tier name, which
+is a finding about the authored tables rather than an omission. See
+[`PRESENTATION_AUDIT_280.md`](PRESENTATION_AUDIT_280.md).
+
+### Ability hotbar
+
+The cooldown countdown is gold, semibold and outlined, with tabular numerals so it does not
+jitter as digit widths change. The cooldown -> ready transition flashes the class-coloured
+wireframe neon green for **200ms**, edge-triggered on `false -> true` only: never a repeating
+blink while an ability sits ready, and never on HUD construction (a slot with no recorded
+previous state establishes a baseline instead of firing). The bound is a timeout rather than a
+frame count, so a frame spike cannot swallow it.
 
 The slot counter excludes prototypes (Arc Conductor, Orbital Lance) because they do not consume
 an ordinary slot. Counting them would tell the player they are fuller than they are, at exactly
@@ -807,6 +927,10 @@ the scale (the crew-select lower HUD nudge) are expressed in px deliberately.
 | `survivor-cleanup-combat` | Cleanup Crew fighting under dense horde load |
 | `survivor-cleanup-departure` | Cleanup Crew transforming back and flying out |
 | `survivor-telemetry` | Multi-source, multi-form build for the Run Report cross-tab |
+
+Browser QA covers two harnesses. `scripts/browserQa.mjs` sweeps the viewport x UI-scale matrix
+for console errors and clipping; `scripts/cardQa.mjs` opens the level-up modal and measures the
+upgrade cards themselves, which the general sweep never reaches.
 
 Example:
 
@@ -900,6 +1024,30 @@ Visual contracts, all covered by tests:
 | spore-bloom | circles | detonation and lingering hazard share one radius |
 | gravity-collapse | marker circle → annulus | pull core and shockwave share a centre |
 | cataclysm | circles | each stays visible until its own detonation |
+
+### Ground-effect geometry (endless-2.8.0)
+
+`survivorEffectGeometry.ts` states how a radius-bearing effect is drawn, so a telegraph, a blast
+and the region that damages cannot drift apart:
+
+| Motion | Kinds | Drawn radius |
+|---|---|---|
+| `static` | `telegraph`, `orbital`, `orbital-strike`, `arc`, `titan-deploy` | `1.0` for the whole window |
+| `expanding` | `pulse`, `impact`, `repulsor`, `orbital-shock` | opens small, ends at exactly `1.0` |
+| `settling` | `orbital-scorch` | `1.0`, relaxing inward |
+| `decorative` | everything else | legacy ramp |
+
+The renderer previously applied `0.5 + t × 1.4` to every ring it did not special-case, so a
+`pulse`, an `impact` and a radius-form `telegraph` opened at **half** the authored radius and
+finished at **1.9×** it. Floor hazards had the opposite error, drawn at `0.85×` at spawn while
+`updateHazards` damages inside `radius + playerRadius`. An arming hazard now also draws dimmer,
+because it cannot damage while `armTimer > 0`. See
+[`PRESENTATION_AUDIT_280.md`](PRESENTATION_AUDIT_280.md).
+
+The **Containment Warden's Ground Slam** commits its impact point at windup and detonates there.
+The Warden advances at quarter speed through its 0.95s windup and the impact used to resolve
+against its current position — measured 0.700 units of drift on a 4.2 radius, enough that a
+player standing clear of the marked circle still took the full 46.8.
 
 Ownership: cancellation, phase change and boss death clear only that boss's entities. Simultaneous
 bosses never clean each other's attacks, and a dead boss leaves no invisible orphan damage — its
