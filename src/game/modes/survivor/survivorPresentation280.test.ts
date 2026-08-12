@@ -49,6 +49,13 @@ import {
   forceBossIntoPattern,
   stepSurvivor,
 } from './survivorSim';
+import {
+  BREAKPOINT_LEVEL,
+  PROGRESSION_BOUNDS,
+  levelGains,
+  levelProgressionRatio,
+  runWeaponBenchmark,
+} from './survivorWeaponBenchmark';
 
 const DT = SURVIVOR.fixedDt;
 const PR = SURVIVOR.playerRadius;
@@ -810,6 +817,14 @@ describe('§8 upgrade naming identifies the weapon being upgraded', () => {
   /** A level is transformative when it changes what the weapon *is*, not how much. */
   function isTransformative(id: WeaponId, level: number): boolean {
     if (level <= 1) return false;
+    /*
+     * Arc Conductor's transformation lives in `SURVIVOR.arc.forkLevel` rather than in
+     * the level table, because forking is a firing behaviour and not a `count`. It is
+     * named here so the rule stays "a mechanic changed", not "a number in this table
+     * changed" — and so a future weapon cannot claim a tier name by pointing at config
+     * that does not exist.
+     */
+    if (id === 'arc') return level === SURVIVOR.arc.forkLevel;
     const a = weaponStatsAtLevel(id, level - 1);
     const b = weaponStatsAtLevel(id, level);
     // One projectile becoming two is a different weapon; four becoming six is not.
@@ -898,9 +913,167 @@ describe('§8 upgrade naming identifies the weapon being upgraded', () => {
       ['boomerang', 5, 'Twin Orbit'],
       ['pulsar', 5, 'Echo Pulsar'],
       ['plasma-wake', 5, 'Twin Wake'],
+      ['arc', 5, 'Forked Conduction'],
     ];
     for (const [id, level, name] of earned) {
       expect(WEAPONS[id].levels[level - 1]!.tier, `${id} L${level}`).toBe(name);
     }
+  });
+});
+
+/* ------------------------------------------- §9 Arc Conductor forked conduction */
+
+describe('§9 Arc Conductor L5 forks instead of adding a fifth jump', () => {
+  /** An arena holding `n` enemies on distinct bearings around the player. */
+  function ring(seed: number, n: number, radius: number): SurvivorState {
+    const state = quietArena(seed, 'survivor-arc');
+    state.weapons = [{ weaponId: 'arc', level: 5, cooldown: 0, prototype: true, focusDebt: 0 }];
+    state.player.invuln = 1e9;
+    state.enemyCap = 0;
+    state.spawnAcc = -1e9;
+    for (const e of state.enemies) e.alive = false;
+    for (let i = 0; i < n; i += 1) {
+      const e = emptyEnemy();
+      e.id = nextEntityId(state);
+      e.defId = 'basic';
+      e.role = 'fodder';
+      e.alive = true;
+      e.radius = 0.5;
+      e.maxHealth = 1e7;
+      e.health = 1e7;
+      e.speedMul = 0;
+      e.contactDamage = 0;
+      const a = (i / n) * Math.PI * 2;
+      e.x = state.player.x + Math.sin(a) * radius;
+      e.z = state.player.z + Math.cos(a) * radius;
+      state.enemies.push(e);
+    }
+    return state;
+  }
+
+  /** Fire one volley and return the arcs it drew, plus the bodies it damaged. */
+  function volley(state: SurvivorState) {
+    const before = new Map(state.enemies.map((e) => [e.id, e.health]));
+    for (let i = 0; i < 600; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      const arcs = state.effects.filter((e) => e.kind === 'arc');
+      if (arcs.length > 0) {
+        const hit = state.enemies.filter((e) => (before.get(e.id) ?? 0) > e.health);
+        return {
+          arcs: arcs.map((a) => ({
+            x: a.x,
+            z: a.z,
+            len: a.length ?? 0,
+            facingX: a.facingX ?? 0,
+            facingZ: a.facingZ ?? 1,
+          })),
+          hit,
+        };
+      }
+    }
+    return { arcs: [], hit: [] };
+  }
+
+  it('throws two initial arcs from the player at two distinct targets', () => {
+    const state = ring(9990, 10, 5);
+    const p = { x: state.player.x, z: state.player.z };
+    const { arcs, hit } = volley(state);
+    expect(arcs.length, 'no arc was drawn').toBeGreaterThan(0);
+    // An initial arc originates at the player; a chain jump originates at a body.
+    const initial = arcs.filter((a) => Math.hypot(a.x - p.x, a.z - p.z) < 1e-6);
+    expect(initial.length, 'L5 did not fork into two initial arcs').toBe(2);
+    // Two primaries plus up to three jumps each, and never the same body twice.
+    expect(hit.length).toBeGreaterThanOrEqual(6);
+    expect(hit.length).toBeLessThanOrEqual(8);
+    expect(new Set(hit.map((e) => e.id)).size).toBe(hit.length);
+  });
+
+  it('covers more of the horde than the single chain it replaced', () => {
+    // The transformation is coverage, not raw output: the same arena, one level apart.
+    const five = ring(9989, 10, 5);
+    const four = ring(9989, 10, 5);
+    four.weapons = [{ weaponId: 'arc', level: 4, cooldown: 0, prototype: true, focusDebt: 0 }];
+    expect(volley(five).hit.length).toBeGreaterThan(volley(four).hit.length);
+  });
+
+  it('never lets two branches claim the same body', () => {
+    for (let seed = 0; seed < 6; seed += 1) {
+      const state = ring(9991 + seed, 6 + seed, 4.5);
+      const { hit } = volley(state);
+      expect(new Set(hit.map((e) => e.id)).size, `seed ${seed} double-hit a body`).toBe(hit.length);
+    }
+  });
+
+  it('separates the two arms so the split is visible', () => {
+    const state = ring(9997, 12, 5);
+    const p = { x: state.player.x, z: state.player.z };
+    const { arcs } = volley(state);
+    // Compare the two arcs that leave the player: those are the arms.
+    const initial = arcs.filter((a) => Math.hypot(a.x - p.x, a.z - p.z) < 1e-6);
+    expect(initial.length).toBe(2);
+    const bearings = initial.map((a) => Math.atan2(a.facingX, a.facingZ));
+    let delta = Math.abs(bearings[0]! - bearings[1]!);
+    if (delta > Math.PI) delta = Math.PI * 2 - delta;
+    expect(delta, 'the two arms lie on top of each other').toBeGreaterThanOrEqual(
+      SURVIVOR.arc.minBranchSeparation - 1e-6,
+    );
+  });
+
+  it('does not bill the split against a lone boss, where no second arm fires', () => {
+    // Pricing a split that cannot happen would make L5 a straight damage loss against
+    // exactly the encounter a prototype is taken for.
+    const l4 = runWeaponBenchmark('arc', 4, 'single-boss', 24).damageDealt;
+    const l5 = runWeaponBenchmark('arc', 5, 'single-boss', 24).damageDealt;
+    expect(l5).toBeGreaterThan(l4);
+  });
+
+  it('stays inside the documented progression contract without widening it', () => {
+    const gains = levelGains('arc');
+    const ratio = levelProgressionRatio('arc');
+    const cap =
+      BREAKPOINT_LEVEL.arc === 5
+        ? PROGRESSION_BOUNDS.breakpointGainMax
+        : PROGRESSION_BOUNDS.typicalGainMax;
+    // The bands are the ones every other weapon is held to. They were not moved.
+    expect(cap).toBe(0.52);
+    expect(PROGRESSION_BOUNDS.ratioMin).toBe(3.0);
+    expect(PROGRESSION_BOUNDS.ratioMax).toBe(4.2);
+    expect(gains[3], 'L4 -> L5 effective gain').toBeLessThanOrEqual(cap);
+    expect(gains[3], 'L4 -> L5 effective gain').toBeGreaterThanOrEqual(
+      PROGRESSION_BOUNDS.typicalGainMin,
+    );
+    expect(ratio).toBeGreaterThanOrEqual(PROGRESSION_BOUNDS.ratioMin);
+    expect(ratio).toBeLessThanOrEqual(PROGRESSION_BOUNDS.ratioMax);
+    // The rebase is the thing holding it there; parity per hit measured +0.76.
+    expect(SURVIVOR.arc.damageMul).toBeLessThan(1);
+  }, 30_000);
+
+  it('keeps the chaining identity below the fork level', () => {
+    const state = quietArena(9998, 'survivor-arc');
+    state.weapons = [{ weaponId: 'arc', level: 4, cooldown: 0, prototype: true, focusDebt: 0 }];
+    state.player.invuln = 1e9;
+    state.enemyCap = 0;
+    state.spawnAcc = -1e9;
+    for (const e of state.enemies) e.alive = false;
+    for (let i = 0; i < 10; i += 1) {
+      const e = emptyEnemy();
+      e.id = nextEntityId(state);
+      e.defId = 'basic';
+      e.role = 'fodder';
+      e.alive = true;
+      e.radius = 0.5;
+      e.maxHealth = 1e7;
+      e.health = 1e7;
+      e.speedMul = 0;
+      e.contactDamage = 0;
+      const a = (i / 10) * Math.PI * 2;
+      e.x = state.player.x + Math.sin(a) * 5;
+      e.z = state.player.z + Math.cos(a) * 5;
+      state.enemies.push(e);
+    }
+    const p = { x: state.player.x, z: state.player.z };
+    const { arcs } = volley(state);
+    const initial = arcs.filter((a) => Math.hypot(a.x - p.x, a.z - p.z) < 1e-6);
+    expect(initial.length, 'L4 forked').toBe(1);
   });
 });

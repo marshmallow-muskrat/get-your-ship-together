@@ -515,6 +515,57 @@ export const SURVIVOR = {
    * precedence, so a single enemy can never be double-counted and the single-boss
    * benchmark scenario is unaffected by the ring.
    */
+  /**
+   * Arc Conductor forked conduction (endless-2.8.0).
+   *
+   * Arc's L1-L4 growth is chain count and range; its L5 was "one more chain, plus a
+   * cosmetic discharge ring", which reads as a fifth ordinary level rather than as the
+   * transformation every other weapon gets at L5. Twin Orbit visibly becomes two discs;
+   * Echo Pulsar visibly becomes two rings; Arc Storm looked exactly like Arc Conductor
+   * IV with a slightly longer tail.
+   *
+   * At `forkLevel` the weapon fires `branches` initial arcs at two distinct targets and
+   * each continues into its own, shorter chain. Coverage becomes two bearings instead of
+   * one walk, which is the identity change; total output does not grow, because the
+   * documented progression contract is not a range to be widened. `damageMul` is the
+   * per-hit rebase that keeps the L4 -> L5 effective gain inside it.
+   */
+  arc: {
+    forkLevel: 5,
+    /** Initial arcs at the fork level. */
+    branches: 2,
+    /**
+     * Jumps removed from each branch's chain, so a fork is not simply twice the reach.
+     *
+     * Two. Each arm keeps a primary plus three jumps — four bodies, eight across the
+     * volley, against the six one L5 chain used to walk. Removing only one jump put ten
+     * bodies in a volley and forced the per-hit rebase down to 0.60 to stay in contract,
+     * which turns a transformation into a lot of small numbers. Fewer, harder hits per
+     * arm reads better and keeps more of the authored damage intact.
+     */
+    branchChainReduction: 2,
+    /**
+     * Per-hit rebase applied only when a second arm actually fires.
+     *
+     * Measured, not guessed. The fork covers far more of a mixed horde than one chain
+     * walk does, so at parity per hit the L4 -> L5 effective gain measured well past the
+     * 0.52 breakpoint ceiling. Swept against the real benchmark across both branch
+     * lengths: 0.72 lands the gain at **0.440** and L5/L1 at **3.29**, both comfortably
+     * inside the contract and close to the **0.493** the old single-chain Arc Storm
+     * produced. The transformation is paid for in output *shape* — two bearings covered
+     * instead of one walk — not in output size. The bands were not moved.
+     */
+    damageMul: 0.72,
+    /**
+     * Minimum bearing separation between the two initial targets, in radians.
+     * A fork whose arms overlap is not visibly a fork.
+     */
+    minBranchSeparation: 0.7,
+    /** Chain damage as a fraction of the primary hit. Unchanged from 2.7.0. */
+    chainDamageMul: 0.75,
+    bossPrimaryMul: 1.15,
+    bossChainMul: 0.85,
+  },
   orbital: {
     /** Shockwave radius as a multiple of the authored core radius. */
     shockwaveRadiusMul: 1.6,
@@ -1013,7 +1064,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       { level: 2, damage: 57, cadence: 0.974, count: 1, radius: 3.5, pierce: 2 },
       { level: 3, damage: 64, cadence: 1.051, count: 1, radius: 3.8, pierce: 3 },
       { level: 4, damage: 72, cadence: 0.931, count: 1, radius: 4.1, pierce: 3 },
-      { level: 5, damage: 80, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
+      { tier: 'Forked Conduction', level: 5, damage: 80, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
     ],
   },
   orbital: {

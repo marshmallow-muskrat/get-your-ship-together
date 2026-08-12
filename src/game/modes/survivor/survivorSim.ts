@@ -1963,34 +1963,41 @@ export function updatePlasmaTrails(state: SurvivorState, dt: number): void {
   }
 }
 
-function fireArcConductor(
+/**
+ * Walk one conduction branch: an initial arc from `originX/originZ` to `target`, then
+ * `chains` further jumps, each to the nearest body not already struck this volley.
+ *
+ * `hitIds` is shared across every branch of a volley, so two forks can never both
+ * select the same body — the fork covers two bearings rather than hitting one target
+ * twice with a longer animation.
+ */
+function conductBranch(
   state: SurvivorState,
-  slot: SurvivorWeaponSlot,
-  def: ReturnType<typeof wdef>,
-  area: number,
-  mech: boolean,
+  target: { x: number; z: number; enemy?: SurvivorEnemy; boss?: SurvivorBoss },
+  originX: number,
+  originZ: number,
+  chains: number,
+  range: number,
+  dmg: number,
+  hitIds: Set<number>,
 ): void {
-  const p = state.player;
-  const aim = selectWeaponTarget(state, slot, p.x, p.z, 16);
-  const pos = targetPosition(aim);
-  if (!pos) {
-    slot.cooldown = 0.15;
-    return;
-  }
-  const chains = 1 + (def.pierce ?? 2);
-  const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
-  const hitIds = new Set<number>();
-  let cx = pos.x;
-  let cz = pos.z;
-  let prevX = p.x;
-  let prevZ = p.z;
-  // Primary
-  if (aim?.kind === 'boss') {
-    damageBoss(state, dmg * 1.15, { kind: 'ability', pop: 0.8, boss: aim.boss, src: weaponSrc('arc') });
-    hitIds.add(aim.boss.id);
-  } else if (aim?.kind === 'enemy') {
-    damageEnemy(state, aim.enemy, dmg, { kind: 'ability', pop: 0.7, src: weaponSrc('arc') });
-    hitIds.add(aim.enemy.id);
+  const cfg = SURVIVOR.arc;
+  let prevX = originX;
+  let prevZ = originZ;
+  let cx = target.x;
+  let cz = target.z;
+
+  if (target.boss) {
+    damageBoss(state, dmg * cfg.bossPrimaryMul, {
+      kind: 'ability',
+      pop: 0.8,
+      boss: target.boss,
+      src: weaponSrc('arc'),
+    });
+    hitIds.add(target.boss.id);
+  } else if (target.enemy) {
+    damageEnemy(state, target.enemy, dmg, { kind: 'ability', pop: 0.7, src: weaponSrc('arc') });
+    hitIds.add(target.enemy.id);
   }
   pushEffect(state, 'arc', prevX, prevZ, 0.34, WEAPONS.arc.color, 1, {
     facingX: cx - prevX,
@@ -2000,7 +2007,7 @@ function fireArcConductor(
   });
   prevX = cx;
   prevZ = cz;
-  const range = (def.radius ?? 3.5) * area;
+
   for (let i = 0; i < chains; i += 1) {
     let bestE: SurvivorEnemy | null = null;
     let bestB: SurvivorBoss | null = null;
@@ -2033,10 +2040,19 @@ function fireArcConductor(
       width: 0.28,
     });
     if (bestE) {
-      damageEnemy(state, bestE, dmg * 0.75, { kind: 'ability', pop: 0.55, src: weaponSrc('arc') });
+      damageEnemy(state, bestE, dmg * cfg.chainDamageMul, {
+        kind: 'ability',
+        pop: 0.55,
+        src: weaponSrc('arc'),
+      });
       hitIds.add(bestE.id);
     } else if (bestB) {
-      damageBoss(state, dmg * 0.85, { kind: 'ability', pop: 0.7, boss: bestB, src: weaponSrc('arc') });
+      damageBoss(state, dmg * cfg.bossChainMul, {
+        kind: 'ability',
+        pop: 0.7,
+        boss: bestB,
+        src: weaponSrc('arc'),
+      });
       hitIds.add(bestB.id);
     }
     prevX = nx;
@@ -2044,9 +2060,138 @@ function fireArcConductor(
     cx = nx;
     cz = nz;
   }
-  // L4+ small discharge
+}
+
+/**
+ * The second branch's seed target.
+ *
+ * Nearest unstruck body on a *different bearing* from the first, so the split is
+ * visible rather than two arms lying on top of each other. Falls back to the nearest
+ * unstruck body when nothing clears the separation, which is the honest behaviour when
+ * the horde really is all in one direction — the fork then reads as a wider single
+ * lane, which is what it is.
+ */
+function secondBranchTarget(
+  state: SurvivorState,
+  originX: number,
+  originZ: number,
+  firstBearing: number,
+  range: number,
+  hitIds: Set<number>,
+): { x: number; z: number; enemy?: SurvivorEnemy; boss?: SurvivorBoss } | null {
+  type BranchTarget = { x: number; z: number; enemy?: SurvivorEnemy; boss?: SurvivorBoss };
+  const minSep = SURVIVOR.arc.minBranchSeparation;
+  let best: BranchTarget | null = null;
+  let bestD = range * range;
+  let fallback: BranchTarget | null = null;
+  let fallbackD = range * range;
+  const consider = (
+    x: number,
+    z: number,
+    ref: { enemy?: SurvivorEnemy; boss?: SurvivorBoss },
+  ): void => {
+    const d = (x - originX) ** 2 + (z - originZ) ** 2;
+    if (d >= fallbackD && d >= bestD) return;
+    const bearing = Math.atan2(x - originX, z - originZ);
+    let delta = Math.abs(bearing - firstBearing);
+    if (delta > Math.PI) delta = Math.PI * 2 - delta;
+    if (delta >= minSep && d < bestD) {
+      bestD = d;
+      best = { x, z, ...ref };
+    }
+    if (d < fallbackD) {
+      fallbackD = d;
+      fallback = { x, z, ...ref };
+    }
+  };
+  for (const e of state.enemies) {
+    if (!e.alive || hitIds.has(e.id)) continue;
+    consider(e.x, e.z, { enemy: e });
+  }
+  for (const b of state.bosses) {
+    if (!b.active || b.state === 'dead' || hitIds.has(b.id)) continue;
+    consider(b.x, b.z, { boss: b });
+  }
+  return best ?? fallback;
+}
+
+/**
+ * Arc Conductor.
+ *
+ * Below `forkLevel` this is one initial arc into a chain, unchanged. At the fork level
+ * the weapon throws `branches` initial arcs at two distinct, separated targets and each
+ * continues into its own shorter chain, sharing one hit set so no body is claimed twice.
+ *
+ * Total output is deliberately held inside the documented progression contract rather
+ * than grown to fit the new mechanic: `SURVIVOR.arc.damageMul` rebases per-hit damage at
+ * the fork level. The transformation is in the *shape* of the output — two bearings
+ * covered instead of one walk — because the acceptance bands are not a range to widen.
+ */
+function fireArcConductor(
+  state: SurvivorState,
+  slot: SurvivorWeaponSlot,
+  def: ReturnType<typeof wdef>,
+  area: number,
+  mech: boolean,
+): void {
+  const p = state.player;
+  const cfg = SURVIVOR.arc;
+  const aim = selectWeaponTarget(state, slot, p.x, p.z, 16);
+  const pos = targetPosition(aim);
+  if (!pos || !aim) {
+    slot.cooldown = 0.15;
+    return;
+  }
+  const forked = slot.level >= cfg.forkLevel;
+  const range = (def.radius ?? 3.5) * area;
+  const hitIds = new Set<number>();
+
+  const primary =
+    aim.kind === 'boss'
+      ? { x: pos.x, z: pos.z, boss: aim.boss }
+      : { x: pos.x, z: pos.z, enemy: aim.enemy };
+  /*
+   * Resolve the branches before pricing them.
+   *
+   * The rebase pays for coverage the fork actually delivers, so it only applies when a
+   * second arm really fires. A lone boss offers no second target: billing the split
+   * there would make L5 a straight damage loss against exactly the encounter the player
+   * took a prototype for, which is a worse weapon dressed as a transformation.
+   */
+  type BranchTarget = { x: number; z: number; enemy?: SurvivorEnemy; boss?: SurvivorBoss };
+  const targets: BranchTarget[] = [primary];
+  if (forked) {
+    const firstBearing = Math.atan2(primary.x - p.x, primary.z - p.z);
+    const claimed = new Set<number>();
+    if (primary.boss) claimed.add(primary.boss.id);
+    if (primary.enemy) claimed.add(primary.enemy.id);
+    for (let b = 1; b < cfg.branches; b += 1) {
+      const next = secondBranchTarget(state, p.x, p.z, firstBearing, 16, claimed);
+      if (!next) break;
+      if (next.boss) claimed.add(next.boss.id);
+      if (next.enemy) claimed.add(next.enemy.id);
+      targets.push(next);
+    }
+  }
+  const split = targets.length > 1;
+  const chains = 1 + (def.pierce ?? 2) - (split ? cfg.branchChainReduction : 0);
+  const dmg =
+    def.damage *
+    (mech ? SURVIVOR.mech.weaponDamageMul : 1) *
+    p.damageMul *
+    (split ? cfg.damageMul : 1);
+
+  let lastX = primary.x;
+  let lastZ = primary.z;
+  for (const t of targets) {
+    conductBranch(state, t, p.x, p.z, chains, range, dmg, hitIds);
+    lastX = t.x;
+    lastZ = t.z;
+  }
+
+  // L4+ small discharge at the end of the last branch walked.
   if ((def.splash ?? 0) > 0 || slot.level >= 4) {
-    pushEffect(state, 'pulse', cx, cz, 0.3, WEAPONS.arc.color, 1.6, { radius: 1.6 });
+    pushEffect(state, 'pulse', lastX, lastZ, 0.3, WEAPONS.arc.color, 1.6, { radius: 1.6 });
   }
 }
 
