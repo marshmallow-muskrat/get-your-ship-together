@@ -82,6 +82,10 @@ site**, so the suite runs at the default budget everywhere else and a genuine
 slowdown anywhere else still shows up:
 
 - `weapon combat benchmark > per-level effective gains`
+- `weapon combat benchmark > intended-scenario L5/L1` (added in endless-2.8.0's
+  presentation pass, after measuring it at 2692ms → 3095ms against `ddcc866`;
+  the 15% is Arc's Forked Conduction doing more work at L5, and the three
+  simulation tests beside it moved by 1–4%, i.e. noise)
 - `pressure director > never stacks surges`
 - `pressure director > uses a 60-75 second cadence` (added in endless-2.8.0)
 - `early specialist gates > nothing enters play before its own gate` (endless-2.8.0)

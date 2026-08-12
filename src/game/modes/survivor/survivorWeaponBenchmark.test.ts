@@ -101,6 +101,26 @@ describe('weapon combat benchmark', () => {
     }
   });
 
+  /*
+   * Explicit per-test budget, added in the endless-2.8.0 presentation pass.
+   *
+   * This drives the real simulation for twelve weapons at L1 and L5 in their intended
+   * scenarios, and its sibling `per-level effective gains` has carried a budget for the
+   * same reason since 2.7.0. It was measured before being granted one, per AGENTS.md:
+   * identical command, idle machine, `ddcc866` versus this branch.
+   *
+   *   intended-scenario L5/L1            2692ms -> 3095ms   (+403ms, +15%)
+   *   nothing enters play before gate    3975ms -> 4024ms   (+49ms, noise)
+   *   gates are floors, not bans         2585ms -> 2686ms   (+101ms, noise)
+   *   ordinary enemies stay melee-only   3781ms -> 3825ms   (+44ms, noise)
+   *
+   * The three simulation tests are unchanged, so nothing in the fixed step got slower.
+   * The 15% here is Arc Conductor's Forked Conduction doing genuinely more work at L5 —
+   * two chains where there was one — which is the mechanic, not a regression, and it is
+   * confined to one weapon's top level. 3095ms against a 5000ms default is not a
+   * failure; the three timeouts that prompted this were the suite running beside an
+   * eleven-page Chromium QA on a four-core box, at load average 7.
+   */
   it('intended-scenario L5/L1 is 3.0–4.2 for every weapon', () => {
     for (const id of allBenchmarkedWeapons()) {
       const r = levelProgressionRatio(id);
@@ -109,7 +129,7 @@ describe('weapon combat benchmark', () => {
       expect(r, `${id} L5/L1`).toBeGreaterThanOrEqual(PROGRESSION_BOUNDS.ratioMin);
       expect(r, `${id} L5/L1`).toBeLessThanOrEqual(PROGRESSION_BOUNDS.ratioMax);
     }
-  });
+  }, 60_000);
 
   it('Arc Conductor enters at five minutes as a premium mixed-horde reward', () => {
     const arc = runWeaponBenchmark('arc', 1, 'mixed-elite', 24);
