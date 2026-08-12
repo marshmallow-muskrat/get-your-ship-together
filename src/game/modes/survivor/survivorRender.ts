@@ -683,14 +683,35 @@ export class SurvivorRenderer {
     return { quad: this.plasmaQuad, cap: this.plasmaCap };
   }
 
+  /**
+   * One layer of the trail ribbon.
+   *
+   * Two things changed in the endless-2.8.0 readability pass, and both are the reason
+   * the trail used to sit *on top of* the game:
+   *
+   * - `depthTest` is on. Every layer previously disabled it and asked for render order
+   *   18, which is an instruction to draw over the entire scene — so the ribbon painted
+   *   straight through the hero, the horde and the bosses standing in it. The strips sit
+   *   a few centimetres above the floor, so with depth testing restored an actor
+   *   standing on the trail correctly occludes it.
+   * - Additive blending is now opt-in per layer rather than universal. Additive is what
+   *   made the trail bleach to white: stacked ember + body + core all summing into the
+   *   framebuffer cannot resolve to anything else. Only the thin core and the ignition
+   *   sparks are additive now; the plasma body composites normally.
+   *
+   * Render order is explicit per layer so the stack is deterministic. Transparent
+   * objects are otherwise depth-sorted against each other, and these are millimetres
+   * apart.
+   */
   private plasmaLayer(
     geo: THREE.BufferGeometry,
     color: string,
     opacity: number,
     name: string,
     y: number,
+    opts: { additive?: boolean; order?: number } = {},
   ): THREE.Mesh {
-    const mesh = new THREE.Mesh(geo, this.effectMat(color, opacity, true));
+    const mesh = new THREE.Mesh(geo, this.effectMat(color, opacity, opts.additive ?? false));
     mesh.userData.sharedGeometry = true;
     mesh.userData.ownsGeometry = false;
     mesh.userData.ownsMaterial = true;
@@ -698,8 +719,8 @@ export class SurvivorRenderer {
     mesh.name = name;
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = y;
-    mesh.renderOrder = 18;
-    (mesh.material as THREE.MeshBasicMaterial).depthTest = false;
+    mesh.renderOrder = opts.order ?? 8;
+    (mesh.material as THREE.MeshBasicMaterial).depthTest = true;
     return mesh;
   }
 
@@ -714,18 +735,27 @@ export class SurvivorRenderer {
   private createPlasmaSegment(): THREE.Object3D {
     const { quad, cap } = this.plasmaGeometry();
     const g = new THREE.Group();
-    g.add(this.plasmaLayer(quad, '#ff7a24', 0.3, 'pw-ember', 0.05));
-    g.add(this.plasmaLayer(cap, '#ff7a24', 0.3, 'pw-ember-cap0', 0.051));
-    g.add(this.plasmaLayer(cap, '#ff7a24', 0.3, 'pw-ember-cap1', 0.052));
-    g.add(this.plasmaLayer(quad, '#ff4f24', 0.52, 'pw-fire', 0.06));
-    g.add(this.plasmaLayer(cap, '#ff4f24', 0.52, 'pw-fire-cap0', 0.061));
-    g.add(this.plasmaLayer(cap, '#ff4f24', 0.52, 'pw-fire-cap1', 0.062));
-    g.add(this.plasmaLayer(quad, '#ffd45a', 0.8, 'pw-core', 0.07));
-    // Flame tongues licking off the strip; animated in layout.
-    for (let i = 0; i < 4; i += 1) {
-      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#ffb83d' : '#fff0b0', 0.55, 'pw-tongue', 0.075);
+    // Cooling ember edge: the outermost, dimmest shell. Orange survives here because it
+    // is the coolest part of the trail, which is the direction the whole ramp now runs.
+    g.add(this.plasmaLayer(quad, '#b5431c', 0.22, 'pw-ember', 0.05, { order: 7 }));
+    g.add(this.plasmaLayer(cap, '#b5431c', 0.22, 'pw-ember-cap0', 0.05, { order: 7 }));
+    g.add(this.plasmaLayer(cap, '#b5431c', 0.22, 'pw-ember-cap1', 0.05, { order: 7 }));
+    // Plasma body: deep violet-magenta, composited normally so it stays a *substance*
+    // on the floor rather than a light source shining through everything above it.
+    g.add(this.plasmaLayer(quad, '#7a1b6b', 0.44, 'pw-fire', 0.055, { order: 8 }));
+    g.add(this.plasmaLayer(cap, '#7a1b6b', 0.44, 'pw-fire-cap0', 0.055, { order: 8 }));
+    g.add(this.plasmaLayer(cap, '#7a1b6b', 0.44, 'pw-fire-cap1', 0.055, { order: 8 }));
+    // The one additive element, and it is thin: a narrow hot filament down the middle.
+    g.add(this.plasmaLayer(quad, '#c94ad6', 0.34, 'pw-core', 0.06, { additive: true, order: 9 }));
+    // Ignition sparks at the burning head. Two, not four — the point is to mark where
+    // the trail was just laid, not to decorate its whole length.
+    for (let i = 0; i < 2; i += 1) {
+      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#ff9a4a' : '#ffcf8a', 0.4, 'pw-tongue', 0.062, {
+        additive: true,
+        order: 10,
+      });
       tongue.userData.tonguePhase = i * 1.37;
-      tongue.userData.tongueAt = 0.16 + i * 0.23;
+      tongue.userData.tongueAt = 0.24 + i * 0.34;
       g.add(tongue);
     }
     return g;
@@ -739,9 +769,13 @@ export class SurvivorRenderer {
    * longer, and the ember shell ends at a dull ash that still reads on a dark floor.
    */
   private static readonly PLASMA_HEAT: Record<string, readonly string[]> = {
-    'pw-core': ['#fffdf0', '#ffe89a', '#ffb347', '#e0631a', '#7a2408'],
-    'pw-fire': ['#ffc25a', '#ff8a2b', '#ff4f24', '#c2321a', '#5e1c0c'],
-    'pw-ember': ['#ff8a3d', '#ff5a24', '#d33a17', '#8a2a12', '#3d1608'],
+    // Hot filament: bright magenta at ignition, into violet, then out. It never reaches
+    // white — white is what the 2.7.0 ribbon spent its whole life being.
+    'pw-core': ['#ffb2f2', '#e05ad8', '#a32fa8', '#5c1a63', '#240c2c'],
+    // Plasma body: violet-magenta cooling through a dull ember to near-black.
+    'pw-fire': ['#a83a9e', '#7a1b6b', '#5a1846', '#3a1226', '#170812'],
+    // Outer shell: the cooling edge. Ember orange only at the very start of its life.
+    'pw-ember': ['#d4622a', '#9c3a20', '#6a2418', '#3c1410', '#170807'],
   };
 
   /** Sample a ramp at `k` in [0,1] with linear interpolation between stops. */
@@ -795,20 +829,30 @@ export class SurvivorRenderer {
     obj.rotation.y = Math.atan2(dx, dz);
 
     const age = 1 - t;
-    // Ember phase: the tail narrows and cools rather than simply fading out.
-    const cool = age < 0.45 ? 1 : 1 - ((age - 0.45) / 0.55) * 0.45;
-    const flicker = 0.9 + Math.sin(performance.now() * 0.009 + h.id * 0.7) * 0.1;
     /*
-     * Heat ramp (endless-2.8.0, presentation only).
+     * Cooling (endless-2.8.0 readability pass).
      *
-     * The trail previously held one authored colour per layer for its whole life and
-     * expressed age purely as opacity, so a two-second-old segment was the same fire as a
-     * fresh one, just dimmer — the ribbon read as a flat decal that was being erased
-     * rather than as something burning down. Each layer now walks its own cooling ramp,
-     * so the head is white-hot, the body is fire, and the tail genuinely goes to ash.
+     * 2.7.0 held full strength for 45% of the life and then eased down. That meant
+     * roughly half of a four-second trail was drawn at maximum brightness, and because
+     * every layer was additive and depth-test-disabled, "maximum brightness" meant a
+     * white ribbon painted over the hero and the horde standing in it. The trail is
+     * dangerous residual plasma; it should look like something that is going out.
      *
-     * This changes no geometry, no lifetime and no damage. The strip is still scaled to
-     * `h.radius` and `len`, which are the simulation's authoritative capsule.
+     * The damage curve is untouched: `hazardPotency` still holds full strength for
+     * `emberStart` (45%) and decays to `emberFloor`. This is presentation cooling only,
+     * and it runs faster than the damage falloff on purpose — a lingering segment should
+     * look spent slightly before it *is* spent, never the other way round.
+     */
+    const cool = age < 0.18 ? 1 : 1 - ((age - 0.18) / 0.82) * 0.55;
+    // Ignition: a brief flash on the freshest sliver of a segment's life, so the player
+    // still sees exactly where the trail is being laid down.
+    const ignite = age < 0.12 ? 1 + (1 - age / 0.12) * 0.9 : 1;
+    const flicker = 0.88 + Math.sin(performance.now() * 0.009 + h.id * 0.7) * 0.12;
+    /*
+     * Each layer walks its own cooling ramp, so the filament goes magenta -> violet ->
+     * out while the shell drops through ember to near-black. No geometry, lifetime or
+     * damage changes here: the strip is still scaled to `h.radius` and `len`, the
+     * simulation's authoritative capsule.
      */
     this.applyPlasmaHeat(obj, age);
 
@@ -819,30 +863,43 @@ export class SurvivorRenderer {
       const n = child.name;
       let widthMul = 1;
       if (n.startsWith('pw-ember')) widthMul = 1.0;
-      else if (n.startsWith('pw-fire')) widthMul = 0.66;
-      else if (n === 'pw-core') widthMul = 0.3;
+      else if (n.startsWith('pw-fire')) widthMul = 0.72;
+      else if (n === 'pw-core') widthMul = 0.22;
 
       if (n === 'pw-ember' || n === 'pw-fire' || n === 'pw-core') {
-        // Strip: X = cross-track width, Y (pre-rotation) = along-track length.
-        child.scale.set(w * 2 * widthMul * cool, Math.max(0.001, len), 1);
+        /*
+         * Strip: X = cross-track width, Y (pre-rotation) = along-track length.
+         *
+         * The outer shell is the footprint the player reads, and it is drawn at exactly
+         * `h.radius` — the same half-width `hazardHitsPoint` tests the capsule against.
+         * Only the inner layers narrow, and only the inner layers cool inward, so the
+         * visible edge of the trail never contracts away from the damaging edge.
+         */
+        const narrow = n === 'pw-ember' ? 1 : cool;
+        child.scale.set(w * 2 * widthMul * narrow, Math.max(0.001, len), 1);
         child.position.set(0, child.position.y, 0);
-        mat.opacity = Math.max(0.05, base * t * (n === 'pw-core' ? flicker : 1));
+        const heat = n === 'pw-core' ? flicker * ignite : 1;
+        mat.opacity = Math.max(0.03, base * t * cool * heat);
       } else if (n.endsWith('cap0') || n.endsWith('cap1')) {
         const end = n.endsWith('cap0') ? -len / 2 : len / 2;
-        child.scale.setScalar(w * widthMul * cool);
+        const narrow = n.startsWith('pw-ember') ? 1 : cool;
+        child.scale.setScalar(w * widthMul * narrow);
         child.position.set(0, child.position.y, end);
-        mat.opacity = Math.max(0.05, base * t);
+        mat.opacity = Math.max(0.03, base * t * cool);
       } else if (n === 'pw-tongue') {
+        // Ignition sparks only. They are gone well before the segment is, so an old
+        // segment is a dark scar rather than something still throwing light.
         const phase = (child.userData.tonguePhase as number) ?? 0;
         const at = (child.userData.tongueAt as number) ?? 0.5;
-        const lick = 0.55 + Math.sin(performance.now() * 0.011 + phase + h.id) * 0.45;
-        child.scale.setScalar(w * 0.42 * lick * cool);
+        const lick = 0.5 + Math.sin(performance.now() * 0.011 + phase + h.id) * 0.5;
+        const spark = age < 0.3 ? 1 - age / 0.3 : 0;
+        child.scale.setScalar(w * 0.3 * lick * spark);
         child.position.set(
-          (phase % 2 === 0 ? 1 : -1) * w * 0.5 * lick,
+          (phase % 2 === 0 ? 1 : -1) * w * 0.42 * lick,
           child.position.y,
           -len / 2 + len * at,
         );
-        mat.opacity = Math.max(0, base * t * lick);
+        mat.opacity = Math.max(0, base * t * lick * spark);
       }
     }
   }
@@ -1807,24 +1864,32 @@ export class SurvivorRenderer {
       return g;
     }
     if (e.kind === 'plasma-flare') {
-      const r = Math.min(2.8, (e.radius ?? e.scale ?? 1.5) * 0.35);
+      /*
+       * Ignition at the burning head of the trail.
+       *
+       * This is the one part of Plasma Wake that stays bright: the player needs to see
+       * where the trail is being laid, and it lives for a third of a second. It is
+       * depth-tested like the ribbon it belongs to, so the hero laying the trail is in
+       * front of their own sparks rather than behind them.
+       */
+      const r = Math.min(2.2, (e.radius ?? e.scale ?? 1.5) * 0.28);
       const flash = this.ownMesh(new THREE.Mesh(
         new THREE.SphereGeometry(r, 16, 10),
-        this.effectMat('#ff8a3d', 0.28, true),
+        this.effectMat('#c94ad6', 0.24, true),
       ));
       flash.scale.y = 0.4;
-      flash.position.y = 0.28;
+      flash.position.y = 0.24;
       const spark = this.ownMesh(new THREE.Mesh(
-        new THREE.ConeGeometry(r * 0.24, r * 1.45, 9, 1, true),
-        this.effectMat('#fff0a0', 0.72, true),
+        new THREE.ConeGeometry(r * 0.22, r * 1.2, 9, 1, true),
+        this.effectMat('#ffb27a', 0.55, true),
       ));
-      spark.position.y = r * 0.55;
+      spark.position.y = r * 0.5;
       g.add(flash, spark);
       g.position.set(e.x, 0, e.z);
       g.traverse((child) => {
         if (!(child instanceof THREE.Mesh)) return;
-        child.material.depthTest = false;
-        child.renderOrder = 20;
+        child.material.depthTest = true;
+        child.renderOrder = 11;
       });
       return g;
     }

@@ -16,6 +16,9 @@
  *    effect is the scaled radius.
  */
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
+import { AssetLibrary } from '../../assets/AssetLibrary';
+import { SurvivorRenderer } from './survivorRender';
 import {
   groundEffectMotion,
   groundEffectScale,
@@ -477,5 +480,85 @@ describe('§3 Containment Field and Weapon Overclock affect their contracted pro
     for (const id of AREA_WEAPONS) {
       expect(area[id], `${id} is not a real weapon family`).toBeTruthy();
     }
+  });
+});
+
+/* --------------------------------------- §4 Plasma Wake reads as a floor hazard */
+
+describe('§4 the Plasma Wake trail is drawn under the actors standing in it', () => {
+  /** Run the trail fixture until the renderer holds live trail segments. */
+  function trailScene(fixture: SurvivorFixture, seed: number) {
+    const renderer = new SurvivorRenderer(new AssetLibrary());
+    const state = createSurvivorState('bee', fixture, seed);
+    state.player.invuln = 1e9;
+    const input = { ...EMPTY_SURVIVOR_INPUT };
+    for (let i = 0; i < 420; i += 1) {
+      const ang = i * DT * 0.9;
+      input.moveX = Math.cos(ang);
+      input.moveY = Math.sin(ang);
+      input.choiceIndex = state.phase === 'levelup' || state.phase === 'protocol' ? 0 : null;
+      stepSurvivor(state, input, DT);
+      renderer.sync(state, DT);
+    }
+    return { renderer, state };
+  }
+
+  /** Every mesh the renderer currently holds for a trail segment. */
+  function trailMeshes(renderer: SurvivorRenderer): THREE.Mesh[] {
+    const out: THREE.Mesh[] = [];
+    renderer.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.name.startsWith('pw-')) out.push(o);
+    });
+    return out;
+  }
+
+  it('depth-tests every trail layer so actors occlude it', () => {
+    const { renderer, state } = trailScene('survivor-plasma-l1', 9900);
+    const meshes = trailMeshes(renderer);
+    expect(meshes.length, 'no trail segments were built').toBeGreaterThan(0);
+    expect(state.hazards.some((h) => h.active && h.kind === 'plasma-wake')).toBe(true);
+    for (const m of meshes) {
+      const mat = m.material as THREE.MeshBasicMaterial;
+      // The 2.7.0 ribbon disabled depth testing on every layer and asked for render
+      // order 18, i.e. "draw over the whole scene". That is what let it bleed through
+      // the hero and the horde standing in it.
+      expect(mat.depthTest, `${m.name} disabled depth testing`).toBe(true);
+      expect(m.renderOrder, `${m.name} render order`).toBeLessThan(16);
+    }
+    renderer.dispose();
+  });
+
+  it('keeps additive blending to the thin filament and the ignition sparks', () => {
+    const { renderer } = trailScene('survivor-plasma-ship', 9901);
+    const meshes = trailMeshes(renderer);
+    expect(meshes.length).toBeGreaterThan(0);
+    for (const m of meshes) {
+      const mat = m.material as THREE.MeshBasicMaterial;
+      const additive = mat.blending === THREE.AdditiveBlending;
+      const isFilament = m.name === 'pw-core' || m.name === 'pw-tongue';
+      // Stacking additive ember + body + core is what bleached the trail to white.
+      expect(additive, `${m.name} blending`).toBe(isFilament);
+    }
+    renderer.dispose();
+  });
+
+  it('draws its outer footprint at exactly the damaging half-width', () => {
+    const { renderer, state } = trailScene('survivor-plasma-ship', 9902);
+    const seg = state.hazards.find((h) => h.active && h.kind === 'plasma-wake');
+    expect(seg, 'no live trail segment').toBeTruthy();
+    const shell = trailMeshes(renderer).filter((m) => m.name === 'pw-ember');
+    expect(shell.length, 'no outer shell strips').toBeGreaterThan(0);
+    // The unit strip is 1x1 and is scaled to the full cross-track width, so half of
+    // scale.x is the drawn half-width. It must equal the capsule radius the simulation
+    // collides against — the shell is the edge the player reads, so it never narrows.
+    const radii = state.hazards
+      .filter((h) => h.active && h.kind === 'plasma-wake')
+      .map((h) => h.radius);
+    for (const m of shell) {
+      const drawn = m.scale.x / 2;
+      const match = radii.some((r) => Math.abs(drawn - r) < 1e-6);
+      expect(match, `shell half-width ${drawn} matches no live capsule radius`).toBe(true);
+    }
+    renderer.dispose();
   });
 });
