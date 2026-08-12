@@ -87,6 +87,47 @@ any 96-run median delta under roughly two minutes as noise, and confirm with 192
 attributing it to a change. Earlier endless-2.8.0 attributions taken at 96 runs — including
 the Phase 3 median movement — should be re-measured before being relied upon.
 
+
+## 192-run re-baseline: what actually regressed (endless-2.8.0 stabilization)
+
+The release's headline claims were all median movements measured at 96 runs. Re-measured
+at 192 runs on identical seeds, **none of them survive**:
+
+| Candidate | n | Median | Bootstrap 95% CI | vs 2.7.0 |
+| --- | ---: | ---: | --- | --- |
+| `endless-2.7.0` (`56b5414`) | 192 | 10:41 | 10:26 – 11:04 | — |
+| Phase 7 (`2208b3b`) | 192 | 12:46 | 10:57 – 14:44 | +2:05, CIs overlap |
+| Final (`088d1a0`) | 192 | 9:08 | 6:55 – 11:05 | −1:33, CIs overlap |
+
+The median is the wrong instrument here, and the CI widths say why. endless-2.7.0's median
+is stable to within 38 seconds; the 2.8.0 candidates carry intervals nearly four minutes
+wide. That is not sampling noise — it is the distribution becoming **bimodal**, with the
+median falling into a sparse middle between an early-death cluster and a long-run cluster.
+Neither SD nor median describes a distribution shaped like that.
+
+**The early-death cluster is the real regression, and it is unambiguous.**
+
+| Candidate | Runs under 5:00 | bee | flamingo | frog | red-panda |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `endless-2.7.0` | 20/192 (10.4%) | 8% | 17% | 4% | 13% |
+| Phase 7 | 32/192 (16.7%) | 8% | 27% | 8% | 23% |
+| Final | 53/192 (27.6%) | 17% | 46% | 15% | 33% |
+
+2.7.0 to final is a 17.2-point rise, **4.4 standard errors** — far outside sampling noise,
+and it grows monotonically across the release rather than appearing at one commit. Every
+hero worsens, and Fitzwilliam (`flamingo`) now fails before five minutes in nearly half of
+all runs.
+
+### How to read this benchmark from now on
+
+- **Primary diagnostics:** fraction of runs under 5:00, P25, per-hero medians, observed
+  maximum. These are stable and they move together.
+- **Median:** report it, but treat a difference as real only when the bootstrap intervals
+  are disjoint. Two halves of one 192-run snapshot of *identical code* drift up to 1:12.
+- **SD and mean+3σ:** retained for historical continuity only. `mean + 3σ` of 33:20 was
+  never an observed survival time; the observed maximum across every 192-run candidate is
+  about 26:20.
+
 ## Interpretation guardrail
 
 - Candidate deltas are trustworthy only within the same policy and identical seed set.
