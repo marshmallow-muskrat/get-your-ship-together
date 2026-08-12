@@ -297,7 +297,9 @@ export function weaponUpgradeCard(
       parent: displayName(fam.name),
       levels: progression.label,
       progression,
-      name: fam.levels[next - 1]!.label,
+      // Ordinary levels keep the weapon's own name; the summary says what changed.
+      // Only a level that changes what the weapon *is* renames it.
+      name: fam.levels[next - 1]!.tier ?? displayName(fam.name),
       summary: weaponUpgradeSummary(weaponId, currentLevel, next),
       stats,
       tradeoff: weaponTradeoff(weaponId, currentLevel, next),
@@ -314,7 +316,7 @@ export function weaponUpgradeCard(
     levels: progression.label,
     progression,
     name: formatOverclockLabel(oc),
-    summary: `Keeps the ${fam.levels[fam.levels.length - 1]!.label} structure and adds flat damage. Overclock damage is additive, so it never compounds.`,
+    summary: `Keeps the Level 5 ${fam.name} structure and adds flat damage. Overclock damage is additive, so it never compounds.`,
     stats,
     tradeoff: null,
   };
@@ -349,7 +351,7 @@ export function newWeaponCard(weaponId: WeaponId): UpgradeCardCopy {
     parent: displayName(fam.name),
     levels: progression.label,
     progression,
-    name: fam.levels[0]!.label,
+    name: displayName(fam.name),
     summary: fam.prototype
       ? `${fam.description} Prototypes do not use an ordinary weapon slot.`
       : fam.description,

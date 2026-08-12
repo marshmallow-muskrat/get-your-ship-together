@@ -32,7 +32,9 @@ import {
   WEAPONS,
   weaponStatsAtLevel,
   type SurvivorFixture,
+  type WeaponId,
 } from './survivorContent';
+import { newWeaponCard, weaponUpgradeCard } from './survivorUpgradeCards';
 import {
   createSurvivorState,
   emptyEnemy,
@@ -797,5 +799,108 @@ describe('§7 cooldown legibility and the ready flash', () => {
   it('clears its timers on teardown', () => {
     // A pending flash on a disposed HUD is a listener leak by another name.
     expect(hudSource).toMatch(/dispose\(\): void \{[\s\S]{0,220}readyTimers/);
+  });
+});
+
+/* ------------------------------------------- §8 weapon names stay the weapon's */
+
+describe('§8 upgrade naming identifies the weapon being upgraded', () => {
+  const ALL = Object.keys(WEAPONS) as WeaponId[];
+
+  /** A level is transformative when it changes what the weapon *is*, not how much. */
+  function isTransformative(id: WeaponId, level: number): boolean {
+    if (level <= 1) return false;
+    const a = weaponStatsAtLevel(id, level - 1);
+    const b = weaponStatsAtLevel(id, level);
+    // One projectile becoming two is a different weapon; four becoming six is not.
+    const doubles = a.count === 1 && b.count > 1;
+    const learnsToSplit = (b.split ?? 0) > (a.split ?? 0);
+    const learnsToBounce = (b.bounce ?? 0) > (a.bounce ?? 0);
+    return doubles || learnsToSplit || learnsToBounce;
+  }
+
+  it('names a tier only where the level actually transforms the weapon', () => {
+    for (const id of ALL) {
+      for (const def of WEAPONS[id].levels) {
+        const tier = def.tier;
+        if (tier == null) continue;
+        expect(
+          isTransformative(id, def.level),
+          `${id} L${def.level} is named "${tier}" but changes no mechanic`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('leaves every ordinary level carrying the weapon own name', () => {
+    for (const id of ALL) {
+      const fam = WEAPONS[id];
+      for (let lv = 1; lv <= 4; lv += 1) {
+        const card = weaponUpgradeCard(id, lv);
+        const tier = fam.levels[lv]!.tier;
+        if (tier) {
+          expect(card.name, `${id} L${lv + 1}`).toBe(tier);
+        } else {
+          // An ordinary step must never rename the player's weapon.
+          expect(card.name, `${id} L${lv} → L${lv + 1} renamed the weapon`).toBe(fam.name);
+          // ...and the copy has to carry the change instead.
+          expect(card.summary.length, `${id} L${lv + 1} summary`).toBeGreaterThan(15);
+        }
+        // Whatever the headline says, the parent always identifies the weapon.
+        expect(card.parent).toBe(fam.name);
+      }
+    }
+  });
+
+  it('acquiring and overclocking a weapon both name the weapon', () => {
+    for (const id of ALL) {
+      expect(newWeaponCard(id).name).toBe(WEAPONS[id].name);
+      expect(newWeaponCard(id).parent).toBe(WEAPONS[id].name);
+      const oc = weaponUpgradeCard(id, 5);
+      expect(oc.parent).toBe(WEAPONS[id].name);
+      // The Overclock keeps the L5 structure, so it must not invent a tier.
+      expect(oc.summary).toMatch(new RegExp(WEAPONS[id].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+  });
+
+  it('records the two weapons that have no transformation to name', () => {
+    /*
+     * The audit's finding, pinned.
+     *
+     * Rocket Barrage L1-L5 adds rockets and cadence and nothing else, so "Salvo",
+     * "Cluster" and "Carpet Fire" were three renames for a count going up — and two of
+     * them promised mechanics that do not exist: rockets never split, and the pattern
+     * never becomes area saturation.
+     *
+     * Microdrone Swarm is the same shape of finding. Three drones becoming five is a
+     * wider formation, not a different weapon, so "Swarm Cadre", "Hunter Wing" and
+     * "Hive Overdrive" renamed Boswell's signature three times without one new
+     * mechanic. If either line earns a tier name it will be by earning a mechanic.
+     */
+    for (const id of ['rocket', 'microdrone'] as WeaponId[]) {
+      for (const def of WEAPONS[id].levels) {
+        expect(def.tier, `${id} L${def.level}`).toBeUndefined();
+      }
+      for (let lv = 1; lv <= 4; lv += 1) {
+        expect(weaponUpgradeCard(id, lv).name).toBe(WEAPONS[id].name);
+      }
+    }
+    // The cards still explain the changes they do make.
+    expect(weaponUpgradeCard('rocket', 3).summary).toMatch(/6 rockets/);
+    expect(weaponUpgradeCard('microdrone', 4).summary).toMatch(/5 drones/);
+  });
+
+  it('keeps the transformative names that were earned', () => {
+    const earned: Array<[WeaponId, number, string]> = [
+      ['pulse', 4, 'Twin Pulse'],
+      ['bioplasma', 4, 'Twin Globs'],
+      ['bioplasma', 5, 'Virulent Cascade'],
+      ['boomerang', 5, 'Twin Orbit'],
+      ['pulsar', 5, 'Echo Pulsar'],
+      ['plasma-wake', 5, 'Twin Wake'],
+    ];
+    for (const [id, level, name] of earned) {
+      expect(WEAPONS[id].levels[level - 1]!.tier, `${id} L${level}`).toBe(name);
+    }
   });
 });

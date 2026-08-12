@@ -842,9 +842,11 @@ describe('§13 upgrade cards', () => {
     expect(card.tradeoff!).toMatch(/less often/);
   });
 
-  it('Swarm Cadre says the drones launch faster and hit harder', () => {
+  it('an ordinary level keeps the weapon name and lets the copy say what changed', () => {
+    // Was "Swarm Cadre". endless-2.8.0's naming audit: L3 adds no mechanic, it only
+    // launches faster and hits harder, so it must not rename the player's weapon.
     const card = weaponUpgradeCard('microdrone', 2);
-    expect(card.name).toBe('Swarm Cadre');
+    expect(card.name).toBe('Microdrone Swarm');
     expect(card.summary).toMatch(/harder/i);
     expect(card.summary).toMatch(/faster/i);
   });

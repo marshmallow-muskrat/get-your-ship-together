@@ -697,7 +697,23 @@ export type WeaponId =
 
 export interface WeaponLevelDef {
   level: number;
-  label: string;
+  /**
+   * Tier name, present **only** where the level introduces a genuinely transformative
+   * mechanic (endless-2.8.0).
+   *
+   * A weapon's primary name is stable across ordinary levels. Rocket Barrage used to
+   * become "Salvo" at L3, "Cluster" at L4 and "Carpet Fire" at L5 while doing nothing
+   * but firing more rockets slightly faster — so the player was told their weapon had
+   * been replaced three times by upgrades that changed a count. Worse, "Cluster"
+   * promised rockets that split, which they do not, and "Carpet Fire" promised area
+   * saturation, which it is not.
+   *
+   * The rule now: an ordinary level keeps the weapon's own name and lets the card's
+   * effect sentence say what changed; a tier name is reserved for a level that changes
+   * what the weapon *is* — one projectile becoming two, a glob learning to split, a
+   * chain learning to fork. Absent means ordinary.
+   */
+  tier?: string;
   damage: number;
   cadence: number;
   count: number;
@@ -734,12 +750,13 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     color: '#88d4ff',
     levels: [
       // Structural growth is capped at 2x projectiles across L1-L5; the rest of the
-      // curve comes from per-shot damage and cadence, so L5 lands near 3.3x L1.
-      { level: 1, label: 'Pulse Blaster I', damage: 14, cadence: 0.32, count: 1, speed: 26, pierce: 0, life: 1.0, radius: 0.2 },
-      { level: 2, label: 'Pulse Blaster II', damage: 16, cadence: 0.281, count: 1, speed: 27, pierce: 0, life: 1.0, radius: 0.21 },
-      { level: 3, label: 'Focused Pulse', damage: 18, cadence: 0.237, count: 1, speed: 28, pierce: 0, life: 1.05, radius: 0.22 },
-      { level: 4, label: 'Twin Pulse', damage: 20, cadence: 0.387, count: 2, speed: 29, pierce: 0, life: 1.1, radius: 0.23 },
-      { level: 5, label: 'Pulse Storm', damage: 22, cadence: 0.301, count: 2, speed: 31, pierce: 0, life: 1.15, radius: 0.25 },
+      // curve comes from per-shot damage and cadence, so L5 lands near 3.3x L1. Twin
+      // Pulse at L4 is the one level that changes what the weapon is.
+      { level: 1, damage: 14, cadence: 0.32, count: 1, speed: 26, pierce: 0, life: 1.0, radius: 0.2 },
+      { level: 2, damage: 16, cadence: 0.281, count: 1, speed: 27, pierce: 0, life: 1.0, radius: 0.21 },
+      { level: 3, damage: 18, cadence: 0.237, count: 1, speed: 28, pierce: 0, life: 1.05, radius: 0.22 },
+      { tier: 'Twin Pulse', level: 4, damage: 20, cadence: 0.387, count: 2, speed: 29, pierce: 0, life: 1.1, radius: 0.23 },
+      { level: 5, damage: 22, cadence: 0.301, count: 2, speed: 31, pierce: 0, life: 1.15, radius: 0.25 },
     ],
   },
   microdrone: {
@@ -748,11 +765,18 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'A broad formation of drones fired in one committed direction.',
     color: '#f5ae42',
     levels: [
-      { level: 1, label: 'Drone Formation I', damage: 42, cadence: 0.72, count: 3, speed: 19, life: 1.35, radius: 0.22, width: 0.7 },
-      { level: 2, label: 'Drone Formation II', damage: 48, cadence: 0.64, count: 3, speed: 20, life: 1.4, radius: 0.23, width: 0.78 },
-      { level: 3, label: 'Swarm Cadre', damage: 54, cadence: 0.57, count: 3, speed: 21, life: 1.45, radius: 0.24, width: 0.86 },
-      { level: 4, label: 'Hunter Wing', damage: 70, cadence: 0.52, count: 3, speed: 22, life: 1.5, radius: 0.25, width: 0.9 },
-      { level: 5, label: 'Hive Overdrive', damage: 86, cadence: 0.67, count: 5, speed: 23, life: 1.55, radius: 0.26, width: 0.9 },
+      /*
+       * Like Rocket Barrage, this line carries no tier name and that is the audit's
+       * finding rather than an omission. A formation of three drones becoming five is
+       * a wider formation, not a different weapon — the same class of change as adding
+       * a rocket to a salvo. "Swarm Cadre", "Hunter Wing" and "Hive Overdrive" renamed
+       * Boswell's signature three times across five levels without one new mechanic.
+       */
+      { level: 1, damage: 42, cadence: 0.72, count: 3, speed: 19, life: 1.35, radius: 0.22, width: 0.7 },
+      { level: 2, damage: 48, cadence: 0.64, count: 3, speed: 20, life: 1.4, radius: 0.23, width: 0.78 },
+      { level: 3, damage: 54, cadence: 0.57, count: 3, speed: 21, life: 1.45, radius: 0.24, width: 0.86 },
+      { level: 4, damage: 70, cadence: 0.52, count: 3, speed: 22, life: 1.5, radius: 0.25, width: 0.9 },
+      { level: 5, damage: 86, cadence: 0.67, count: 5, speed: 23, life: 1.55, radius: 0.26, width: 0.9 },
     ],
   },
   rail: {
@@ -761,12 +785,13 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Piercing line that cuts through dense packs.',
     color: '#ff7ab8',
     levels: [
-      // Twin Rails at L4 is the explicit breakpoint; L3 widens instead of adding a rail.
-      { level: 1, label: 'Rail Lance I', damage: 100, cadence: 1.885, count: 1, width: 0.95, length: 16 },
-      { level: 2, label: 'Rail Lance II', damage: 115, cadence: 1.7, count: 1, width: 1.02, length: 16.5 },
-      { level: 3, label: 'Focused Lance', damage: 118, cadence: 1.3568, count: 1, width: 1.08, length: 17 },
-      { level: 4, label: 'Wide Beam', damage: 144, cadence: 1.254, count: 1, width: 1.2, length: 17.5 },
-      { level: 5, label: 'Lance Battery', damage: 174, cadence: 2.1183, count: 2, width: 1.1, length: 18 },
+      // The second rail at L5 is the explicit breakpoint; L3 and L4 widen the single
+      // lane instead of adding one, which is why neither takes a tier name.
+      { level: 1, damage: 100, cadence: 1.885, count: 1, width: 0.95, length: 16 },
+      { level: 2, damage: 115, cadence: 1.7, count: 1, width: 1.02, length: 16.5 },
+      { level: 3, damage: 118, cadence: 1.3568, count: 1, width: 1.08, length: 17 },
+      { level: 4, damage: 144, cadence: 1.254, count: 1, width: 1.2, length: 17.5 },
+      { tier: 'Lance Battery', level: 5, damage: 174, cadence: 2.1183, count: 2, width: 1.1, length: 18 },
     ],
   },
   gravity: {
@@ -789,11 +814,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
        * authored to have. The authored axes stay damage, cadence, radius, and the second
        * well at L5 as the declared breakpoint; duration is a property of the mechanic.
        */
-      { level: 1, label: 'Gravity Pulse I', damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 1.05 },
-      { level: 2, label: 'Gravity Pulse II', damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 1.05 },
-      { level: 3, label: 'Gravity Pulse III', damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 1.05 },
-      { level: 4, label: 'Deep Well', damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 1.05 },
-      { level: 5, label: 'Event Horizon', damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 1.05 },
+      { level: 1, damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 1.05 },
+      { level: 2, damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 1.05 },
+      { level: 3, damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 1.05 },
+      { level: 4, damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 1.05 },
+      { tier: 'Event Horizon', level: 5, damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 1.05 },
     ],
   },
   boomerang: {
@@ -813,11 +838,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
        * declared L5 breakpoint, thrown on a diverging bearing so Twin Orbit covers a
        * cone rather than doubling one lane.
        */
-      { level: 1, label: 'Cosmic Boomerang I', damage: 34, cadence: 1.55, count: 1, speed: 15, radius: 0.5, life: 2.6 },
-      { level: 2, label: 'Cosmic Boomerang II', damage: 39, cadence: 1.42, count: 1, speed: 15.5, radius: 0.55, life: 2.8 },
-      { level: 3, label: 'Wide Arc', damage: 44, cadence: 1.34, count: 1, speed: 16, radius: 0.6, life: 3.0 },
-      { level: 4, label: 'Deep Throw', damage: 50, cadence: 1.24, count: 1, speed: 16.5, radius: 0.63, life: 3.15 },
-      { level: 5, label: 'Twin Orbit', damage: 57, cadence: 1.42, count: 2, speed: 17, radius: 0.66, life: 3.4 },
+      { level: 1, damage: 34, cadence: 1.55, count: 1, speed: 15, radius: 0.5, life: 2.6 },
+      { level: 2, damage: 39, cadence: 1.42, count: 1, speed: 15.5, radius: 0.55, life: 2.8 },
+      { level: 3, damage: 44, cadence: 1.34, count: 1, speed: 16, radius: 0.6, life: 3.0 },
+      { level: 4, damage: 50, cadence: 1.24, count: 1, speed: 16.5, radius: 0.63, life: 3.15 },
+      { tier: 'Twin Orbit', level: 5, damage: 57, cadence: 1.42, count: 2, speed: 17, radius: 0.66, life: 3.4 },
     ],
   },
   rocket: {
@@ -826,14 +851,25 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Visible mini-rockets launch from the hero and burst on impact.',
     color: '#ff8a4a',
     levels: [
-      // Rutherford begins with a real distributed salvo. Growth then comes from
-      // cadence, blast coverage and one declared L4 launcher breakpoint rather
-      // than making the starter weak and asking upgrades to repair it.
-      { level: 1, label: 'Rocket Barrage I', damage: 46, cadence: 1.65, count: 4, radius: 1.6, life: 0.36 },
-      { level: 2, label: 'Rocket Barrage II', damage: 52, cadence: 1.5, count: 4, radius: 1.64, life: 0.34 },
-      { level: 3, label: 'Salvo', damage: 57, cadence: 1.25, count: 4, radius: 1.68, life: 0.32 },
-      { level: 4, label: 'Cluster', damage: 59, cadence: 1.6, count: 6, radius: 1.73, life: 0.3 },
-      { level: 5, label: 'Carpet Fire', damage: 72, cadence: 1.5, count: 7, radius: 1.8, life: 0.28 },
+      /*
+       * Rutherford begins with a real distributed salvo. Growth then comes from cadence,
+       * blast coverage and more launchers rather than from making the starter weak and
+       * asking upgrades to repair it.
+       *
+       * No level here carries a tier name, and that is a finding rather than an
+       * oversight: nothing in L1-L5 changes what Rocket Barrage *is*. It fires more
+       * rockets, faster, with a slightly wider burst. The 2.8.0 tables called L3 "Salvo",
+       * L4 "Cluster" and L5 "Carpet Fire", which told the player their weapon had been
+       * replaced three times — and two of those names promised mechanics that do not
+       * exist. Rockets never split, so nothing here is a cluster payload; the pattern
+       * never becomes area saturation, so nothing here is carpet fire. If Rocket Barrage
+       * is to earn a transformation it needs a mechanic, not a noun.
+       */
+      { level: 1, damage: 46, cadence: 1.65, count: 4, radius: 1.6, life: 0.36 },
+      { level: 2, damage: 52, cadence: 1.5, count: 4, radius: 1.64, life: 0.34 },
+      { level: 3, damage: 57, cadence: 1.25, count: 4, radius: 1.68, life: 0.32 },
+      { level: 4, damage: 59, cadence: 1.6, count: 6, radius: 1.73, life: 0.3 },
+      { level: 5, damage: 72, cadence: 1.5, count: 7, radius: 1.8, life: 0.28 },
     ],
   },
   bioplasma: {
@@ -845,7 +881,6 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // Impact and corrosion scale together so the residue identity never falls behind.
       {
         level: 1,
-        label: 'Bio-Plasma Glob I',
         damage: 38,
         cadence: 0.626,
         count: 1,
@@ -859,7 +894,6 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       },
       {
         level: 2,
-        label: 'Bio-Plasma Glob II',
         damage: 43,
         cadence: 0.487,
         count: 1,
@@ -873,7 +907,6 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       },
       {
         level: 3,
-        label: 'Corrosive Glob',
         damage: 47,
         cadence: 0.401,
         count: 1,
@@ -886,8 +919,9 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
         puddleDamage: 5.6,
       },
       {
+        // One glob becomes two.
+        tier: 'Twin Globs',
         level: 4,
-        label: 'Twin Globs',
         damage: 53,
         cadence: 0.648,
         count: 2,
@@ -900,8 +934,9 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
         puddleDamage: 6.2,
       },
       {
+        // Impacts learn to bounce and split — the weapon stops being one glob at a time.
+        tier: 'Virulent Cascade',
         level: 5,
-        label: 'Virulent Cascade',
         damage: 58,
         cadence: 0.897,
         count: 2,
@@ -924,11 +959,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'Rapid machine-gun fire for sustained priority-target damage.',
     color: '#ffe28a',
     levels: [
-      { level: 1, label: 'Rotary Cannon I', damage: 11, cadence: 0.16, count: 1, speed: 34, life: 1.05, radius: 0.16 },
-      { level: 2, label: 'Rotary Cannon II', damage: 13, cadence: 0.145, count: 1, speed: 35, life: 1.08, radius: 0.17 },
-      { level: 3, label: 'Accelerator Feed', damage: 15, cadence: 0.13, count: 1, speed: 36, life: 1.1, radius: 0.18 },
-      { level: 4, label: 'Heavy Rounds', damage: 18, cadence: 0.118, count: 1, speed: 37, life: 1.12, radius: 0.19 },
-      { level: 5, label: 'Twin Barrels', damage: 20, cadence: 0.19, count: 2, speed: 38, life: 1.15, radius: 0.2 },
+      { level: 1, damage: 11, cadence: 0.16, count: 1, speed: 34, life: 1.05, radius: 0.16 },
+      { level: 2, damage: 13, cadence: 0.145, count: 1, speed: 35, life: 1.08, radius: 0.17 },
+      { level: 3, damage: 15, cadence: 0.13, count: 1, speed: 36, life: 1.1, radius: 0.18 },
+      { level: 4, damage: 18, cadence: 0.118, count: 1, speed: 37, life: 1.12, radius: 0.19 },
+      { tier: 'Twin Barrels', level: 5, damage: 20, cadence: 0.19, count: 2, speed: 38, life: 1.15, radius: 0.2 },
     ],
   },
   'plasma-wake': {
@@ -944,11 +979,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
        * add a piece; coverage comes from lifetime and speed. `radius` is the
        * cross-track half-width basis, preserving the wide/thin identity.
        */
-      { level: 1, label: 'Plasma Wake I', damage: 54, cadence: 0.34, count: 1, radius: 1.15, life: 3.6 },
-      { level: 2, label: 'Plasma Wake II', damage: 66, cadence: 0.31, count: 1, radius: 1.22, life: 3.8 },
-      { level: 3, label: 'Hot Trail', damage: 78, cadence: 0.28, count: 1, radius: 1.3, life: 4.0 },
-      { level: 4, label: 'Fusion Footprint', damage: 90, cadence: 0.25, count: 1, radius: 1.4, life: 4.2 },
-      { level: 5, label: 'Twin Wake', damage: 99, cadence: 0.55, count: 2, radius: 1.5, life: 4.5 },
+      { level: 1, damage: 54, cadence: 0.34, count: 1, radius: 1.15, life: 3.6 },
+      { level: 2, damage: 66, cadence: 0.31, count: 1, radius: 1.22, life: 3.8 },
+      { level: 3, damage: 78, cadence: 0.28, count: 1, radius: 1.3, life: 4.0 },
+      { level: 4, damage: 90, cadence: 0.25, count: 1, radius: 1.4, life: 4.2 },
+      { tier: 'Twin Wake', level: 5, damage: 99, cadence: 0.55, count: 2, radius: 1.5, life: 4.5 },
     ],
   },
   pulsar: {
@@ -957,11 +992,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'A periodic radial discharge centered on the hero.',
     color: '#b899ff',
     levels: [
-      { level: 1, label: 'Pulsar Core I', damage: 42, cadence: 3.2, count: 1, radius: 8.0, life: 0.35 },
-      { level: 2, label: 'Pulsar Core II', damage: 54, cadence: 3.2, count: 1, radius: 8.0, life: 0.38 },
-      { level: 3, label: 'Charged Core', damage: 70, cadence: 3.2, count: 1, radius: 8.0, life: 0.42 },
-      { level: 4, label: 'Nova Shell', damage: 90, cadence: 3.2, count: 1, radius: 8.0, life: 0.46 },
-      { level: 5, label: 'Echo Pulsar', damage: 108, cadence: 3.2, count: 2, radius: 8.0, life: 0.5 },
+      { level: 1, damage: 42, cadence: 3.2, count: 1, radius: 8.0, life: 0.35 },
+      { level: 2, damage: 54, cadence: 3.2, count: 1, radius: 8.0, life: 0.38 },
+      { level: 3, damage: 70, cadence: 3.2, count: 1, radius: 8.0, life: 0.42 },
+      { level: 4, damage: 90, cadence: 3.2, count: 1, radius: 8.0, life: 0.46 },
+      { tier: 'Echo Pulsar', level: 5, damage: 108, cadence: 3.2, count: 2, radius: 8.0, life: 0.5 },
     ],
   },
 
@@ -973,12 +1008,12 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     prototype: true,
     unlockTime: 300,
     levels: [
-      // Chain count doubles across the span; L5 adds the splash breakpoint.
-      { level: 1, label: 'Arc Conductor I', damage: 50, cadence: 1.15, count: 1, radius: 3.2, pierce: 2 },
-      { level: 2, label: 'Arc Conductor II', damage: 57, cadence: 0.974, count: 1, radius: 3.5, pierce: 2 },
-      { level: 3, label: 'Arc Conductor III', damage: 64, cadence: 1.051, count: 1, radius: 3.8, pierce: 3 },
-      { level: 4, label: 'Arc Conductor IV', damage: 72, cadence: 0.931, count: 1, radius: 4.1, pierce: 3 },
-      { level: 5, label: 'Arc Storm', damage: 80, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
+      // Chain count doubles across the span. L5 is the declared breakpoint.
+      { level: 1, damage: 50, cadence: 1.15, count: 1, radius: 3.2, pierce: 2 },
+      { level: 2, damage: 57, cadence: 0.974, count: 1, radius: 3.5, pierce: 2 },
+      { level: 3, damage: 64, cadence: 1.051, count: 1, radius: 3.8, pierce: 3 },
+      { level: 4, damage: 72, cadence: 0.931, count: 1, radius: 4.1, pierce: 3 },
+      { level: 5, damage: 80, cadence: 0.816, count: 1, radius: 4.4, pierce: 4, splash: 1.2 },
     ],
   },
   orbital: {
@@ -989,7 +1024,7 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     prototype: true,
     unlockTime: 900,
     levels: [
-      // Second lance is the explicit breakpoint at L4.
+      // Second lance is the explicit breakpoint at L5.
       // Orbital grows through strike power, not cadence: its identity is a small number
       // of heavy, telegraphed impacts, and a slow weapon measured over a fixed window is
       // dominated by shot quantisation if growth is pushed through cadence instead.
@@ -997,11 +1032,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // hit strength (304 max hit) — it was coverage: 2.6% of a 21:18 run because a
       // 2.1-2.6 radius simply missed most of what was on screen. `radius` is the
       // high-damage core; the wider shockwave is derived from it in SURVIVOR.orbital.
-      { level: 1, label: 'Orbital Lance I', damage: 140, cadence: 4.2, count: 1, radius: 3.2, life: 0.85 },
-      { level: 2, label: 'Orbital Lance II', damage: 168, cadence: 4.0, count: 1, radius: 3.45, life: 0.8 },
-      { level: 3, label: 'Orbital Lance III', damage: 205, cadence: 3.8, count: 1, radius: 3.7, life: 0.78 },
-      { level: 4, label: 'Sustained Lance', damage: 250, cadence: 3.6, count: 1, radius: 3.95, life: 0.72 },
-      { level: 5, label: 'Judgment Array', damage: 290, cadence: 5.9, count: 2, radius: 4.25, life: 0.68 },
+      { level: 1, damage: 140, cadence: 4.2, count: 1, radius: 3.2, life: 0.85 },
+      { level: 2, damage: 168, cadence: 4.0, count: 1, radius: 3.45, life: 0.8 },
+      { level: 3, damage: 205, cadence: 3.8, count: 1, radius: 3.7, life: 0.78 },
+      { level: 4, damage: 250, cadence: 3.6, count: 1, radius: 3.95, life: 0.72 },
+      { tier: 'Judgment Array', level: 5, damage: 290, cadence: 5.9, count: 2, radius: 4.25, life: 0.68 },
     ],
   },
 
@@ -1504,7 +1539,8 @@ export function weaponStatsAtLevel(weaponId: WeaponId, displayedLevel: number): 
   return {
     ...base,
     level,
-    label: `${fam.name} L${level}`,
+    // An Overclock is not a new tier: it keeps the L5 structure, including whatever
+    // tier name L5 carried.
     damage: base.damage * mul,
     puddleDamage: base.puddleDamage != null ? base.puddleDamage * mul : undefined,
   };
