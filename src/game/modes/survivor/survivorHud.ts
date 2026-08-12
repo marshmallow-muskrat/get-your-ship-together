@@ -70,6 +70,16 @@ export class SurvivorHud {
   private getKeybinds: () => KeybindMap;
   private projectWorld: (x: number, z: number) => { x: number; y: number } | null;
   private lastChoicesKey = '';
+  /**
+   * Previous readiness per ability slot, for the cooldown -> ready flash.
+   *
+   * A slot with no entry has never been observed, so its first observation only
+   * establishes a baseline. That is what stops every slot flashing on the frame the HUD
+   * is constructed, when readiness goes from "unknown" to "ready" without anything
+   * having actually come off cooldown.
+   */
+  private readyPrev = new Map<string, boolean>();
+  private readyTimers = new Map<string, number>();
   private helpTimer = 0;
   private helpHidden = false;
   private startedAt = performance.now();
@@ -584,6 +594,42 @@ export class SurvivorHud {
     return `${seconds.toFixed(1)}s`;
   }
 
+  /**
+   * Flash the class-coloured wireframe neon green when an ability comes back.
+   *
+   * Deliberately edge-triggered and time-bounded. The ambient `pulse-ready` glow is a
+   * *state* — it looks identical whether the ability returned this frame or twenty
+   * seconds ago — so it cannot tell the player the one thing they need at the moment it
+   * matters. This is a 200ms one-shot on the false -> true edge only: no repeating
+   * blink while the ability sits ready, and nothing at all on construction.
+   *
+   * The timeout, rather than a frame count, is why a frame spike cannot swallow it.
+   */
+  private flashReady(el: Element | null | undefined, key: string, ready: boolean): void {
+    const prev = this.readyPrev.get(key);
+    this.readyPrev.set(key, ready);
+    // First observation is a baseline, not a transition.
+    if (prev === undefined || prev || !ready) return;
+    if (!(el instanceof HTMLElement)) return;
+    const existing = this.readyTimers.get(key);
+    if (existing !== undefined) window.clearTimeout(existing);
+    el.classList.remove('just-ready');
+    // Force a reflow so a repeat transition restarts the animation rather than being
+    // coalesced into the still-running one.
+    el.getBoundingClientRect();
+    el.classList.add('just-ready');
+    this.readyTimers.set(
+      key,
+      window.setTimeout(() => {
+        el.classList.remove('just-ready');
+        this.readyTimers.delete(key);
+      }, SurvivorHud.READY_FLASH_MS),
+    );
+  }
+
+  /** Duration of the cooldown -> ready flash. Inside the authored 150-250ms band. */
+  private static readonly READY_FLASH_MS = 200;
+
   private publishAbilities(state: SurvivorState): void {
     const p = state.player;
     const dEl = this.root.querySelector('#sv-ab-dodge');
@@ -591,6 +637,7 @@ export class SurvivorHud {
     const dReady = p.dodgeCd <= 0 && p.form !== 'ship' && p.alive && p.dodgeActive <= 0;
     dEl?.classList.toggle('ready', dReady);
     dEl?.classList.toggle('pulse-ready', dReady);
+    this.flashReady(dEl, 'dodge', dReady);
     dEl?.classList.toggle('blocked', p.form === 'ship');
     dEl?.classList.toggle('cooling', p.dodgeCd > 0);
     if (dState) {
@@ -624,6 +671,7 @@ export class SurvivorHud {
     const qBlocked = p.form === 'ship';
     qEl?.classList.toggle('ready', qReady);
     qEl?.classList.toggle('pulse-ready', qReady);
+    this.flashReady(qEl, 'repulsor', qReady);
     qEl?.classList.toggle('blocked', qBlocked);
     qEl?.classList.toggle('cooling', p.repulsorCd > 0);
     if (qState) {
@@ -638,6 +686,7 @@ export class SurvivorHud {
     const eBlocked = p.form === 'mech';
     eEl?.classList.toggle('ready', eReady);
     eEl?.classList.toggle('pulse-ready', eReady);
+    this.flashReady(eEl, 'ship', eReady);
     eEl?.classList.toggle('active', eActive);
     eEl?.classList.toggle('blocked', eBlocked);
     eEl?.classList.toggle('cooling', p.shipCd > 0 && !eActive);
@@ -656,6 +705,7 @@ export class SurvivorHud {
     const rBlocked = p.form === 'ship';
     rEl?.classList.toggle('ready', rReady);
     rEl?.classList.toggle('pulse-ready', rReady);
+    this.flashReady(rEl, 'mech', rReady);
     rEl?.classList.toggle('active', rActive);
     rEl?.classList.toggle('blocked', rBlocked);
     if (rState) {
@@ -1368,6 +1418,9 @@ export class SurvivorHud {
   }
 
   dispose(): void {
+    for (const t of this.readyTimers.values()) window.clearTimeout(t);
+    this.readyTimers.clear();
+    this.readyPrev.clear();
     this.root.remove();
   }
 }

@@ -1607,10 +1607,76 @@ html {
   letter-spacing: 0.08em;
   opacity: 0.85;
 }
+/*
+ * Cooldown readout.
+ *
+ * This was 0.58rem of plain white on a dark panel that also carries a rotating conic
+ * sweep behind it, at the busiest moment of the run. Gold, larger, semibold, and with a
+ * dark outline so it holds against whatever the sweep is doing underneath it. Tabular
+ * numerals stop the countdown jittering as digit widths change — `11.1s` and `10.0s`
+ * are the same width now, so the eye can read a falling number instead of a moving one.
+ */
 .survivor-hud .sv-ab-state {
   font-family: 'Space Mono', monospace;
-  font-size: 0.58rem;
-  margin-top: 0.1rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  margin-top: 0.12rem;
+  color: #ffc94a;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 3px rgba(0, 0, 0, 0.9),
+    0 0 10px color-mix(in srgb, #ffc94a 35%, transparent);
+}
+/* READY / SHIP / MECH are states, not counts: they stay in the panel's own voice. */
+.survivor-hud .sv-ability.ready .sv-ab-state,
+.survivor-hud .sv-ability.active .sv-ab-state,
+.survivor-hud .sv-ability.blocked .sv-ab-state {
+  color: #eef4ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+/*
+ * Cooldown -> ready.
+ *
+ * The moment an ability comes back is the single most actionable thing the hotbar can
+ * tell a player, and it was told by a slow ambient glow that looks the same whether the
+ * ability returned this frame or twenty seconds ago. One short neon-green flash of the
+ * class-coloured wireframe marks the transition and then hands the slot straight back to
+ * its normal colour. It is time-based (200ms) rather than frame-based, so it survives a
+ * frame spike, and it fires on the transition only — never as a repeating blink, and
+ * never on first construction.
+ */
+.survivor-hud .sv-ability.just-ready {
+  animation: sv-ready-flash 0.2s ease-out;
+}
+@keyframes sv-ready-flash {
+  0% {
+    border-color: #4dff9a;
+    box-shadow:
+      0 0 0 0 rgba(77, 255, 154, 0.85),
+      0 0 18px rgba(77, 255, 154, 0.75);
+    filter: brightness(1.5);
+  }
+  60% {
+    border-color: #4dff9a;
+    box-shadow:
+      0 0 26px 6px rgba(77, 255, 154, 0.55),
+      0 0 44px rgba(77, 255, 154, 0.3);
+    filter: brightness(1.3);
+  }
+  100% {
+    border-color: color-mix(in srgb, var(--hud-accent) 70%, white 10%);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--hud-accent) 35%, transparent);
+    filter: brightness(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .survivor-hud .sv-ability.just-ready {
+    animation: none;
+    border-color: #4dff9a;
+  }
 }
 .survivor-hud .sv-weapons {
   display: flex;

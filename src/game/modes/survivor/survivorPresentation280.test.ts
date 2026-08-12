@@ -17,6 +17,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import cssSource from '../../../styles/app.css?raw';
+import hudSource from './survivorHud.ts?raw';
 import { AssetLibrary } from '../../assets/AssetLibrary';
 import { SurvivorRenderer } from './survivorRender';
 import {
@@ -730,5 +732,70 @@ describe('§6 the Orbital Lance impact communicates its damaged area', () => {
           .toBeLessThanOrEqual(outer + 1e-6);
       }
     }
+  });
+});
+
+/* -------------------------------- §7 the hotbar says when an ability is back */
+
+describe('§7 cooldown legibility and the ready flash', () => {
+  function block(css: string, selector: string): string {
+    const at = css.indexOf(selector);
+    expect(at, `${selector} is not in the stylesheet`).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf('}', at));
+  }
+
+  it('draws the countdown in thematic gold, larger, bold and outlined', () => {
+    const s = block(cssSource, '.survivor-hud .sv-ab-state {');
+    // Was 0.58rem of plain white over a rotating conic sweep.
+    const size = /font-size:\s*([\d.]+)rem/.exec(s);
+    expect(size, 'no font-size on the cooldown readout').toBeTruthy();
+    expect(Number(size![1])).toBeGreaterThan(0.58);
+    const weight = /font-weight:\s*(\d+)/.exec(s);
+    expect(weight).toBeTruthy();
+    expect(Number(weight![1])).toBeGreaterThanOrEqual(600);
+    expect(s, 'countdown is not gold').toMatch(/color:\s*#ff[cd]/i);
+    expect(s, 'no dark outline behind the countdown').toMatch(/text-shadow:/);
+    // A countdown whose digits change width jitters as it falls.
+    expect(s).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it('flashes neon green only on the cooldown-to-ready edge', () => {
+    // Edge-triggered: a baseline observation, then only false -> true.
+    expect(hudSource).toMatch(/private flashReady\(/);
+    expect(hudSource).toMatch(/if \(prev === undefined \|\| prev \|\| !ready\) return;/);
+    // All four slots participate.
+    for (const slot of ['dodge', 'repulsor', 'ship', 'mech']) {
+      expect(hudSource, `${slot} has no ready flash`).toContain(`'${slot}', `);
+    }
+  });
+
+  it('bounds the flash by time, inside the authored 150-250ms band', () => {
+    const ms = /READY_FLASH_MS = (\d+)/.exec(hudSource);
+    expect(ms, 'the flash is not time-bounded').toBeTruthy();
+    const value = Number(ms![1]);
+    expect(value).toBeGreaterThanOrEqual(150);
+    expect(value).toBeLessThanOrEqual(250);
+    // A timeout, not a frame count: a frame spike must not swallow it.
+    expect(hudSource).toMatch(/window\.setTimeout\([\s\S]{0,200}READY_FLASH_MS/);
+  });
+
+  it('returns to the class colour and never becomes a repeating blink', () => {
+    const flash = block(cssSource, '.survivor-hud .sv-ability.just-ready {');
+    expect(flash).toMatch(/animation:/);
+    // A one-shot: no `infinite`, and no `forwards` pinning it green afterwards.
+    expect(flash).not.toMatch(/infinite/);
+    expect(flash).not.toMatch(/forwards/);
+    const keyframes = cssSource.slice(
+      cssSource.indexOf('@keyframes sv-ready-flash'),
+      cssSource.indexOf('@media (prefers-reduced-motion: reduce) {', cssSource.indexOf('@keyframes sv-ready-flash')),
+    );
+    expect(keyframes).toMatch(/#4dff9a/);
+    // The final keyframe hands the slot back to its own accent.
+    expect(keyframes).toMatch(/100% \{[\s\S]*var\(--hud-accent\)/);
+  });
+
+  it('clears its timers on teardown', () => {
+    // A pending flash on a disposed HUD is a listener leak by another name.
+    expect(hudSource).toMatch(/dispose\(\): void \{[\s\S]{0,220}readyTimers/);
   });
 });
