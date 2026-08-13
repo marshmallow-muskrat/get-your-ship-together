@@ -63,6 +63,36 @@ interface AllyVis {
   thrust: number;
 }
 
+function repairCrossGeometry(): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape();
+  const arm = 0.11;
+  const reach = 0.34;
+  shape.moveTo(-arm, -reach);
+  shape.lineTo(arm, -reach);
+  shape.lineTo(arm, -arm);
+  shape.lineTo(reach, -arm);
+  shape.lineTo(reach, arm);
+  shape.lineTo(arm, arm);
+  shape.lineTo(arm, reach);
+  shape.lineTo(-arm, reach);
+  shape.lineTo(-arm, arm);
+  shape.lineTo(-reach, arm);
+  shape.lineTo(-reach, -arm);
+  shape.lineTo(-arm, -arm);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.09,
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: 0.025,
+    bevelThickness: 0.025,
+    curveSegments: 1,
+  });
+  geometry.center();
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
 /**
  * Presentation for survivor mode.
  * Full skeletal animation for player/boss/elites; throttled mixers for horde.
@@ -108,7 +138,26 @@ export class SurvivorRenderer {
   private shieldRoot: THREE.Group | null = null;
   private shieldMats: THREE.MeshBasicMaterial[] = [];
   private shieldWasActive = false;
-  private boltGeo = new THREE.SphereGeometry(0.14, 8, 8);
+  /** Shared procedural projectile geometry; all are bounded and allocated once. */
+  private boltGeo = new THREE.CapsuleGeometry(0.085, 0.34, 3, 8);
+  private enemyShardGeo = new THREE.OctahedronGeometry(1, 0);
+  private bioCoreGeo = new THREE.IcosahedronGeometry(0.56, 1);
+  private bioShellGeo = new THREE.IcosahedronGeometry(1, 1);
+  private bossOrbCoreGeo = new THREE.IcosahedronGeometry(0.46, 1);
+  private bossOrbShellGeo = new THREE.IcosahedronGeometry(1, 2);
+  private bossOrbRingGeo = new THREE.TorusGeometry(0.78, 0.045, 6, 32);
+  private bossFanGeo = new THREE.ConeGeometry(0.42, 1.6, 5);
+  private bossFanCoreGeo = new THREE.ConeGeometry(0.16, 1.32, 5);
+  private orbitalNeedleGeo = new THREE.ConeGeometry(0.2, 1.3, 6);
+  private orbitalLocatorGeo = new THREE.TorusGeometry(0.58, 0.045, 6, 24);
+  /** Shared pickup structure; materials remain per-pickup for warning/full-state fades. */
+  private pickupEnergyCoreGeo = new THREE.OctahedronGeometry(0.22, 0);
+  private pickupEnergyShellGeo = new THREE.IcosahedronGeometry(0.36, 1);
+  private pickupEnergyCoilGeo = new THREE.TorusKnotGeometry(0.235, 0.018, 40, 5, 2, 3);
+  private pickupRepairCoreGeo = new THREE.DodecahedronGeometry(0.2, 0);
+  private pickupRepairCrossGeo = repairCrossGeometry();
+  private pickupRepairFrameGeo = new THREE.TorusGeometry(0.46, 0.045, 4, 6);
+  private pickupRepairShellGeo = new THREE.OctahedronGeometry(0.56, 0);
   private eliteShellGeo = new THREE.SphereGeometry(1.05, 16, 12);
   private eliteRingGeo = new THREE.TorusGeometry(0.9, 0.055, 8, 30);
   private eliteBarGeo = new THREE.PlaneGeometry(1.7, 0.16);
@@ -118,10 +167,18 @@ export class SurvivorRenderer {
   private animFrame = 0;
   private readonly mats = new Map<string, THREE.MeshStandardMaterial>();
   private readonly basicMats = new Map<string, THREE.MeshBasicMaterial>();
+  private readonly proceduralMats = new Map<string, THREE.MeshBasicMaterial>();
 
   constructor(assets: AssetLibrary) {
     this.assets = assets;
     this.root.name = 'survivor-actors';
+    // Author the reusable projectile axes once. Forward is +Z throughout survivor mode.
+    this.boltGeo.rotateX(Math.PI / 2);
+    this.enemyShardGeo.scale(0.36, 0.3, 0.9);
+    this.bossFanGeo.rotateX(Math.PI / 2);
+    this.bossFanCoreGeo.rotateX(Math.PI / 2);
+    this.orbitalNeedleGeo.rotateX(Math.PI / 2);
+    this.pickupRepairFrameGeo.rotateX(Math.PI / 2);
   }
 
   async setupPlayer(heroId: keyof typeof HEROES): Promise<void> {
@@ -220,6 +277,29 @@ export class SurvivorRenderer {
     return m;
   }
 
+  private proceduralMat(
+    color: string,
+    opacity: number,
+    additive = false,
+    wireframe = false,
+  ): THREE.MeshBasicMaterial {
+    const key = `${color}:${opacity}:${additive ? 1 : 0}:${wireframe ? 1 : 0}`;
+    let material = this.proceduralMats.get(key);
+    if (!material) {
+      material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: opacity < 1,
+        opacity,
+        wireframe,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      });
+      this.proceduralMats.set(key, material);
+    }
+    return material;
+  }
+
   /**
    * Shared Cosmic Boomerang geometry.
    *
@@ -280,6 +360,15 @@ export class SurvivorRenderer {
     color: string,
     variant = 0,
   ): THREE.Object3D {
+    const shared = (geometry: THREE.BufferGeometry, material: THREE.Material, name?: string): THREE.Mesh => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.sharedGeometry = true;
+      mesh.userData.ownsGeometry = false;
+      mesh.userData.ownsMaterial = false;
+      if (name) mesh.name = name;
+      return mesh;
+    };
+
     if (kind === 'boomerang') {
       /*
        * A boomerang, not a disc.
@@ -338,11 +427,64 @@ export class SurvivorRenderer {
       void color;
       return g;
     }
-    if (kind !== 'rocket' && kind !== 'drone' && kind !== 'rotary-round') {
-      return new THREE.Mesh(this.boltGeo, this.mat(color));
+    if (kind === 'bolt') {
+      const bolt = shared(this.boltGeo, this.mat(color), 'projectile-bolt');
+      return bolt;
+    }
+    if (kind === 'enemy') {
+      const shard = shared(this.enemyShardGeo, this.proceduralMat('#ff4966', 0.92, true), 'projectile-enemy');
+      return shard;
+    }
+    if (kind === 'bioplasma') {
+      const g = new THREE.Group();
+      g.name = 'projectile-bioplasma';
+      const core = shared(this.bioCoreGeo, this.proceduralMat('#f5fff3', 0.96, true), 'bioplasma-core');
+      core.scale.set(0.72, 0.72, 0.96);
+      const shell = shared(this.bioShellGeo, this.proceduralMat(color, 0.48, true, true), 'bioplasma-shell');
+      shell.scale.set(0.96, 0.8, 1);
+      const nucleus = shared(this.enemyShardGeo, this.proceduralMat('#79ff73', 0.8, true), 'bioplasma-nucleus');
+      nucleus.scale.setScalar(0.32);
+      nucleus.position.set(0.2, 0.12, -0.12);
+      g.add(shell, core, nucleus);
+      return g;
+    }
+    if (kind === 'boss-orb') {
+      const g = new THREE.Group();
+      g.name = 'projectile-boss-orb';
+      const shell = shared(this.bossOrbShellGeo, this.proceduralMat('#ff173e', 0.26, true, true), 'boss-orb-shell');
+      const core = shared(this.bossOrbCoreGeo, this.proceduralMat('#fff1ea', 0.98, true), 'boss-orb-core');
+      const mantle = shared(this.bioCoreGeo, this.proceduralMat(color, 0.62, true), 'boss-orb-mantle');
+      mantle.scale.setScalar(0.7);
+      const ringA = shared(this.bossOrbRingGeo, this.proceduralMat('#ff7890', 0.78, true), 'boss-orb-ring-a');
+      const ringB = shared(this.bossOrbRingGeo, this.proceduralMat('#ffcfb8', 0.52, true), 'boss-orb-ring-b');
+      ringA.rotation.x = Math.PI / 2.8;
+      ringB.rotation.z = Math.PI / 2;
+      g.add(shell, mantle, core, ringA, ringB);
+      return g;
+    }
+    if (kind === 'boss-fan') {
+      const g = new THREE.Group();
+      g.name = 'projectile-boss-fan';
+      const blade = shared(this.bossFanGeo, this.proceduralMat('#ff3157', 0.82, true), 'boss-fan-blade');
+      const core = shared(this.bossFanCoreGeo, this.proceduralMat('#fff3e8', 0.98, true), 'boss-fan-core');
+      blade.position.z = 0.02;
+      core.position.z = 0.06;
+      g.add(blade, core);
+      return g;
+    }
+    if (kind === 'orbital-marker') {
+      const g = new THREE.Group();
+      g.name = 'projectile-orbital-marker';
+      const needle = shared(this.orbitalNeedleGeo, this.proceduralMat('#fff4c8', 0.95, true), 'orbital-needle');
+      const locator = shared(this.orbitalLocatorGeo, this.proceduralMat('#ffd46a', 0.72, true), 'orbital-locator');
+      locator.rotation.x = Math.PI / 2;
+      locator.position.z = -0.18;
+      g.add(needle, locator);
+      return g;
     }
 
     const g = new THREE.Group();
+    g.name = `projectile-${kind}`;
     if (kind === 'rotary-round') {
       const glow = this.ownMesh(new THREE.Mesh(
         new THREE.BoxGeometry(0.13, 0.11, 1.05),
@@ -455,14 +597,19 @@ export class SurvivorRenderer {
       vis.mesh.visible = true;
       vis.update(shapeToRender(a.shape));
       vis.material.color.set(a.color);
+      vis.outlineMaterial.color.set(a.color);
       const t = 1 - Math.max(0, Math.min(1, a.remaining / a.maxRemaining));
+      const heartbeat = 0.76 + Math.sin(performance.now() * 0.012 + used * 1.7) * 0.24;
       if (a.lifecycle === 'windup') {
         // Warning: builds toward the strike so the read is unambiguous.
-        vis.material.opacity = 0.16 + t * 0.30;
+        vis.material.opacity = 0.1 + t * 0.2;
+        vis.outlineMaterial.opacity = (0.5 + t * 0.46) * heartbeat;
       } else if (a.lifecycle === 'active') {
-        vis.material.opacity = a.damaging ? 0.62 : 0.30;
+        vis.material.opacity = a.damaging ? 0.38 : 0.2;
+        vis.outlineMaterial.opacity = a.damaging ? 1 : 0.58;
       } else {
-        vis.material.opacity = Math.max(0, 0.5 * (1 - t));
+        vis.material.opacity = Math.max(0, 0.32 * (1 - t));
+        vis.outlineMaterial.opacity = Math.max(0, 0.74 * (1 - t));
       }
       used += 1;
     }
@@ -739,13 +886,28 @@ export class SurvivorRenderer {
         this.root.add(mesh);
       }
       const boomerang = mesh.name === 'projectile-boomerang';
-      if (mesh instanceof THREE.Group && !boomerang) {
+      if (!boomerang) {
         mesh.rotation.y = Math.atan2(p.vx, p.vz);
+      }
+      if (mesh instanceof THREE.Group && !boomerang) {
         const exhaust = mesh.getObjectByName('projectile-exhaust');
         if (exhaust) {
           const flicker = 0.82 + Math.sin(performance.now() * 0.045 + p.id) * 0.2;
           exhaust.scale.set(1, flicker, 1);
         }
+        const bioShell = mesh.getObjectByName('bioplasma-shell');
+        if (bioShell) {
+          bioShell.rotation.x += dt * 2.4;
+          bioShell.rotation.z -= dt * 3.1;
+        }
+        const bossShell = mesh.getObjectByName('boss-orb-shell');
+        if (bossShell) bossShell.rotation.y += dt * 2.8;
+        const ringA = mesh.getObjectByName('boss-orb-ring-a');
+        const ringB = mesh.getObjectByName('boss-orb-ring-b');
+        if (ringA) ringA.rotation.z += dt * 4.2;
+        if (ringB) ringB.rotation.x -= dt * 3.3;
+        const locator = mesh.getObjectByName('orbital-locator');
+        if (locator) locator.rotation.z += dt * 5.5;
       }
       if (boomerang) {
         /*
@@ -779,8 +941,18 @@ export class SurvivorRenderer {
                 ? Math.max(2.8, (p.visualRadius || p.radius) * 4.2)
                 : p.kind === 'boss-fan'
                   ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5)
-                  : 1;
-      if (!(mesh instanceof THREE.Group)) mesh.scale.setScalar(s);
+                  : p.kind === 'bolt'
+                    ? Math.max(0.85, (p.visualRadius || p.radius) / 0.2)
+                    : p.kind === 'enemy'
+                      ? Math.max(0.8, (p.visualRadius || p.radius) / 0.2)
+                      : 1;
+      if (!(mesh instanceof THREE.Group)) {
+        mesh.scale.setScalar(s);
+      } else if (p.kind === 'bioplasma' || p.kind === 'boss-orb' || p.kind === 'boss-fan') {
+        mesh.scale.setScalar(Math.max(0.12, p.visualRadius || p.radius));
+      } else if (p.kind === 'orbital-marker') {
+        mesh.scale.setScalar(Math.max(0.35, (p.visualRadius || p.radius) * 1.6));
+      }
       mesh.position.set(
         p.x,
         p.kind === 'rocket' && p.armTimer > 0
@@ -792,18 +964,14 @@ export class SurvivorRenderer {
               : 1.0,
         p.z,
       );
-      if (mesh instanceof THREE.Mesh && (mesh.material instanceof THREE.MeshStandardMaterial || mesh.material instanceof THREE.MeshBasicMaterial)) {
-        // hostile projectiles stay bright
-        if (p.kind === 'boss-orb' || p.kind === 'boss-fan') {
-          (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.4;
-        }
+      if (mesh instanceof THREE.Mesh && mesh.material instanceof THREE.MeshStandardMaterial) {
+        mesh.material.emissiveIntensity = p.kind === 'bioplasma' ? 2.2 : 1.3;
       }
       if (mesh instanceof THREE.Mesh && p.kind === 'rocket' && p.armTimer > 0) {
         mesh.scale.setScalar(p.explodeRadius * 1.4);
         (mesh.material as THREE.MeshStandardMaterial).opacity = 0.35;
-      } else if (mesh instanceof THREE.Mesh) {
-        (mesh.material as THREE.MeshStandardMaterial).opacity = 0.95;
-        (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = p.kind === 'bioplasma' ? 2.2 : 1.3;
+      } else if (mesh instanceof THREE.Mesh && mesh.material instanceof THREE.MeshStandardMaterial) {
+        mesh.material.opacity = 0.95;
       }
     }
   }
@@ -1385,6 +1553,7 @@ export class SurvivorRenderer {
     for (const [id, obj] of this.pickups) {
       if (!alive.has(id)) {
         this.root.remove(obj);
+        this.disposeEffectObject(obj);
         this.pickups.delete(id);
       }
     }
@@ -1393,55 +1562,73 @@ export class SurvivorRenderer {
       let obj = this.pickups.get(p.id);
       if (!obj) {
         const g = new THREE.Group();
+        g.name = p.kind === 'xp' ? 'pickup-energy' : 'pickup-repair';
+        const sharedPickupMesh = (
+          geometry: THREE.BufferGeometry,
+          material: THREE.MeshBasicMaterial,
+          name: string,
+        ): THREE.Mesh => {
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = name;
+          mesh.userData.sharedGeometry = true;
+          mesh.userData.ownsGeometry = false;
+          mesh.userData.ownsMaterial = true;
+          return mesh;
+        };
         if (p.kind === 'xp') {
-          // Cyan crystalline energy — premium bundles are larger/brighter, same type.
+          // Energy: faceted core, transparent crystalline shell and a non-spherical coil.
           const s = p.premium ? 1.35 : 1;
-          const core = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.22 * s, 0),
-            this.effectMat(p.premium ? '#a8ffe0' : '#66ffcc', 0.95, true),
+          const core = sharedPickupMesh(
+            this.pickupEnergyCoreGeo,
+            this.effectMat(p.premium ? '#73ffd5' : '#16cfe0', 0.92, false),
+            'energy-core',
           );
-          const halo = new THREE.Mesh(
-            new THREE.SphereGeometry(0.32 * s, 10, 10),
-            this.effectMat('#88ffdd', p.premium ? 0.32 : 0.22, true),
+          // Normal blending holds the cyan silhouette against both bright floor panels and
+          // dark corridors; additive white is reserved for the narrow moving coil.
+          const shellMat = this.effectMat(p.premium ? '#a5ffe0' : '#5ae4f3', p.premium ? 0.62 : 0.5, false);
+          shellMat.wireframe = true;
+          const shell = sharedPickupMesh(
+            this.pickupEnergyShellGeo,
+            shellMat,
+            'energy-shell',
           );
-          const ring = new THREE.Mesh(
-            new THREE.TorusGeometry(0.28 * s, 0.03 * s, 6, 16),
-            this.effectMat('#aaffee', 0.7, true),
+          const coil = sharedPickupMesh(
+            this.pickupEnergyCoilGeo,
+            this.effectMat(p.premium ? '#ffe27a' : '#b1fff5', p.premium ? 0.56 : 0.48, true),
+            'energy-coil',
           );
-          ring.rotation.x = Math.PI / 2;
-          g.add(halo, core, ring);
-          if (p.premium) g.scale.setScalar(1.2);
+          coil.rotation.x = Math.PI / 2;
+          core.scale.setScalar(s);
+          shell.scale.setScalar(s);
+          coil.scale.setScalar(s);
+          g.add(shell, core, coil);
         } else {
-          // Health — crimson medical cross only.
-          const core = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 12, 12),
-            this.effectMat('#ffffff', 0.98, true),
+          // Repair: a warm cross in a hexagonal frame — distinct from energy in grayscale.
+          const shellMat = this.effectMat('#ff3158', 0.2, false);
+          shellMat.wireframe = true;
+          const shell = sharedPickupMesh(
+            this.pickupRepairShellGeo,
+            shellMat,
+            'repair-shell',
           );
-          const barH = new THREE.Mesh(
-            new THREE.BoxGeometry(0.58, 0.14, 0.14),
-            this.effectMat('#ff2255', 0.95, true),
+          const frame = sharedPickupMesh(
+            this.pickupRepairFrameGeo,
+            this.effectMat('#ff496b', 0.84, true),
+            'repair-frame',
           );
-          const barV = new THREE.Mesh(
-            new THREE.BoxGeometry(0.14, 0.58, 0.14),
-            this.effectMat('#ff4477', 0.95, true),
+          const core = sharedPickupMesh(
+            this.pickupRepairCoreGeo,
+            this.effectMat('#ff8a78', 0.72, true),
+            'repair-core',
           );
-          const ring = new THREE.Mesh(
-            new THREE.TorusGeometry(0.48, 0.05, 8, 22),
-            this.effectMat('#ff6699', 0.8, true),
+          const cross = sharedPickupMesh(
+            this.pickupRepairCrossGeo,
+            this.effectMat('#fff7ed', 0.98, true),
+            'repair-cross',
           );
-          ring.rotation.x = Math.PI / 2;
-          ring.name = 'repair-ring';
-          const glow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.55, 12, 12),
-            this.effectMat('#ff1144', 0.22, true),
-          );
-          const pillar = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.04, 0.06, 0.9, 6),
-            this.effectMat('#ff88aa', 0.4, true),
-          );
-          pillar.position.y = 0.55;
-          g.add(glow, ring, core, barH, barV, pillar);
-          g.scale.setScalar(1.32);
+          shell.rotation.y = Math.PI / 4;
+          cross.position.y = 0.03;
+          g.add(shell, frame, core, cross);
         }
         obj = g;
         this.pickups.set(p.id, obj);
@@ -1451,7 +1638,11 @@ export class SurvivorRenderer {
         // Slow strong pulse + optional magnet trail tint.
         const bob = 0.62 + Math.sin(performance.now() * 0.005 + p.id) * 0.16;
         obj.position.set(p.x, bob, p.z);
-        obj.rotation.y += 0.018;
+        obj.rotation.y += 0.013;
+        const frame = obj.getObjectByName('repair-frame');
+        const shell = obj.getObjectByName('repair-shell');
+        if (frame) frame.rotation.y -= 0.024;
+        if (shell) shell.rotation.y += 0.01;
         const full = state.player.health >= state.player.maxHealth - 0.01;
         const expiring = Number.isFinite(p.life) && p.life < SURVIVOR.repairPickupWarnLife;
         const pulse = expiring
@@ -1464,7 +1655,7 @@ export class SurvivorRenderer {
             c.material.opacity = base * (full ? 0.32 : pulse);
           }
         });
-        const baseScale = 1.32;
+        const baseScale = 1.18;
         obj.scale.setScalar(
           full ? baseScale * 0.72 : expiring ? baseScale * (0.95 + Math.sin(performance.now() * 0.03) * 0.12) : baseScale,
         );
@@ -1472,11 +1663,15 @@ export class SurvivorRenderer {
           // Faint pink magnet trail (short-lived pooled effects).
         }
       } else if (p.kind === 'xp') {
-        // Faster crystalline spin; smaller than health.
+        // Fast crystalline shell and counter-rotating coil; smaller than repair.
         const bob = 0.5 + Math.sin(performance.now() * 0.01 + p.id) * 0.1;
         obj.position.set(p.x, bob, p.z);
-        obj.rotation.y += 0.07;
-        obj.scale.setScalar(0.92);
+        obj.rotation.y += 0.045;
+        const shell = obj.getObjectByName('energy-shell');
+        const coil = obj.getObjectByName('energy-coil');
+        if (shell) shell.rotation.z += 0.022;
+        if (coil) coil.rotation.z -= 0.055;
+        obj.scale.setScalar(p.premium ? 1.18 : 1);
       } else {
         const bob = 0.55 + Math.sin(performance.now() * 0.008 + p.id) * 0.12;
         obj.position.set(p.x, bob, p.z);
@@ -2309,6 +2504,7 @@ export class SurvivorRenderer {
     for (const mesh of this.projectiles.values()) {
       if (mesh instanceof THREE.Group) this.disposeEffectObject(mesh);
     }
+    for (const pickup of this.pickups.values()) this.disposeEffectObject(pickup);
     for (const mesh of this.railPool) {
       const m = mesh.material;
       if (m instanceof THREE.Material && m.userData?.owned) m.dispose();
@@ -2335,6 +2531,23 @@ export class SurvivorRenderer {
     }
     this.allies.clear();
     this.boltGeo.dispose();
+    this.enemyShardGeo.dispose();
+    this.bioCoreGeo.dispose();
+    this.bioShellGeo.dispose();
+    this.bossOrbCoreGeo.dispose();
+    this.bossOrbShellGeo.dispose();
+    this.bossOrbRingGeo.dispose();
+    this.bossFanGeo.dispose();
+    this.bossFanCoreGeo.dispose();
+    this.orbitalNeedleGeo.dispose();
+    this.orbitalLocatorGeo.dispose();
+    this.pickupEnergyCoreGeo.dispose();
+    this.pickupEnergyShellGeo.dispose();
+    this.pickupEnergyCoilGeo.dispose();
+    this.pickupRepairCoreGeo.dispose();
+    this.pickupRepairCrossGeo.dispose();
+    this.pickupRepairFrameGeo.dispose();
+    this.pickupRepairShellGeo.dispose();
     // Shared Cosmic Boomerang silhouette: owned by the renderer, not by any disc.
     if (this.boomerangGeo) {
       this.boomerangGeo.arm.dispose();
@@ -2356,6 +2569,8 @@ export class SurvivorRenderer {
     this.mats.clear();
     for (const m of this.basicMats.values()) m.dispose();
     this.basicMats.clear();
+    for (const m of this.proceduralMats.values()) m.dispose();
+    this.proceduralMats.clear();
     for (const m of this.exhaustMats) m.dispose();
     this.exhaustMats = [];
     for (const m of this.cacheMats) m.dispose();

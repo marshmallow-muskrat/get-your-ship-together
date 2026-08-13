@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SurvivalPolicyController,
   runSurvivalSimulation,
   summarizeDistribution,
   summarizeHeroRuns,
 } from './survivorSurvivalBenchmark';
+import { createSurvivorState } from './survivorState';
 import { formatSurvivalMarkdown, formatSurvivalSvg } from './survivalReport';
 
 describe('full-run survival benchmark', () => {
@@ -23,6 +25,19 @@ describe('full-run survival benchmark', () => {
     const a = runSurvivalSimulation(opts);
     const b = runSurvivalSimulation(opts);
     expect(b).toEqual(a);
+  });
+
+  it('keeps the comparison policy inside the stable combat pocket on a larger map', () => {
+    const state = createSurvivorState('bee', null, 9142);
+    state.player.x = 30;
+    state.player.z = 0;
+    state.time = 0;
+
+    const input = new SurvivalPolicyController('competent', 9142).input(state, 1 / 60);
+
+    // At x=30 the expanded 64-half-width station still has ample room, but the
+    // benchmark's legacy 27-unit comparison envelope must pull the policy inward.
+    expect(input.moveX).toBeLessThan(0);
   });
 
   it('reports real pressure, actions and terminal/censored status', () => {

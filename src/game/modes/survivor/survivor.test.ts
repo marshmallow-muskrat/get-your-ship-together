@@ -1584,8 +1584,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.8.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.8.0');
+  it('is endless-2.9.0-test-center', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.9.0-test-center');
   });
 });
 
@@ -2418,7 +2418,7 @@ describe('early specialist gates', () => {
 
 /** Which perimeter edge a spawn point sits on. */
 function edgeOf(x: number, z: number): number {
-  const h = SURVIVOR.arenaHalf + 1.2;
+  const h = SURVIVOR.combatSpawnHalf + 1.2;
   if (Math.abs(z + h) < 0.01) return 0;
   if (Math.abs(z - h) < 0.01) return 1;
   if (Math.abs(x + h) < 0.01) return 2;

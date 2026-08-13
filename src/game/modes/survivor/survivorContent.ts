@@ -28,7 +28,7 @@ import {
  * policy are unchanged — but their stamp records the partition that was live when they
  * were taken rather than the release they belong to.
  */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.8.0';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.9.0-test-center';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -78,7 +78,17 @@ export const SURVIVOR = {
    * by 5–7 minutes, so 2.5.0 lowers the opening value to prevent accidental backlog.
    */
   firstBossBaseHealth: 3000,
-  arenaHalf: 32, // 64×64 playable
+  /** Doubled Test Center platform: 128 x 128 playable world units. */
+  arenaHalf: 64,
+  /**
+   * Normal waves still enter one legacy-platform half-width from the player.
+   *
+   * The larger map creates roaming room; it must not turn every encounter into a
+   * 60-unit commute from a distant global wall.
+   */
+  combatSpawnHalf: 32,
+  /** Stable boss entry distance, independent of the expanded global platform. */
+  bossSpawnRadius: 14,
   cameraHalf: 12,
   actorScale: {
     player: 1.5,
@@ -1132,7 +1142,7 @@ export const PASSIVES: PassiveDef[] = [
     id: 'move-speed',
     name: 'Thruster Boost',
     description:
-      'Move 6% faster per level, up to +30%. Useful for spacing and dodging without being mandatory — the enemy speed curve leaves kiting headroom on its own.',
+      'Move 6% faster per level, up to +30%, to cross attack lanes and keep combat spacing.',
     maxLevel: 5,
     perLevel: 0.06,
   },
@@ -1140,7 +1150,7 @@ export const PASSIVES: PassiveDef[] = [
     id: 'pickup-radius',
     name: 'Magnet Field',
     description:
-      'Energy reach +0.55 and repair reach +1.0 world units per level, and pickups fly to you faster. Ship and Mech forms keep their larger collection radii on top.',
+      'Extend energy and repair reach, and pull both pickup types toward you faster.',
     maxLevel: 5,
     perLevel: 0.55,
   },
@@ -1156,7 +1166,7 @@ export const PASSIVES: PassiveDef[] = [
     id: 'regen',
     name: 'Nanite Bleed',
     description:
-      'Repair 0.4% of maximum integrity per second per level (2.0%/s at L5) after two seconds without taking damage, and collect 10% more from repair orbs per level.',
+      'Regenerate after two safe seconds and increase the healing delivered by repair orbs.',
     maxLevel: Infinity,
     perLevel: 0.004,
     repeatable: true,
@@ -1179,7 +1189,7 @@ export const PASSIVES: PassiveDef[] = [
     id: 'overdrive-systems',
     name: 'Overdrive Systems',
     description:
-      'Mech Overdrive lasts longer, returns sooner, and moves faster. Cooldown is measured activation-to-activation and keeps counting down while Mech is active. At L5: 7.0s duration, 28.0s cooldown (exactly 25% scheduled uptime) and +15% Mech-only movement speed.',
+      'Extend Mech Overdrive, shorten its activation-to-activation cooldown, and move faster while transformed.',
     maxLevel: 5,
     // Representative per-level step; the authored table below is authoritative.
     perLevel: 0.03,
@@ -1195,7 +1205,7 @@ export const PASSIVES: PassiveDef[] = [
     id: 'reinforced-airframe',
     name: 'Reinforced Airframe',
     description:
-      'Afterburner form takes 5% less damage per level, from 50% baseline mitigation up to 75% at L5. Ship survivability is earned by the build rather than granted by the form.',
+      'Afterburner takes 5% less damage per level, rising from 50% baseline mitigation to 75% at L5.',
     maxLevel: 5,
     perLevel: 0.05,
   },

@@ -126,7 +126,10 @@ export class SurvivorHud {
     this.root.innerHTML = `
       <div class="sv-top">
         <div class="sv-identity">
-          <span class="eyebrow">CONTAINMENT PROTOCOL</span>
+          <div class="sv-protocol-line">
+            <span class="eyebrow">CONTAINMENT PROTOCOL</span>
+            <span class="sv-test-tag">TEST CENTER</span>
+          </div>
           <strong id="sv-hero">—</strong>
         </div>
         <div class="sv-timer-wrap">
@@ -184,22 +187,22 @@ export class SurvivorHud {
         </div>
         <div class="sv-abilities">
           <button type="button" class="sv-ability" id="sv-ab-dodge" disabled tabindex="-1">
-            <span class="sv-ab-key" id="sv-key-dodge">SPC</span>
+            <span class="sv-ab-head"><svg class="sv-ab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h14M12 5l7 7-7 7" /></svg><span class="sv-ab-key" id="sv-key-dodge">SPC</span></span>
             <span class="sv-ab-name">DODGE</span>
             <span class="sv-ab-state" id="sv-dodge-state">READY</span>
           </button>
           <button type="button" class="sv-ability" id="sv-ab-q" disabled tabindex="-1">
-            <span class="sv-ab-key" id="sv-key-repulsor">Q</span>
+            <span class="sv-ab-head"><svg class="sv-ab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M5.6 8.3A7.3 7.3 0 0 0 5.6 15.7M18.4 8.3a7.3 7.3 0 0 1 0 7.4M2.8 5.6a11 11 0 0 0 0 12.8M21.2 5.6a11 11 0 0 1 0 12.8" /></svg><span class="sv-ab-key" id="sv-key-repulsor">Q</span></span>
             <span class="sv-ab-name">REPULSE</span>
             <span class="sv-ab-state" id="sv-q-state">READY</span>
           </button>
           <button type="button" class="sv-ability" id="sv-ab-e" disabled tabindex="-1">
-            <span class="sv-ab-key" id="sv-key-ship">E</span>
+            <span class="sv-ab-head"><svg class="sv-ab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 20l-8-3.7L4 20 12 3Z" /><path d="M12 8v8" /></svg><span class="sv-ab-key" id="sv-key-ship">E</span></span>
             <span class="sv-ab-name">SHIP</span>
             <span class="sv-ab-state" id="sv-e-state">READY</span>
           </button>
           <button type="button" class="sv-ability ultimate" id="sv-ab-r" disabled tabindex="-1">
-            <span class="sv-ab-key" id="sv-key-mech">R</span>
+            <span class="sv-ab-head"><svg class="sv-ab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 7.8 4.5v9L12 21l-7.8-4.5v-9L12 3Z" /><path d="M8.5 9.5h7v5h-7zM12 9.5V6.8" /></svg><span class="sv-ab-key" id="sv-key-mech">R</span></span>
             <span class="sv-ab-name">MECH CORE</span>
             <span class="sv-ab-state" id="sv-r-state">0%</span>
           </button>
@@ -1025,6 +1028,8 @@ export class SurvivorHud {
             btn.type = 'button';
             btn.className = 'sv-choice sv-card';
             btn.dataset.i = String(i);
+            btn.dataset.cardKind = c.kind;
+            btn.dataset.cardCategory = (card?.category ?? fallbackLabel(c)).toLowerCase().replaceAll(' ', '-');
 
             /*
              * Four deliberate regions, as grid rows: head (category + level), title
@@ -1061,6 +1066,11 @@ export class SurvivorHud {
               head.appendChild(level);
             }
             btn.appendChild(head);
+
+            const sigil = document.createElement('span');
+            sigil.className = 'sv-card-sigil';
+            sigil.setAttribute('aria-hidden', 'true');
+            btn.appendChild(sigil);
 
             /*
              * The parent line, when it says something the headline does not.
@@ -1115,10 +1125,13 @@ export class SurvivorHud {
             // Reserved footer. Nothing else is ever placed in this row.
             const footer = document.createElement('span');
             footer.className = 'sv-card-footer';
+            const cta = document.createElement('span');
+            cta.className = 'sv-card-cta';
+            cta.textContent = 'SELECT';
             const bind = document.createElement('kbd');
             bind.className = 'sv-card-bind';
             bind.textContent = labels[i] ?? String(i + 1);
-            footer.appendChild(bind);
+            footer.append(cta, bind);
             btn.appendChild(footer);
 
             btn.addEventListener('pointerdown', (ev) => {

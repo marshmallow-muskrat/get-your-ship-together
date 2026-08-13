@@ -406,10 +406,14 @@ export class SurvivorMode {
        * lance is a slow, telegraphed weapon, so a freshly-built fixture otherwise shows
        * nothing but the telegraph.
        */
-      // The first lance fires immediately and arms for `life` (~0.7s), so stopping just
-      // past that lands inside the detonation's effect window.
-      const steps = Math.round(0.95 / SURVIVOR.fixedDt);
-      for (let i = 0; i < steps; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      // Stop on the first simulation step that creates the real impact. A fixed
+      // timestamp can overshoot the deliberately brief 0.22s beam before the browser
+      // gets its first rendered frame, especially when fixture setup is under load.
+      const maxSteps = Math.round(1.5 / SURVIVOR.fixedDt);
+      for (let i = 0; i < maxSteps; i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        if (state.effects.some((effect) => effect.kind === 'orbital-strike')) break;
+      }
     } else if (this.fixture === 'survivor-plasma-l1' || this.fixture === 'survivor-plasma-ship') {
       /*
        * Fast-forward a curved run so the trail already exists on the first frame.
@@ -580,6 +584,7 @@ export class SurvivorMode {
       this.state.player.hitShake,
       this.state.time,
     );
+    this.arena?.followLighting(this.state.player.x, this.state.player.z);
     this.hud?.publish(this.state, this.showMetrics || this.fixture === 'survivor-horde', {
       settingsOpen: this.settingsOpen,
       rebinding: this.rebindingAction,

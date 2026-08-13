@@ -63,6 +63,9 @@ const useProxy = proxyServer && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(ba
 
 const browser = await chromium.launch({
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
+  ...(process.env.CHROME_EXECUTABLE_PATH
+    ? { executablePath: process.env.CHROME_EXECUTABLE_PATH }
+    : {}),
   ...(useProxy
     ? { proxy: { server: proxyServer, bypass: 'localhost,127.0.0.1,::1' } }
     : {}),

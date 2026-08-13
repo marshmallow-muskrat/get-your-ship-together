@@ -1,0 +1,1195 @@
+{
+  "generatedAt": "2026-08-13T04:00:28.202Z",
+  "browser": "system Chrome via Playwright 1.56.1",
+  "baselineUrl": "http://127.0.0.1:4181/",
+  "candidateUrl": "http://127.0.0.1:4189/",
+  "fixtures": [
+    {
+      "fixture": "survivor-start",
+      "elapsedMs": 5893,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-levelup",
+      "elapsedMs": 5418,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": true,
+        "cardCount": 3,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-horde",
+      "elapsedMs": 5643,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-mech",
+      "elapsedMs": 5237,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-boss",
+      "elapsedMs": 7948,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-repulsor",
+      "elapsedMs": 5507,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-ship",
+      "elapsedMs": 5484,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-damage",
+      "elapsedMs": 4918,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-miniboss",
+      "elapsedMs": 8323,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-pickups",
+      "elapsedMs": 5290,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-arc",
+      "elapsedMs": 5118,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-orbital",
+      "elapsedMs": 5771,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-mega",
+      "elapsedMs": 8186,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-mega-cache",
+      "elapsedMs": 5868,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-cache",
+      "elapsedMs": 5511,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-shield",
+      "elapsedMs": 5535,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-recall",
+      "elapsedMs": 4980,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-gunship",
+      "elapsedMs": 5656,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-identity",
+      "elapsedMs": 4997,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-rotary",
+      "elapsedMs": 5023,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-boomerang",
+      "elapsedMs": 5736,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-plasma-l1",
+      "elapsedMs": 5710,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-plasma-ship",
+      "elapsedMs": 5901,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-ship-ram",
+      "elapsedMs": 7026,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-overdrive",
+      "elapsedMs": 5155,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-cleanup-arrival",
+      "elapsedMs": 5734,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-cleanup-combat",
+      "elapsedMs": 5590,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-cleanup-departure",
+      "elapsedMs": 5651,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-telemetry",
+      "elapsedMs": 5936,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-stress",
+      "elapsedMs": 6881,
+      "navigationError": null,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1600,
+          "height": 1000
+        },
+        "document": {
+          "scrollWidth": 1600,
+          "scrollHeight": 1000
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1600,
+          "cssHeight": 1000,
+          "width": 1600,
+          "height": 1000
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    }
+  ],
+  "responsive": [
+    {
+      "fixture": "survivor-start",
+      "width": 1366,
+      "height": 768,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1366,
+          "height": 768
+        },
+        "document": {
+          "scrollWidth": 1366,
+          "scrollHeight": 768
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1366,
+          "cssHeight": 768,
+          "width": 1366,
+          "height": 768
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-levelup",
+      "width": 1366,
+      "height": 768,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1366,
+          "height": 768
+        },
+        "document": {
+          "scrollWidth": 1366,
+          "scrollHeight": 768
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1366,
+          "cssHeight": 768,
+          "width": 1366,
+          "height": 768
+        },
+        "hudPresent": true,
+        "levelupVisible": true,
+        "cardCount": 3,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-start",
+      "width": 1024,
+      "height": 768,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1024,
+          "height": 768
+        },
+        "document": {
+          "scrollWidth": 1024,
+          "scrollHeight": 768
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1024,
+          "cssHeight": 768,
+          "width": 1024,
+          "height": 768
+        },
+        "hudPresent": true,
+        "levelupVisible": false,
+        "cardCount": 0,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    },
+    {
+      "fixture": "survivor-levelup",
+      "width": 1024,
+      "height": 768,
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": [],
+      "viewport": {
+        "title": "Get Your Ship Together",
+        "viewport": {
+          "width": 1024,
+          "height": 768
+        },
+        "document": {
+          "scrollWidth": 1024,
+          "scrollHeight": 768
+        },
+        "horizontalOverflow": false,
+        "canvas": {
+          "cssWidth": 1024,
+          "cssHeight": 768,
+          "width": 1024,
+          "height": 768
+        },
+        "hudPresent": true,
+        "levelupVisible": true,
+        "cardCount": 3,
+        "cardsWithinViewport": true
+      },
+      "passed": true
+    }
+  ],
+  "metrics": {
+    "baseline": {
+      "text": "FPS 27 · 36.9ms · E 1 · P 4 · K 0\ngeo 26 · tex 8 · prog 11 · draws 1171\nfx 7 · atk 0 · rail 0",
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": []
+    },
+    "candidate": {
+      "text": "FPS 33 · 30.4ms · E 0 · P 0 · K 0\ngeo 27 · tex 8 · prog 14 · draws 74\nfx 5 · atk 0 · rail 0",
+      "consoleErrors": [],
+      "consoleWarnings": [
+        "[]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content."
+      ],
+      "pageErrors": [],
+      "requestFailures": []
+    }
+  },
+  "summary": {
+    "fixturePasses": 30,
+    "fixtureTotal": 30,
+    "responsivePasses": 4,
+    "responsiveTotal": 4,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "requestFailures": 0
+  }
+}

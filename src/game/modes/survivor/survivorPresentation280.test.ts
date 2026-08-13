@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import cssSource from '../../../styles/app.css?raw';
 import hudSource from './survivorHud.ts?raw';
 import { AssetLibrary } from '../../assets/AssetLibrary';
+import { SurvivorArena } from './survivorArena';
 import { SurvivorRenderer } from './survivorRender';
 import {
   groundEffectMotion,
@@ -44,6 +45,27 @@ import {
   type SurvivorHazard,
   type SurvivorState,
 } from './survivorState';
+
+describe('§0 station wayfinding never hides gameplay signals', () => {
+  it('keeps every generated marking out of the depth buffer', () => {
+    const arena = new SurvivorArena();
+    // Build only the synchronous generated decal layer. Imported kit art is irrelevant
+    // to this contract and deliberately remains unloaded in the unit test.
+    (arena as unknown as { addWayfinding(): void }).addWayfinding();
+    const markings: THREE.Mesh[] = [];
+    arena.root.traverse((object) => {
+      if (object instanceof THREE.Mesh) markings.push(object);
+    });
+    expect(markings.length, 'the station built no wayfinding markings').toBeGreaterThan(0);
+    for (const marking of markings) {
+      const materials = Array.isArray(marking.material) ? marking.material : [marking.material];
+      for (const material of materials) {
+        expect(material.depthWrite, `${marking.name || marking.type} writes depth`).toBe(false);
+      }
+    }
+    arena.dispose();
+  });
+});
 import {
   EMPTY_SURVIVOR_INPUT,
   forceBossIntoPattern,

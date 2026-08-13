@@ -273,6 +273,67 @@ export class EnvAssetLibrary {
     return clone;
   }
 
+  /**
+   * Place a large static batch without cloning one scene graph per tile.
+   *
+   * Reactor Platform 7 uses the kit's source geometry and materials exactly as loaded,
+   * but a 128 x 128 floor contains 4,096 cells. Cloning every mesh would turn one
+   * unchanged art asset into thousands of draw calls. One InstancedMesh per source-mesh
+   * layer preserves the asset while reducing the batch to the template's draw-call count.
+   */
+  placeModularInstances(
+    name: ModularPiece,
+    placements: ReadonlyArray<{
+      x: number;
+      z: number;
+      ry?: number;
+      y?: number;
+      scale?: number;
+      scaleY?: number;
+    }>,
+  ): THREE.Group | null {
+    const template = this.modular.get(name);
+    if (!template || placements.length === 0) return null;
+
+    template.updateMatrixWorld(true);
+    const root = new THREE.Group();
+    root.name = `${name}-instances`;
+    const placementMatrix = new THREE.Matrix4();
+    const worldMatrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const rotation = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const axis = new THREE.Vector3(0, 1, 0);
+
+    template.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const batch = new THREE.InstancedMesh(child.geometry, child.material, placements.length);
+      batch.name = `${name}:${child.name || 'mesh'}`;
+      batch.castShadow = child.castShadow;
+      batch.receiveShadow = child.receiveShadow;
+      for (let i = 0; i < placements.length; i += 1) {
+        const p = placements[i]!;
+        const uniform = p.scale ?? 1;
+        const defaultScaleY = WALL_PIECES.has(name)
+          ? WALL_SCALE_Y
+          : name.startsWith('Column_')
+            ? COLUMN_SCALE_Y
+            : 1;
+        position.set(p.x, p.y ?? 0, p.z);
+        rotation.setFromAxisAngle(axis, p.ry ?? 0);
+        scale.set(uniform, uniform * (p.scaleY ?? defaultScaleY), uniform);
+        placementMatrix.compose(position, rotation, scale);
+        worldMatrix.multiplyMatrices(placementMatrix, child.matrixWorld);
+        batch.setMatrixAt(i, worldMatrix);
+      }
+      batch.instanceMatrix.needsUpdate = true;
+      batch.computeBoundingBox();
+      batch.computeBoundingSphere();
+      root.add(batch);
+    });
+    return root;
+  }
+
   placeGltf(
     url: string,
     x: number,

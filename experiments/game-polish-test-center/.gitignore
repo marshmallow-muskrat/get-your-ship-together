@@ -1,0 +1,7 @@
+# Local frozen Vite outputs are reproducible from their corresponding source pass.
+/baseline-build/
+/iterations/
+
+# Local preview-server transcripts are not review artifacts.
+*-server.stdout.log
+*-server.stderr.log

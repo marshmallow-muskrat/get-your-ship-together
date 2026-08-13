@@ -316,7 +316,7 @@ export function weaponUpgradeCard(
     levels: progression.label,
     progression,
     name: formatOverclockLabel(oc),
-    summary: `Keeps the Level 5 ${fam.name} structure and adds flat damage. Overclock damage is additive, so it never compounds.`,
+    summary: `Preserves the Level 5 ${fam.name} firing pattern and adds damage. Each Overclock is additive, so the bonus never compounds.`,
     stats,
     tradeoff: null,
   };
@@ -353,7 +353,7 @@ export function newWeaponCard(weaponId: WeaponId): UpgradeCardCopy {
     progression,
     name: displayName(fam.name),
     summary: fam.prototype
-      ? `${fam.description} Prototypes do not use an ordinary weapon slot.`
+      ? `${fam.description} Prototypes do not use one of your five weapon slots.`
       : fam.description,
     stats,
     tradeoff: null,
@@ -381,7 +381,7 @@ export function passiveCard(
     case 'max-health': {
       const gain = hullPlatingGainAtLevel(next);
       stats.push(`Max integrity ${round(maxHealth)} → ${round(maxHealth + gain)}`);
-      summary = 'Permanently increases maximum integrity. Also increases how much Nanite Bleed repairs, since regeneration scales with hull size.';
+      summary = 'Adds permanent integrity and strengthens percentage-based Nanite Bleed repairs.';
       break;
     }
     case 'regen': {
@@ -392,7 +392,7 @@ export function passiveCard(
       const ra = repairOrbBonusAtLevel(currentLevel);
       const rb = repairOrbBonusAtLevel(next);
       if (rb > ra) stats.push(`Repair orbs +${round(ra * 100)}% → +${round(rb * 100)}%`);
-      summary = `Repairs ${round(b * 100, 2)}% of maximum integrity per second after ${round(SURVIVOR.regenDamagePause, 0)} seconds without taking damage, and increases healing from repair orbs.`;
+      summary = `Repairs ${round(b * 100, 2)}% of maximum integrity per second after ${round(SURVIVOR.regenDamagePause, 0)} safe seconds, and strengthens repair orbs.`;
       break;
     }
     case 'move-speed': {
@@ -400,7 +400,7 @@ export function passiveCard(
       const b = moveSpeedBonus(next);
       stats.push(`Move speed +${round(a * 100)}% → +${round(b * 100)}%`);
       stats.push(`Hard cap +${round(moveSpeedBonus(def.maxLevel) * 100)}%`);
-      summary = 'Move faster through the horde. Helps you keep spacing and reposition for surges and boss telegraphs.';
+      summary = 'Move faster to hold spacing, cross attack lanes, and reposition for boss telegraphs.';
       break;
     }
     case 'pickup-radius': {
@@ -411,7 +411,7 @@ export function passiveCard(
       stats.push(`Energy reach ${round(eA, 2)} → ${round(eB, 2)}`);
       stats.push(`Repair reach ${round(hA, 2)} → ${round(hB, 2)}`);
       stats.push('Pickups also travel to you faster');
-      summary = 'Pulls energy and repair orbs from farther away, and pulls them in faster. Repair reach gains almost twice as much as energy reach. Ship and Mech forms keep their larger collection radii on top of this.';
+      summary = 'Pulls energy and repair orbs from farther away and accelerates collection. Repair reach scales faster; Ship and Mech retain their built-in bonus.';
       break;
     }
     case 'weapon-haste': {
@@ -448,7 +448,7 @@ export function passiveCard(
         `Hard cap at L${cap}: ${round(mechDurationAtLevel(cap), 1)}s / ${round(mechCooldownAtLevel(cap), 1)}s · ${round(mechUptimeFractionAtLevel(cap) * 100, 1)}% uptime · +${round(mechSpeedBonusAtLevel(cap) * 100)}% speed`,
       );
       summary =
-        'Mech Overdrive lasts longer, returns sooner, and moves faster while active. The cooldown is measured activation-to-activation and keeps counting down during Mech, so a longer duration also means less waiting after it ends. The speed bonus applies only in Mech form and multiplies on top of Thruster Boost.';
+        'Mech Overdrive lasts longer, recharges sooner, and moves faster. Cooldown is activation-to-activation and keeps counting down during Mech.';
       break;
     }
     case 'breach-shielding': {
@@ -463,7 +463,7 @@ export function passiveCard(
       stats.push(`Afterburner damage taken −${at(currentLevel)}% → −${at(next)}%`);
       stats.push(`Afterburner window ${SURVIVOR.ship.duration.toFixed(2)}s`);
       summary =
-        'Reduces damage taken in Afterburner form only, from 50% baseline up to a hard 75% ceiling at L5. Ordinary and Mech forms are unaffected.';
+        'Fortifies Afterburner only, raising damage reduction from the 50% baseline toward the 75% L5 cap. Astronaut and Mech are unchanged.';
       break;
     }
   }

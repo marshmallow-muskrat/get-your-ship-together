@@ -363,8 +363,13 @@ export class SurvivalPolicyController {
     dx += (ox - p.x) * 0.16;
     dz += (oz - p.z) * 0.16;
 
-    // Strong, smooth arena-edge correction instead of perfect wall knowledge.
-    const edge = SURVIVOR.arenaHalf - 5;
+    // Strong, smooth combat-pocket correction instead of perfect wall knowledge.
+    //
+    // The Test Center station is deliberately larger than the original arena, but
+    // benchmark policies must remain comparable across layout-only changes. Letting
+    // this bot use the new world edge gave it a much larger kiting envelope even
+    // though live encounter spawns intentionally retain their legacy footprint.
+    const edge = Math.min(SURVIVOR.combatSpawnHalf, SURVIVOR.arenaHalf) - 5;
     if (Math.abs(p.x) > edge) dx += -p.x * 1.8;
     if (Math.abs(p.z) > edge) dz += -p.z * 1.8;
 

@@ -4488,12 +4488,20 @@ function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
 }
 
 function fleetLane(state: SurvivorState, pass: number): { x0: number; z0: number; x1: number; z1: number } {
-  const h = SURVIVOR.arenaHalf * 0.96;
-  const cx = state.player.x * 0.35;
-  const cz = state.player.z * 0.35;
-  if (pass === 0) return { x0: -h, z0: cz - 5, x1: h, z1: cz + 5 };
-  if (pass === 1) return { x0: cx - 5, z0: -h, x1: cx + 5, z1: h };
-  return { x0: -h, z0: h, x1: h, z1: -h };
+  /*
+   * The expanded station must not double Carrier Wing's travel lane and dilute the
+   * protocol. Keep its original 64-wide combat sweep, but centre that window on the
+   * current engagement and shift it inside the station near a perimeter. This preserves
+   * the authored timing/damage density while letting the protocol work anywhere on the
+   * larger map.
+   */
+  const h = SURVIVOR.combatSpawnHalf * 0.96;
+  const limit = SURVIVOR.arenaHalf - h;
+  const cx = Math.max(-limit, Math.min(limit, state.player.x));
+  const cz = Math.max(-limit, Math.min(limit, state.player.z));
+  if (pass === 0) return { x0: cx - h, z0: cz - 5, x1: cx + h, z1: cz + 5 };
+  if (pass === 1) return { x0: cx - 5, z0: cz - h, x1: cx + 5, z1: cz + h };
+  return { x0: cx - h, z0: cz + h, x1: cx + h, z1: cz - h };
 }
 
 function telegraphFleetPass(state: SurvivorState, pass: number): void {
@@ -4718,10 +4726,13 @@ export function forceStartProtocol(state: SurvivorState, id: ProtocolId, potency
 
 /**
  * Gunship originates at the player/cache collection point (on-camera), then flies
- * toward the primary boss or densest cluster and exits at the far arena edge.
+ * toward the primary boss or densest cluster and exits at the local combat edge.
+ * The station can be much larger than the active encounter pocket; tying this pass
+ * to the world edge would stretch its travel speed and timing as the map grows.
  */
 function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: number; z1: number } {
-  const half = SURVIVOR.arenaHalf * 0.95;
+  const worldHalf = SURVIVOR.arenaHalf * 0.95;
+  const localReach = Math.min(SURVIVOR.combatSpawnHalf * 0.95, worldHalf);
   const ox = state.player.x;
   const oz = state.player.z;
   const directions: Array<{ x: number; z: number }> = [];
@@ -4739,13 +4750,10 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
   }
 
   const exitAlong = (dx: number, dz: number): { x: number; z: number } => {
-    let t = Infinity;
-    if (dx > 1e-6) t = Math.min(t, (half - ox) / dx);
-    else if (dx < -1e-6) t = Math.min(t, (-half - ox) / dx);
-    if (dz > 1e-6) t = Math.min(t, (half - oz) / dz);
-    else if (dz < -1e-6) t = Math.min(t, (-half - oz) / dz);
-    if (!Number.isFinite(t) || t < 1) t = half * 2;
-    return { x: ox + dx * t, z: oz + dz * t };
+    return {
+      x: Math.max(-worldHalf, Math.min(worldHalf, ox + dx * localReach)),
+      z: Math.max(-worldHalf, Math.min(worldHalf, oz + dz * localReach)),
+    };
   };
 
   const facingLen = Math.hypot(state.player.facingX, state.player.facingZ) || 1;
@@ -4763,7 +4771,9 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
       score += e.isMiniboss ? 5 : e.isElite ? 2.5 : 1;
     }
     for (const boss of livingBosses(state)) {
-      if (distPointToSegment(boss.x, boss.z, ox, oz, exit.x, exit.z) <= SURVIVOR.gunship.laneHalfWidth + boss.colliderRadius) {
+      // Match the collision corridor used during the actual strike. A broader
+      // scoring width can select a plausible-looking lane that can never land.
+      if (distPointToSegment(boss.x, boss.z, ox, oz, exit.x, exit.z) <= SURVIVOR.gunship.laneHalfWidth + boss.colliderRadius * 0.5) {
         score += boss.isMega ? 5 : 6;
       }
     }
@@ -5165,11 +5175,13 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
     s.banner = SURVIVOR.surgeTelegraph;
     // Illuminate the exact edges the wave will arrive from, for the full telegraph.
     for (const edge of s.activeEdges) {
-      const mid = edgeMidpoint(edge);
-      pushEffect(state, 'telegraph', mid.x * 0.94, mid.z * 0.94, SURVIVOR.surgeTelegraph, '#ff8866', 2.4, {
+      const mid = edgeMidpoint(state, edge);
+      const tx = state.player.x + (mid.x - state.player.x) * 0.94;
+      const tz = state.player.z + (mid.z - state.player.z) * 0.94;
+      pushEffect(state, 'telegraph', tx, tz, SURVIVOR.surgeTelegraph, '#ff8866', 2.4, {
         radius: 2.2,
-        facingX: -mid.x,
-        facingZ: -mid.z,
+        facingX: state.player.x - mid.x,
+        facingZ: state.player.z - mid.z,
       });
     }
     return;
@@ -5200,18 +5212,44 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
   }
 }
 
-/** Centre of one arena edge. 0=-Z, 1=+Z, 2=-X, 3=+X. */
-function edgeMidpoint(edge: number): { x: number; z: number } {
-  const h = SURVIVOR.arenaHalf + 1.2;
-  if (edge === 0) return { x: 0, z: -h };
-  if (edge === 1) return { x: 0, z: h };
-  if (edge === 2) return { x: -h, z: 0 };
-  return { x: h, z: 0 };
+/**
+ * A point on the local engagement perimeter, clipped only by the global platform.
+ * 0=-Z, 1=+Z, 2=-X, 3=+X.
+ */
+function localEngagementEdge(
+  state: SurvivorState,
+  edge: number,
+  tangent: number,
+): { x: number; z: number } {
+  const global = SURVIVOR.arenaHalf + 1.2;
+  const local = Math.min(SURVIVOR.combatSpawnHalf, SURVIVOR.arenaHalf) + 1.2;
+  let x = state.player.x;
+  let z = state.player.z;
+  if (edge === 0) {
+    x += tangent;
+    z -= local;
+  } else if (edge === 1) {
+    x += tangent;
+    z += local;
+  } else if (edge === 2) {
+    x -= local;
+    z += tangent;
+  } else {
+    x += local;
+    z += tangent;
+  }
+  return {
+    x: Math.max(-global, Math.min(global, x)),
+    z: Math.max(-global, Math.min(global, z)),
+  };
+}
+
+function edgeMidpoint(state: SurvivorState, edge: number): { x: number; z: number } {
+  return localEngagementEdge(state, edge, 0);
 }
 
 /** Spawn edge weighted by surge type. */
 function edgeSpawnWeighted(state: SurvivorState, kind: string): { x: number; z: number } {
-  const h = SURVIVOR.arenaHalf + 1.2;
   let side = Math.floor(rng(state) * 4);
   if (kind === 'pincer') {
     // Alternate per spawn, not per within-frame index, so both jaws actually fill.
@@ -5239,11 +5277,8 @@ function edgeSpawnWeighted(state: SurvivorState, kind: string): { x: number; z: 
     if (r < 0.35) side = facingSide;
     else if (r < 0.6) side = (facingSide + (rng(state) < 0.5 ? 1 : 3)) % 4;
   }
-  const t = (rng(state) * 2 - 1) * h;
-  if (side === 0) return { x: t, z: -h };
-  if (side === 1) return { x: t, z: h };
-  if (side === 2) return { x: -h, z: t };
-  return { x: h, z: t };
+  const t = (rng(state) * 2 - 1) * SURVIVOR.combatSpawnHalf;
+  return localEngagementEdge(state, side, t);
 }
 
 /**
@@ -5438,17 +5473,23 @@ function spawnBossAtIndex(state: SurvivorState, index: number, fromStack = false
   const px = state.player.x;
   const pz = state.player.z;
   const ang = (index * 1.7) % (Math.PI * 2);
-  let bx = Math.sin(ang) * SURVIVOR.arenaHalf * 0.42;
-  let bz = -Math.cos(ang) * SURVIVOR.arenaHalf * 0.42;
-  if (Math.hypot(px - bx, pz - bz) < 12) {
-    bx = -bx;
-    bz = -bz;
-  }
   const bdef = bossDefForIndex(index);
   const collR = bdef.colliderRadius * (mega ? SURVIVOR.megaColliderMul : 1);
-  const c = clampArena(bx, bz, collR);
-  bx = c.x;
-  bz = c.z;
+  const forward = clampArena(
+    px + Math.sin(ang) * SURVIVOR.bossSpawnRadius,
+    pz - Math.cos(ang) * SURVIVOR.bossSpawnRadius,
+    collR,
+  );
+  const opposite = clampArena(
+    px - Math.sin(ang) * SURVIVOR.bossSpawnRadius,
+    pz + Math.cos(ang) * SURVIVOR.bossSpawnRadius,
+    collR,
+  );
+  // Near a global wall, choose the candidate that still preserves the fuller entrance.
+  const fd = Math.hypot(forward.x - px, forward.z - pz);
+  const od = Math.hypot(opposite.x - px, opposite.z - pz);
+  const bx = fd >= od ? forward.x : opposite.x;
+  const bz = fd >= od ? forward.z : opposite.z;
 
   const b = emptyBoss();
   b.id = nextEntityId(state);
