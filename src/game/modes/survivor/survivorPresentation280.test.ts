@@ -463,7 +463,7 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
       for (let i = 0; i < 400 && seen === 0; i += 1) {
         stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
         for (const e of state.effects) {
-          if (e.kind !== 'pulse' || e.radius == null) continue;
+          if (e.kind !== 'pulsar' || e.radius == null) continue;
           seen += 1;
           // Echo Pulsar's second discharge is authored at 0.82x the first; both are
           // clean multiples of one effective radius.
@@ -474,7 +474,7 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
           ).toBe(true);
           // ...and the drawn ring never exceeds the ring it stands for.
           for (let k = 0; k <= 10; k += 1) {
-            expect(groundEffectScale('pulse', k / 10) * e.radius).toBeLessThanOrEqual(
+            expect(groundEffectScale('pulsar', k / 10) * e.radius).toBeLessThanOrEqual(
               e.radius + 1e-9,
             );
           }
@@ -619,7 +619,7 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
       const state = armed('pulsar', 5, 0, haste);
       for (let i = 0; i < 400; i += 1) {
         stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
-        const pulse = state.effects.find((e) => e.kind === 'pulse' && e.radius != null);
+        const pulse = state.effects.find((e) => e.kind === 'pulsar' && e.radius != null);
         if (pulse) return pulse.radius!;
       }
       return -1;
@@ -795,19 +795,20 @@ describe('§5 the Cosmic Boomerang is a boomerang that actually spins', () => {
     renderer.dispose();
   });
 
-  it('holds no white additive halo — the body composites normally', () => {
+  it('uses a forged crescent body with restrained additive ion edges', () => {
     const { renderer, state } = boomerangScene(9954, 5);
     const discs = throwUntil(renderer, state, 1);
     expect(discs.length).toBeGreaterThan(0);
-    let bodyMeshes = 0;
-    discs[0]!.getObjectByName('boomerang-spin')!.traverse((o) => {
-      if (!(o instanceof THREE.Mesh)) return;
-      bodyMeshes += 1;
-      const mat = o.material as THREE.MeshBasicMaterial;
-      expect(mat.blending, 'boomerang body is additive').toBe(THREE.NormalBlending);
-    });
-    // Elbow plus two arms, each an arm body and a gold edge.
-    expect(bodyMeshes).toBe(5);
+    const blade = discs[0]!.getObjectByName('boomerang-blade') as THREE.Mesh;
+    const energy = discs[0]!.getObjectByName('boomerang-energy') as THREE.Mesh;
+    const core = discs[0]!.getObjectByName('boomerang-core') as THREE.Mesh;
+    expect(blade).toBeTruthy();
+    expect(energy).toBeTruthy();
+    expect(core).toBeTruthy();
+    expect((blade.material as THREE.MeshBasicMaterial).blending).toBe(THREE.NormalBlending);
+    expect((energy.material as THREE.MeshBasicMaterial).blending).toBe(THREE.AdditiveBlending);
+    expect((energy.material as THREE.MeshBasicMaterial).color.getHexString()).not.toBe('ffffff');
+    expect(discs[0]!.getObjectByName('boomerang-wake')!.children).toHaveLength(3);
     renderer.dispose();
   });
 });

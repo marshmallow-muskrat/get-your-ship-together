@@ -44,6 +44,10 @@ export interface HeroDef {
   species: string;
   accent: string;
   fullName: string;
+  /** Crew-select dossier copy; identity presentation stays centralized with hero content. */
+  role: string;
+  abilityName: string;
+  brief: string;
   shipUrl: string;
   astronaut: FormProfile;
   mech: FormProfile;
@@ -137,6 +141,9 @@ export const HEROES: Record<HeroId, HeroDef> = {
     name: 'Boswell',
     species: 'The Bee',
     fullName: 'Boswell the Bee',
+    role: 'Swarm Systems Specialist',
+    abilityName: 'Microdrone Screen',
+    brief: 'Deploys autonomous interceptors that turn encirclement into a firing solution.',
     accent: '#f5ae42',
     shipUrl: `${root}/ship-bee.gltf`,
     astronaut: astronautForm('astronaut-bee', `${root}/astronaut-bee.gltf`),
@@ -149,6 +156,9 @@ export const HEROES: Record<HeroId, HeroDef> = {
     name: 'Fitzwilliam',
     species: 'The Flamingo',
     fullName: 'Fitzwilliam the Flamingo',
+    role: 'Precision Rail Vanguard',
+    abilityName: 'Rail Lance',
+    brief: 'Threads a high-energy lance through dense breach lines with surgical reach.',
     accent: '#ff7c9a',
     shipUrl: `${root}/ship-flamingo.gltf`,
     astronaut: astronautForm('astronaut-flamingo', `${root}/astronaut-flamingo.gltf`),
@@ -161,6 +171,9 @@ export const HEROES: Record<HeroId, HeroDef> = {
     name: 'Fortunato',
     species: 'The Frog',
     fullName: 'Fortunato the Frog',
+    role: 'Gravity Control Specialist',
+    abilityName: 'Gravity Pulse',
+    brief: 'Compresses the horde into kill zones and dictates the shape of every engagement.',
     accent: '#71f6da',
     shipUrl: `${root}/ship-frog.gltf`,
     astronaut: astronautForm('astronaut-frog', `${root}/astronaut-frog.gltf`),
@@ -173,6 +186,9 @@ export const HEROES: Record<HeroId, HeroDef> = {
     name: 'Rutherford',
     species: 'The Red Panda',
     fullName: 'Rutherford the Red Panda',
+    role: 'Siege Ordnance Engineer',
+    abilityName: 'Rocket Barrage',
+    brief: 'Saturates priority sectors with disciplined volleys built to break heavy targets.',
     accent: '#ff876b',
     shipUrl: `${root}/ship-red-panda.gltf`,
     astronaut: astronautForm('astronaut-red-panda', `${root}/astronaut-red-panda.gltf`),

@@ -523,6 +523,25 @@ describe('§8 Cosmic Boomerang', () => {
     expect(maxDist).toBeGreaterThan(4);
   }, 60_000);
 
+  it('bows visibly away from its launch vector before returning', () => {
+    const state = thrown(28801);
+    let disc: SurvivorState['projectiles'][number] | null = null;
+    let maxLateral = 0;
+    for (let i = 0; i < 180; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      disc ??= state.projectiles.find((p) => p.active && p.kind === 'boomerang') ?? null;
+      if (!disc) continue;
+      state.weapons[0]!.cooldown = 1e9;
+      if (disc.returning) break;
+      const dx = disc.x - disc.originX;
+      const dz = disc.z - disc.originZ;
+      maxLateral = Math.max(maxLateral, Math.abs(dx * disc.launchFz - dz * disc.launchFx));
+    }
+    expect(disc).not.toBeNull();
+    expect(maxLateral).toBeGreaterThan(0.35);
+    expect(maxLateral).toBeLessThan(disc!.turnDistance * 0.12);
+  });
+
   it('strikes each body once per leg, and gets two legs', () => {
     /*
      * The identity. Within a leg the limit is geometry, not a pierce counter, so a disc
@@ -590,7 +609,7 @@ describe('§8 Cosmic Boomerang', () => {
     const gains = levelGains('boomerang');
     const over = gains.filter((g) => g > PROGRESSION_BOUNDS.typicalGainMax).length;
     // Only the declared L5 breakpoint may exceed the typical ceiling.
-    expect(over).toBeLessThanOrEqual(1);
+    expect(over, `effective gains ${gains.map((g) => g.toFixed(3)).join('/')}`).toBeLessThanOrEqual(1);
     expect(BREAKPOINT_LEVEL.boomerang).toBe(5);
   }, 60_000);
 
@@ -963,6 +982,26 @@ describe('§4 Gravity Pulse is a control field, not a damage field', () => {
     for (const id of ALL_BOSS_PATTERNS) {
       expect(bossPatternColor(id).toLowerCase()).not.toBe(WEAPONS.gravity.color.toLowerCase());
     }
+  });
+
+  it('places Event Horizon wells on separate threat clusters', () => {
+    const state = createSurvivorState('bee', null, 2814);
+    state.phase = 'playing';
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.spawnAcc = -1e9;
+    state.weapons = [{ weaponId: 'gravity', level: 5, cooldown: 0, focusDebt: 0, prototype: false }];
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 5; i += 1) {
+        spawnEnemyForTest(state, 'basic', side * (5.2 + (i % 2) * 0.5), 5 + Math.floor(i / 2) * 0.45);
+      }
+    }
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+    const wells = state.hazards.filter((h) => h.active && h.kind === 'gravity-well');
+    expect(wells).toHaveLength(2);
+    expect(Math.hypot(wells[0]!.x - wells[1]!.x, wells[0]!.z - wells[1]!.z)).toBeGreaterThan(6);
+    expect(state.effects.filter((e) => e.kind === 'gravity-collapse')).toHaveLength(2);
   });
 });
 

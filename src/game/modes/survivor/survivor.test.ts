@@ -1168,6 +1168,13 @@ describe('pickup repair completeness', () => {
 });
 
 describe('protocol cache and gunship', () => {
+  it('extends the ordinary cache window by seven seconds for the larger arena', () => {
+    const previousWindow = 38;
+    expect(SURVIVOR.cacheLifetime - previousWindow).toBeGreaterThanOrEqual(5);
+    expect(SURVIVOR.cacheLifetime - previousWindow).toBeLessThanOrEqual(8);
+    expect(SURVIVOR.cacheLifetime).toBe(45);
+  });
+
   it('cache remains active for its lifetime until collected', () => {
     const state = createSurvivorState('bee', 'survivor-cache', 22);
     // Advance to spawn
@@ -1281,12 +1288,15 @@ describe('protocol cache and gunship', () => {
     expect(state.gunship.firing).toBe(false);
     const hpMid = tracked().reduce((s, e) => s + e.health, 0);
     expect(hpMid).toBe(hpBefore);
+    let visibleShots = 0;
     for (let i = 0; i < 500; i += 1) {
       if (!state.gunship.active) break;
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      visibleShots += state.effects.filter((effect) => effect.kind === 'gunship-shot').length;
     }
     const hpAfter = tracked().reduce((s, e) => s + (e.alive ? e.health : 0), 0);
     expect(hpAfter).toBeLessThan(hpMid);
+    expect(visibleShots).toBeGreaterThan(0);
     expect(state.gunship.active).toBe(false);
   });
 

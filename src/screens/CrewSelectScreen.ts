@@ -3,6 +3,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { HERO_LIST, type HeroDef, type HeroId } from '../game/content/heroes';
 import { AssetLibrary } from '../game/assets/AssetLibrary';
+import { AudioBus } from '../game/audio/AudioBus';
 import {
   formatSurvivalTime,
   getHeroLeaderboard,
@@ -22,17 +23,22 @@ export class CrewSelectScreen {
   private readonly host: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly handlers: CrewSelectHandlers;
+  private readonly audio: AudioBus;
   private readonly assets = new AssetLibrary();
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
   private selectedHeroGroup = new THREE.Group();
+  private stageGroup = new THREE.Group();
+  private stageRotors: Array<{ object: THREE.Object3D; speed: number }> = [];
+  private stagePulseMaterials: THREE.MeshBasicMaterial[] = [];
   private selectedHeroLight = new THREE.PointLight('#f5ae42', 3.6, 24, 2);
   private floaters: Array<{ object: THREE.Object3D; baseY: number; phase: number }> = [];
   private selectedIndex = 0;
   private selectionScale = 1;
   private raf = 0;
+  private scaleObserver: MutationObserver | null = null;
   private disposed = false;
   private leaderboardHistory = false;
   private clock = new THREE.Clock();
@@ -40,24 +46,40 @@ export class CrewSelectScreen {
   private loading: HTMLElement | null = null;
 
   private onResize = (): void => this.resize();
+  private onPointerDown = (): void => {
+    void this.audio.unlock();
+  };
+  private syncUiScaleClass = (): void => {
+    const uiScale = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'),
+    ) || 1;
+    this.hud?.classList.toggle('selection-ui-large', uiScale >= 1.4);
+  };
   private onKeyDown = (e: KeyboardEvent): void => {
+    void this.audio.unlock();
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
       this.updateSelection((this.selectedIndex + HERO_LIST.length - 1) % HERO_LIST.length);
     } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
       this.updateSelection((this.selectedIndex + 1) % HERO_LIST.length);
     } else if (e.key === 'Enter') {
       this.launch();
+    } else if (e.key === 'm' || e.key === 'M') {
+      this.audio.setMuted(!this.audio.isMuted());
+      this.updateAudioLabel();
     }
   };
 
-  constructor(host: HTMLElement, canvas: HTMLCanvasElement, handlers: CrewSelectHandlers) {
+  constructor(host: HTMLElement, canvas: HTMLCanvasElement, handlers: CrewSelectHandlers, audio: AudioBus) {
     this.host = host;
     this.canvas = canvas;
     this.handlers = handlers;
+    this.audio = audio;
   }
 
   async mount(): Promise<void> {
     if (this.disposed) return;
+    this.audio.setMode('menu');
+    this.audio.preload();
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -84,6 +106,8 @@ export class CrewSelectScreen {
     pmrem.dispose();
 
     this.selectedHeroGroup.position.y = 1.4;
+    this.createHangarStage();
+    this.scene.add(this.stageGroup);
     this.scene.add(this.selectedHeroGroup);
     this.createLighting();
     this.buildHud();
@@ -134,6 +158,10 @@ export class CrewSelectScreen {
     this.updateSelection(0);
     window.addEventListener('resize', this.onResize);
     window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('pointerdown', this.onPointerDown);
+    this.scaleObserver = new MutationObserver(this.syncUiScaleClass);
+    this.scaleObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    this.syncUiScaleClass();
     this.canvas.classList.remove('game-mode', 'map-mode');
     this.clock.start();
     this.raf = requestAnimationFrame(() => this.animate());
@@ -163,21 +191,53 @@ export class CrewSelectScreen {
       <div class="lower-hud">
         <nav id="bay-selector" class="bay-selector" aria-label="Choose a hero"></nav>
       </div>
+      <div class="form-telemetry" aria-label="Three combat forms">
+        <span><i>01</i><strong>ASTRONAUT</strong><small>TACTICAL CORE</small></span>
+        <span><i>02</i><strong>AFTERBURNER</strong><small>SHIP FORM</small></span>
+        <span><i>03</i><strong>MECH</strong><small>OVERDRIVE</small></span>
+      </div>
+      <aside class="selection-dossier" aria-live="polite">
+        <div class="dossier-status"><span></span> CREW LINK VERIFIED</div>
+        <p class="eyebrow">OPERATIVE DOSSIER</p>
+        <strong id="selected-role">Swarm Systems Specialist</strong>
+        <p id="selected-brief">Deploys autonomous interceptors that turn encirclement into a firing solution.</p>
+        <dl>
+          <div><dt>ACTIVE SYSTEM</dt><dd id="selected-ability">Microdrone Screen</dd></div>
+          <div><dt>FORM LINK</dt><dd>TRI-FORM READY</dd></div>
+        </dl>
+      </aside>
       <div class="corner-actions" aria-label="Screen actions">
-        <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
+        <div class="utility-actions">
+          <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
+          <button class="select-hero-button audio-button" type="button" id="audio-button">AUDIO ON · M</button>
+        </div>
         <div class="mode-actions">
           <button id="leaderboard-button" class="select-hero-button ghost-button" type="button">LEADERBOARDS</button>
-          <button id="launch-button" class="select-hero-button survivor-button" type="button">BEGIN CONTAINMENT PROTOCOL</button>
+          <button id="launch-button" class="select-hero-button survivor-button" type="button"><span>CONTINUE</span><small>BEGIN RUN</small></button>
         </div>
       </div>
       <div id="crew-leaderboard" class="crew-leaderboard hidden" role="dialog" aria-label="Local leaderboards">
         <div class="crew-lb-panel">
-          <p class="eyebrow">LOCAL RECORDS</p>
-          <h2>Leaderboards</h2>
-          <div id="crew-lb-view-tabs" class="crew-lb-tabs"></div>
-          <div id="crew-lb-tabs" class="crew-lb-tabs"></div>
-          <div id="crew-lb-list" class="crew-lb-list"></div>
-          <button type="button" id="crew-lb-close" class="select-hero-button">BACK</button>
+          <header class="crew-lb-header">
+            <div><p class="eyebrow">LOCAL RECORDS // REACTOR PLATFORM 7</p><h2>Hall of Survivors</h2></div>
+            <span class="crew-lb-live"><i></i> LOCAL ARCHIVE ONLINE</span>
+          </header>
+          <div class="crew-lb-shell">
+            <aside class="crew-lb-profile">
+              <div id="crew-lb-portrait" class="crew-lb-portrait" aria-hidden="true"></div>
+              <span id="crew-lb-species">THE BEE</span>
+              <strong id="crew-lb-hero">BOSWELL</strong>
+              <div class="crew-lb-best"><small>PERSONAL BEST</small><b id="crew-lb-best">—</b></div>
+              <div class="crew-lb-totals"><span><small>RUNS</small><b id="crew-lb-runs">0</b></span><span><small>CAREER KILLS</small><b id="crew-lb-kills">0</b></span></div>
+            </aside>
+            <main class="crew-lb-records">
+              <div id="crew-lb-view-tabs" class="crew-lb-tabs"></div>
+              <div id="crew-lb-tabs" class="crew-lb-tabs crew-lb-hero-tabs"></div>
+              <div class="crew-lb-column-labels"><span>RANK</span><span>ENDURANCE</span><span>RUN DATA</span></div>
+              <div id="crew-lb-list" class="crew-lb-list"></div>
+            </main>
+          </div>
+          <footer class="crew-lb-footer"><span>INDEPENDENT LOCAL RECORDS · NO CLOUD SYNC</span><button type="button" id="crew-lb-close" class="select-hero-button">RETURN TO BAY</button></footer>
         </div>
       </div>
     `;
@@ -203,22 +263,51 @@ export class CrewSelectScreen {
     this.hud.querySelector('#launch-button')?.addEventListener('click', () => this.launch());
     this.hud.querySelector('#leaderboard-button')?.addEventListener('click', () => this.openLeaderboard());
     this.hud.querySelector('#crew-lb-close')?.addEventListener('click', () => this.closeLeaderboard());
+    this.hud.querySelector('#audio-button')?.addEventListener('click', () => {
+      this.audio.setMuted(!this.audio.isMuted());
+      this.updateAudioLabel();
+    });
     this.hud.querySelector('#exit-button')?.addEventListener('click', () => {
       // Soft exit: stay on selection.
     });
+    this.updateAudioLabel();
+  }
+
+  private updateAudioLabel(): void {
+    const button = this.hud?.querySelector<HTMLButtonElement>('#audio-button');
+    if (button) button.textContent = `${this.audio.isMuted() ? 'AUDIO OFF' : 'AUDIO ON'} · M`;
   }
 
   private openLeaderboard(): void {
+    this.audio.uiConfirm();
     const hero = HERO_LIST[this.selectedIndex]!.id;
     this.renderCrewLeaderboard(hero);
     this.hud?.querySelector('#crew-leaderboard')?.classList.remove('hidden');
   }
 
   private closeLeaderboard(): void {
+    this.audio.uiMove();
     this.hud?.querySelector('#crew-leaderboard')?.classList.add('hidden');
   }
 
   private renderCrewLeaderboard(heroId: HeroId): void {
+    const heroIndex = HERO_LIST.findIndex((hero) => hero.id === heroId);
+    const hero = HERO_LIST[Math.max(0, heroIndex)]!;
+    const history = getRunHistory(heroId);
+    const best = getHeroLeaderboard(heroId)[0];
+    const portrait = this.hud?.querySelector<HTMLElement>('#crew-lb-portrait');
+    const heroName = this.hud?.querySelector('#crew-lb-hero');
+    const species = this.hud?.querySelector('#crew-lb-species');
+    const bestTime = this.hud?.querySelector('#crew-lb-best');
+    const runCount = this.hud?.querySelector('#crew-lb-runs');
+    const careerKills = this.hud?.querySelector('#crew-lb-kills');
+    if (portrait) portrait.style.backgroundPosition = ['0% 0%', '100% 0%', '0% 100%', '100% 100%'][Math.max(0, heroIndex)]!;
+    if (heroName) heroName.textContent = hero.name;
+    if (species) species.textContent = hero.species;
+    if (bestTime) bestTime.textContent = best ? formatSurvivalTime(best.survivalTime) : '—';
+    if (runCount) runCount.textContent = String(history.length);
+    if (careerKills) careerKills.textContent = history.reduce((total, run) => total + run.kills, 0).toLocaleString();
+
     const viewTabs = this.hud?.querySelector('#crew-lb-view-tabs');
     const tabs = this.hud?.querySelector('#crew-lb-tabs');
     const list = this.hud?.querySelector('#crew-lb-list');
@@ -247,24 +336,36 @@ export class CrewSelectScreen {
     }
     if (list) {
       const runs = this.leaderboardHistory ? getRunHistory(heroId) : getHeroLeaderboard(heroId);
+      list.replaceChildren();
       if (runs.length === 0) {
-        list.innerHTML = '<p class="crew-lb-empty">No runs recorded yet for this hero.</p>';
+        const empty = document.createElement('p');
+        empty.className = 'crew-lb-empty';
+        empty.innerHTML = '<strong>NO SIGNALS RECORDED</strong><span>Complete a run to establish this operative’s first endurance record.</span>';
+        list.appendChild(empty);
       } else {
-        list.innerHTML = runs
-          .map((r, i) => {
-            const build = r.weapons.map((w) => `${w.weaponId} L${w.level}`).join(', ');
-            const date = new Date(r.timestamp).toLocaleDateString();
-            return `<div class="crew-lb-row">
-              <strong>${this.leaderboardHistory ? `RUN ${runs.length - i}` : `#${i + 1}`}</strong>
-              <span>${formatSurvivalTime(r.survivalTime)}</span>
-              <span>K ${r.kills}</span>
-              <span>L${r.level}</span>
-              <span>B ${r.bossesDefeated}</span>
-              <span class="crew-lb-meta">${date} · ${r.balanceVersion}</span>
-              <span class="crew-lb-build">${build}</span>
-            </div>`;
-          })
-          .join('');
+        runs.forEach((run, index) => {
+          const row = document.createElement('div');
+          row.className = `crew-lb-row${!this.leaderboardHistory && index < 3 ? ` podium podium-${index + 1}` : ''}`;
+          const rank = document.createElement('strong');
+          rank.className = 'crew-lb-rank';
+          rank.textContent = this.leaderboardHistory ? `RUN ${runs.length - index}` : `#${index + 1}`;
+          const endurance = document.createElement('span');
+          endurance.className = 'crew-lb-time';
+          endurance.textContent = formatSurvivalTime(run.survivalTime);
+          const data = document.createElement('span');
+          data.className = 'crew-lb-data';
+          data.textContent = `${run.kills.toLocaleString()} KILLS  ·  LEVEL ${run.level}  ·  ${run.bossesDefeated} BOSSES`;
+          const meta = document.createElement('span');
+          meta.className = 'crew-lb-meta';
+          meta.textContent = `${new Date(run.timestamp).toLocaleDateString()}  //  ${run.balanceVersion}`;
+          const build = document.createElement('span');
+          build.className = 'crew-lb-build';
+          build.textContent = run.weapons.length > 0
+            ? run.weapons.map((weapon) => `${weapon.weaponId} L${weapon.level}`).join('  ·  ')
+            : 'NO WEAPON TELEMETRY';
+          row.append(rank, endurance, data, meta, build);
+          list.appendChild(row);
+        });
       }
     }
   }
@@ -288,6 +389,127 @@ export class CrewSelectScreen {
     const magentaRim = new THREE.PointLight('#d76cff', 2, 32, 2);
     magentaRim.position.set(13, 9, -10);
     this.scene.add(magentaRim);
+  }
+
+  /** Procedural command-deck architecture; runtime asset packs remain untouched. */
+  private createHangarStage(): void {
+    this.stageGroup.clear();
+    this.stageRotors.length = 0;
+    this.stagePulseMaterials.length = 0;
+
+    const metal = new THREE.MeshStandardMaterial({
+      color: '#111a31',
+      metalness: 0.82,
+      roughness: 0.32,
+      emissive: '#07152c',
+      emissiveIntensity: 0.55,
+    });
+    const deck = new THREE.MeshStandardMaterial({
+      color: '#091226',
+      metalness: 0.76,
+      roughness: 0.42,
+      emissive: '#07132a',
+      emissiveIntensity: 0.72,
+    });
+    const cyan = new THREE.MeshBasicMaterial({
+      color: '#63e9ff',
+      transparent: true,
+      opacity: 0.5,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const violet = new THREE.MeshBasicMaterial({
+      color: '#9a72ff',
+      transparent: true,
+      opacity: 0.3,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const frost = new THREE.MeshBasicMaterial({
+      color: '#d9f7ff',
+      transparent: true,
+      opacity: 0.62,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.stagePulseMaterials.push(cyan, violet, frost);
+
+    const mesh = (
+      geometry: THREE.BufferGeometry,
+      material: THREE.Material,
+      position: [number, number, number],
+      rotation: [number, number, number] = [0, 0, 0],
+    ): THREE.Mesh => {
+      const object = new THREE.Mesh(geometry, material);
+      object.position.set(...position);
+      object.rotation.set(...rotation);
+      this.stageGroup.add(object);
+      return object;
+    };
+
+    // Deep deck and two form-specific elevator plinths establish real scale beneath
+    // the hero, instead of leaving three models floating against a flat space image.
+    mesh(new THREE.CylinderGeometry(15.8, 17.4, 0.7, 64), deck, [0, 0.65, -0.8]);
+    mesh(new THREE.TorusGeometry(13.3, 0.055, 8, 128), cyan, [0, 1.02, -0.8], [-Math.PI / 2, 0, 0]);
+    mesh(new THREE.TorusGeometry(9.2, 0.035, 8, 96), violet, [0, 1.04, -0.8], [-Math.PI / 2, 0, 0]);
+
+    const plinths: Array<[number, number, number]> = [
+      [-3.4, 3.17, 1.1],
+      [3.4, 2.22, 1.1],
+    ];
+    for (const [x, y, z] of plinths) {
+      mesh(new THREE.CylinderGeometry(2.05, 2.35, 0.2, 48), metal, [x, y, z]);
+      mesh(new THREE.TorusGeometry(1.86, 0.055, 8, 64), cyan, [x, y + 0.115, z], [-Math.PI / 2, 0, 0]);
+      for (let i = -1; i <= 1; i += 2) {
+        mesh(new THREE.BoxGeometry(0.08, 0.025, 2.7), frost, [x + i * 1.05, y + 0.13, z]);
+      }
+    }
+
+    // Ship diagnostic portal and counter-rotating guidance rings.
+    mesh(new THREE.CylinderGeometry(0.12, 0.2, 11.5, 10), metal, [-7.8, 7.2, -3.8]);
+    mesh(new THREE.CylinderGeometry(0.12, 0.2, 11.5, 10), metal, [7.8, 7.2, -3.8]);
+    const portal = mesh(new THREE.TorusGeometry(4.7, 0.08, 12, 128), cyan, [0, 10.8, -4]);
+    const portalInner = mesh(new THREE.TorusGeometry(4.15, 0.035, 8, 96), violet, [0, 10.8, -3.96]);
+    this.stageRotors.push({ object: portal, speed: 0.055 }, { object: portalInner, speed: -0.09 });
+    for (let i = 0; i < 12; i += 1) {
+      const angle = (i / 12) * Math.PI * 2;
+      const tick = mesh(new THREE.BoxGeometry(0.055, 0.48, 0.04), frost, [Math.cos(angle) * 4.7, 10.8 + Math.sin(angle) * 4.7, -3.9]);
+      tick.rotation.z = angle;
+      portal.add(tick);
+      tick.position.x -= portal.position.x;
+      tick.position.y -= portal.position.y;
+      tick.position.z -= portal.position.z;
+    }
+
+    // Architectural light fins and a deterministic star/dust volume add parallax.
+    for (let i = -3; i <= 3; i += 1) {
+      mesh(new THREE.BoxGeometry(0.045, 8.6, 0.04), i % 2 === 0 ? cyan : violet, [i * 2.35, 7.1, -6.2]);
+    }
+    const dustGeometry = new THREE.BufferGeometry();
+    const dust = new Float32Array(150 * 3);
+    for (let i = 0; i < 150; i += 1) {
+      const u = ((i * 73) % 151) / 150;
+      const v = ((i * 41 + 17) % 149) / 148;
+      dust[i * 3] = (u - 0.5) * 30;
+      dust[i * 3 + 1] = 1.4 + v * 14;
+      dust[i * 3 + 2] = -5.8 - ((i * 29) % 31) * 0.1;
+    }
+    dustGeometry.setAttribute('position', new THREE.BufferAttribute(dust, 3));
+    const dustMaterial = new THREE.PointsMaterial({
+      color: '#9deeff',
+      size: 0.055,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const dustPoints = new THREE.Points(dustGeometry, dustMaterial);
+    this.stageGroup.add(dustPoints);
+    this.stageRotors.push({ object: dustPoints, speed: 0.0025 });
+
+    this.stageGroup.add(new THREE.PointLight('#62dfff', 3.2, 20, 2));
+    const stageLight = this.stageGroup.children[this.stageGroup.children.length - 1] as THREE.PointLight;
+    stageLight.position.set(0, 10.5, -1.5);
   }
 
   private fitModel(model: THREE.Object3D, target: number, mode: 'height' | 'width'): THREE.Object3D {
@@ -334,6 +556,7 @@ export class CrewSelectScreen {
   }
 
   private updateSelection(index: number): void {
+    const shouldCue = this.selectedHeroGroup.children.length > 1 && index !== this.selectedIndex;
     this.selectedIndex = index;
     const hero = HERO_LIST[index]!;
     document.documentElement.style.setProperty('--bay-accent', hero.accent);
@@ -341,9 +564,15 @@ export class CrewSelectScreen {
     const num = this.hud?.querySelector('#selected-number');
     const name = this.hud?.querySelector('#selected-hero');
     const species = this.hud?.querySelector('#selected-species');
+    const role = this.hud?.querySelector('#selected-role');
+    const brief = this.hud?.querySelector('#selected-brief');
+    const ability = this.hud?.querySelector('#selected-ability');
     if (num) num.textContent = `${String(index + 1).padStart(2, '0')} / 04`;
     if (name) name.textContent = hero.name;
     if (species) species.textContent = hero.species;
+    if (role) role.textContent = hero.role;
+    if (brief) brief.textContent = hero.brief;
+    if (ability) ability.textContent = hero.abilityName;
 
     this.hud?.querySelectorAll('.bay-button').forEach((btn, i) => {
       btn.classList.toggle('active', i === index);
@@ -360,10 +589,12 @@ export class CrewSelectScreen {
     this.addForm(hero, 'ship');
     this.selectionScale = 0.78;
     this.selectedHeroGroup.scale.setScalar(this.selectionScale);
+    if (shouldCue) this.audio.uiMove();
   }
 
   private launch(): void {
     const hero = HERO_LIST[this.selectedIndex]!;
+    this.audio.uiConfirm();
     this.handlers.onLaunch(hero.id);
   }
 
@@ -386,7 +617,13 @@ export class CrewSelectScreen {
     this.selectedHeroGroup.scale.setScalar(this.selectionScale);
     for (const { object, baseY, phase } of this.floaters) {
       object.position.y = baseY + Math.sin(elapsed * 1.35 + phase) * 0.12;
-      object.rotation.y += 0.0015;
+      object.rotation.y = elapsed * 0.09 + phase * 0.08;
+    }
+    for (const { object, speed } of this.stageRotors) {
+      object.rotation.z = elapsed * speed;
+    }
+    for (let i = 0; i < this.stagePulseMaterials.length; i += 1) {
+      this.stagePulseMaterials[i]!.opacity = (i === 0 ? 0.46 : i === 1 ? 0.28 : 0.58) + Math.sin(elapsed * 0.7 + i * 1.8) * 0.06;
     }
     this.selectedHeroLight.position.x = Math.sin(elapsed * 0.55) * 4.2;
     this.selectedHeroLight.position.z = 5 + Math.cos(elapsed * 0.55) * 1.8;
@@ -400,10 +637,26 @@ export class CrewSelectScreen {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('pointerdown', this.onPointerDown);
+    this.scaleObserver?.disconnect();
+    this.scaleObserver = null;
     this.hud?.remove();
     this.loading?.remove();
     this.hud = null;
     this.loading = null;
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    this.stageGroup.traverse((object) => {
+      const renderable = object as THREE.Mesh;
+      if (renderable.geometry) geometries.add(renderable.geometry);
+      const material = renderable.material;
+      if (Array.isArray(material)) material.forEach((entry) => materials.add(entry));
+      else if (material) materials.add(material);
+    });
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => material.dispose());
+    this.stageRotors.length = 0;
+    this.stagePulseMaterials.length = 0;
     this.scene?.clear();
     this.assets.dispose();
     this.renderer?.dispose();

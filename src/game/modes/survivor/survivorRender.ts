@@ -308,50 +308,49 @@ export class SurvivorRenderer {
    * per-projectile teardown releases materials but never these.
    */
   private boomerangGeo: {
-    arm: THREE.CylinderGeometry;
-    edge: THREE.CylinderGeometry;
-    elbow: THREE.CylinderGeometry;
-    chevron: THREE.ConeGeometry;
+    blade: THREE.ExtrudeGeometry;
+    energy: THREE.RingGeometry;
+    core: THREE.OctahedronGeometry;
+    ghost: THREE.RingGeometry;
   } | null = null;
 
   private boomerangGeometry(): NonNullable<SurvivorRenderer['boomerangGeo']> {
     if (!this.boomerangGeo) {
+      // A single asymmetric crescent: recognisable at any spin angle and wholly unlike
+      // the old two-cylinder V. The opening is deliberately off-centre so rotation has
+      // a readable cadence even against a dense horde.
+      const shape = new THREE.Shape();
+      const outer = 1;
+      const inner = 0.42;
+      const a0 = -1.22;
+      const a1 = 1.05;
+      shape.moveTo(Math.cos(a0) * outer, Math.sin(a0) * outer);
+      shape.absarc(0, 0, outer, a0, a1, false);
+      shape.lineTo(Math.cos(0.82) * inner, Math.sin(0.82) * inner);
+      shape.absarc(0, 0, inner, 0.82, -0.95, true);
+      shape.closePath();
+      const blade = new THREE.ExtrudeGeometry(shape, {
+        depth: 0.13,
+        bevelEnabled: true,
+        bevelSegments: 2,
+        bevelSize: 0.045,
+        bevelThickness: 0.04,
+        curveSegments: 18,
+      });
+      blade.center();
+      blade.rotateX(-Math.PI / 2);
+      const energy = new THREE.RingGeometry(0.69, 0.93, 40, 1, a0, a1 - a0);
+      energy.rotateX(-Math.PI / 2);
+      const ghost = new THREE.RingGeometry(0.53, 0.83, 32, 1, a0, a1 - a0);
+      ghost.rotateX(-Math.PI / 2);
       this.boomerangGeo = {
-        // Tapered arms: thick at the elbow, thin at the tip.
-        arm: new THREE.CylinderGeometry(0.07, 0.2, 1.0, 6),
-        // The gold leading edge rides slightly proud of the arm it belongs to.
-        edge: new THREE.CylinderGeometry(0.04, 0.09, 0.96, 5),
-        elbow: new THREE.CylinderGeometry(0.3, 0.3, 0.16, 12),
-        chevron: new THREE.ConeGeometry(0.2, 0.5, 4),
+        blade,
+        energy,
+        core: new THREE.OctahedronGeometry(0.22, 1),
+        ghost,
       };
     }
     return this.boomerangGeo;
-  }
-
-  /** One swept arm: purple body with a gold leading edge, tip pointing along +Z. */
-  private boomerangArm(sweep: number, bodyColor: string): THREE.Group {
-    const geo = this.boomerangGeometry();
-    const pivot = new THREE.Group();
-    pivot.rotation.y = sweep;
-
-    const share = (mesh: THREE.Mesh): THREE.Mesh => {
-      mesh.userData.sharedGeometry = true;
-      mesh.userData.ownsGeometry = false;
-      mesh.userData.ownsMaterial = true;
-      return mesh;
-    };
-
-    const body = share(new THREE.Mesh(geo.arm, this.effectMat(bodyColor, 0.96)));
-    body.rotation.x = Math.PI / 2;
-    body.position.set(0, 0, 0.5);
-
-    // Gold sits on the outer face of the arm — the edge that leads through the cut.
-    const edge = share(new THREE.Mesh(geo.edge, this.effectMat('#ffd24a', 0.95)));
-    edge.rotation.x = Math.PI / 2;
-    edge.position.set(Math.sign(sweep) * 0.13, 0.06, 0.5);
-
-    pivot.add(body, edge);
-    return pivot;
   }
 
   /** Distinct readable silhouettes for signature projectiles. */
@@ -370,58 +369,46 @@ export class SurvivorRenderer {
     };
 
     if (kind === 'boomerang') {
-      /*
-       * A boomerang, not a disc.
-       *
-       * The 2.8.0 actor was a white additive torus with a pale core: rotationally
-       * symmetric, so it could not show spin, and bright enough to read as a halo rather
-       * than a thrown object. It also concealed a bug — the generic Group branch below
-       * assigns `rotation.y` from the velocity every frame, so the disc's "spin" was
-       * overwritten each frame and amounted to a fixed offset. Nothing rotated. A
-       * symmetric silhouette is the only reason that was invisible.
-       *
-       * The silhouette is now two swept arms meeting at a thicker elbow, deep purple
-       * with a gold leading edge, and it genuinely spins about its own axis while a
-       * separate non-spinning wake marks which way it is travelling. Those are two
-       * different questions in a crowded fight and they need two different answers.
-       */
+      // Entirely new silhouette and motion language: an asymmetric forged crescent,
+      // bright ion edge and three phase-lag ghosts. The spinner answers rotation; the
+      // non-spinning ghost train answers travel direction and makes the curved path
+      // legible between simulation steps.
       const g = new THREE.Group();
       const spinner = new THREE.Group();
       spinner.name = 'boomerang-spin';
-      // Flattened: this is a thrown blade seen from an isometric camera, not a wing.
-      spinner.scale.set(1, 0.55, 1);
-
-      const bodyColor = variant % 2 === 0 ? '#4d1c96' : '#6a24a8';
-      // ~102 degrees between the arms, opening rearward so the elbow leads.
-      spinner.add(this.boomerangArm(2.25, bodyColor), this.boomerangArm(-2.25, bodyColor));
-
       const geo = this.boomerangGeometry();
-      const elbow = new THREE.Mesh(geo.elbow, this.effectMat('#8a3fd6', 0.95));
-      elbow.userData.sharedGeometry = true;
-      elbow.userData.ownsGeometry = false;
-      elbow.userData.ownsMaterial = true;
-      spinner.add(elbow);
+      const share = (geometry: THREE.BufferGeometry, material: THREE.Material, name: string): THREE.Mesh => {
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = name;
+        mesh.userData.sharedGeometry = true;
+        mesh.userData.ownsGeometry = false;
+        mesh.userData.ownsMaterial = true;
+        return mesh;
+      };
+      const blade = share(geo.blade, this.effectMat(variant % 2 === 0 ? '#35106f' : '#4b1480', 0.98), 'boomerang-blade');
+      const edge = share(geo.energy, this.effectMat('#8ffcff', 0.96, true), 'boomerang-energy');
+      edge.position.y = 0.11;
+      const core = share(geo.core, this.effectMat('#fff3bd', 1, true), 'boomerang-core');
+      core.position.set(-0.08, 0.18, -0.02);
+      core.scale.set(0.9, 0.48, 0.9);
+      spinner.add(blade, edge, core);
 
-      /*
-       * Travel marker: a single restrained gold chevron trailing the elbow, aligned to
-       * velocity and deliberately *not* spinning. The old presentation answered
-       * "where is it going" with a large white circular halo, which answered nothing.
-       */
       const wake = new THREE.Group();
       wake.name = 'boomerang-wake';
-      const chevron = new THREE.Mesh(geo.chevron, this.effectMat('#ffd24a', 0.5, true));
-      chevron.userData.sharedGeometry = true;
-      chevron.userData.ownsGeometry = false;
-      chevron.userData.ownsMaterial = true;
-      chevron.rotation.x = -Math.PI / 2;
-      chevron.position.z = -0.62;
-      chevron.scale.set(1, 1, 0.45);
-      wake.add(chevron);
+      for (let i = 0; i < 3; i += 1) {
+        const ghost = share(
+          geo.ghost,
+          this.effectMat(i === 0 ? '#a875ff' : '#54dfff', 0.28 - i * 0.055, true),
+          `boomerang-ghost-${i}`,
+        );
+        ghost.position.set(0, 0.05, -0.42 - i * 0.36);
+        ghost.scale.setScalar(0.82 - i * 0.11);
+        ghost.userData.phase = i * 1.4;
+        wake.add(ghost);
+      }
 
       g.add(spinner, wake);
       g.name = 'projectile-boomerang';
-      // Counter-rotating pair at Twin Orbit: two discs on diverging bearings that also
-      // spin opposite ways cannot be mistaken for one disc.
       g.userData.spinSign = variant % 2 === 0 ? 1 : -1;
       g.userData.spin = 0;
       void color;
@@ -921,11 +908,26 @@ export class SurvivorRenderer {
          */
         const spinner = mesh.getObjectByName('boomerang-spin');
         const wake = mesh.getObjectByName('boomerang-wake');
-        const sign = ((mesh.userData.spinSign as number | undefined) ?? 1) * (p.returning ? -1 : 1);
-        const spin = ((mesh.userData.spin as number | undefined) ?? 0) + sign * 11 * dt;
+        const sign = p.curveSign * (p.returning ? -1 : 1);
+        const spin = ((mesh.userData.spin as number | undefined) ?? 0) + sign * 14.5 * dt;
         mesh.userData.spin = spin;
-        if (spinner) spinner.rotation.y = spin;
-        if (wake) wake.rotation.y = Math.atan2(p.vx, p.vz);
+        if (spinner) {
+          spinner.rotation.y = spin;
+          spinner.position.y = Math.sin(spin * 0.5) * 0.08;
+        }
+        if (wake) {
+          wake.rotation.y = Math.atan2(p.vx, p.vz);
+          wake.children.forEach((ghost, i) => {
+            const pulse = 0.9 + Math.sin(spin * 0.45 - i * 1.2) * 0.08;
+            const base = 0.82 - i * 0.11;
+            ghost.scale.setScalar(base * pulse);
+          });
+        }
+        const energy = mesh.getObjectByName('boomerang-energy');
+        if (energy instanceof THREE.Mesh && energy.material instanceof THREE.MeshBasicMaterial) {
+          energy.material.color.set(p.returning ? '#ffd46a' : '#8ffcff');
+          energy.material.opacity = 0.78 + Math.sin(spin * 0.7) * 0.16;
+        }
         // Drawn at exactly the authored decorative radius (1.55x collision), rather
         // than the 1.39x the old torus happened to reach.
         mesh.scale.setScalar(Math.max(0.3, p.visualRadius || p.radius));
@@ -1049,27 +1051,36 @@ export class SurvivorRenderer {
   private createPlasmaSegment(): THREE.Object3D {
     const { quad, cap } = this.plasmaGeometry();
     const g = new THREE.Group();
-    // Cooling ember edge: the outermost, dimmest shell. Orange survives here because it
-    // is the coolest part of the trail, which is the direction the whole ramp now runs.
-    g.add(this.plasmaLayer(quad, '#b5431c', 0.22, 'pw-ember', 0.05, { order: 7 }));
-    g.add(this.plasmaLayer(cap, '#b5431c', 0.22, 'pw-ember-cap0', 0.05, { order: 7 }));
-    g.add(this.plasmaLayer(cap, '#b5431c', 0.22, 'pw-ember-cap1', 0.05, { order: 7 }));
-    // Plasma body: deep violet-magenta, composited normally so it stays a *substance*
-    // on the floor rather than a light source shining through everything above it.
-    g.add(this.plasmaLayer(quad, '#7a1b6b', 0.44, 'pw-fire', 0.055, { order: 8 }));
-    g.add(this.plasmaLayer(cap, '#7a1b6b', 0.44, 'pw-fire-cap0', 0.055, { order: 8 }));
-    g.add(this.plasmaLayer(cap, '#7a1b6b', 0.44, 'pw-fire-cap1', 0.055, { order: 8 }));
-    // The one additive element, and it is thin: a narrow hot filament down the middle.
-    g.add(this.plasmaLayer(quad, '#c94ad6', 0.34, 'pw-core', 0.06, { additive: true, order: 9 }));
-    // Ignition sparks at the burning head. Two, not four — the point is to mark where
-    // the trail was just laid, not to decorate its whole length.
-    for (let i = 0; i < 2; i += 1) {
-      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#ff9a4a' : '#ffcf8a', 0.4, 'pw-tongue', 0.062, {
+    // Magnetically contained aurora: the readable outside is an inky violet sheath,
+    // inside it sits a saturated field, and two opposite-polarity filaments braid down
+    // the capsule. This replaces the previous orange/magenta "paint stripe" language.
+    g.add(this.plasmaLayer(quad, '#130b38', 0.62, 'pw-ember', 0.05, { order: 7 }));
+    g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap0', 0.05, { order: 7 }));
+    g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap1', 0.05, { order: 7 }));
+    g.add(this.plasmaLayer(quad, '#5c2bc7', 0.5, 'pw-fire', 0.055, { order: 8 }));
+    g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap0', 0.055, { order: 8 }));
+    g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap1', 0.055, { order: 8 }));
+    for (const side of [-1, 1]) {
+      const rail = this.plasmaLayer(
+        quad,
+        side < 0 ? '#57f3ff' : '#ff67de',
+        0.56,
+        'pw-core',
+        0.062,
+        { additive: true, order: 9 },
+      );
+      rail.userData.railSide = side;
+      rail.userData.railPhase = side < 0 ? 0 : Math.PI;
+      g.add(rail);
+    }
+    // Three travelling charge knots sell flow along even an old, stationary segment.
+    for (let i = 0; i < 3; i += 1) {
+      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#adfbff' : '#ff9bea', 0.5, 'pw-tongue', 0.068, {
         additive: true,
         order: 10,
       });
-      tongue.userData.tonguePhase = i * 1.37;
-      tongue.userData.tongueAt = 0.24 + i * 0.34;
+      tongue.userData.tonguePhase = i * 2.094;
+      tongue.userData.tongueAt = i / 3;
       g.add(tongue);
     }
     return g;
@@ -1083,13 +1094,9 @@ export class SurvivorRenderer {
    * longer, and the ember shell ends at a dull ash that still reads on a dark floor.
    */
   private static readonly PLASMA_HEAT: Record<string, readonly string[]> = {
-    // Hot filament: bright magenta at ignition, into violet, then out. It never reaches
-    // white — white is what the 2.7.0 ribbon spent its whole life being.
-    'pw-core': ['#ffb2f2', '#e05ad8', '#a32fa8', '#5c1a63', '#240c2c'],
-    // Plasma body: violet-magenta cooling through a dull ember to near-black.
-    'pw-fire': ['#a83a9e', '#7a1b6b', '#5a1846', '#3a1226', '#170812'],
-    // Outer shell: the cooling edge. Ember orange only at the very start of its life.
-    'pw-ember': ['#d4622a', '#9c3a20', '#6a2418', '#3c1410', '#170807'],
+    'pw-core': ['#d8ffff', '#7fefff', '#c261ed', '#54206f', '#1c102a'],
+    'pw-fire': ['#8754ed', '#6231c3', '#45228d', '#28164d', '#100a22'],
+    'pw-ember': ['#352069', '#25164e', '#1b1039', '#110a25', '#080714'],
   };
 
   /** Sample a ramp at `k` in [0,1] with linear interpolation between stops. */
@@ -1177,8 +1184,8 @@ export class SurvivorRenderer {
       const n = child.name;
       let widthMul = 1;
       if (n.startsWith('pw-ember')) widthMul = 1.0;
-      else if (n.startsWith('pw-fire')) widthMul = 0.72;
-      else if (n === 'pw-core') widthMul = 0.22;
+      else if (n.startsWith('pw-fire')) widthMul = 0.78;
+      else if (n === 'pw-core') widthMul = 0.12;
 
       if (n === 'pw-ember' || n === 'pw-fire' || n === 'pw-core') {
         /*
@@ -1191,7 +1198,10 @@ export class SurvivorRenderer {
          */
         const narrow = n === 'pw-ember' ? 1 : cool;
         child.scale.set(w * 2 * widthMul * narrow, Math.max(0.001, len), 1);
-        child.position.set(0, child.position.y, 0);
+        const railSide = (child.userData.railSide as number | undefined) ?? 0;
+        const railPhase = (child.userData.railPhase as number | undefined) ?? 0;
+        const flow = performance.now() * 0.0045 + h.id * 0.31 + railPhase;
+        child.position.set(railSide * w * (0.24 + Math.sin(flow) * 0.09), child.position.y, 0);
         const heat = n === 'pw-core' ? flicker * ignite : 1;
         mat.opacity = Math.max(0.03, base * t * cool * heat);
       } else if (n.endsWith('cap0') || n.endsWith('cap1')) {
@@ -1201,19 +1211,18 @@ export class SurvivorRenderer {
         child.position.set(0, child.position.y, end);
         mat.opacity = Math.max(0.03, base * t * cool);
       } else if (n === 'pw-tongue') {
-        // Ignition sparks only. They are gone well before the segment is, so an old
-        // segment is a dark scar rather than something still throwing light.
         const phase = (child.userData.tonguePhase as number) ?? 0;
         const at = (child.userData.tongueAt as number) ?? 0.5;
-        const lick = 0.5 + Math.sin(performance.now() * 0.011 + phase + h.id) * 0.5;
-        const spark = age < 0.3 ? 1 - age / 0.3 : 0;
-        child.scale.setScalar(w * 0.3 * lick * spark);
+        const clock = performance.now() * 0.0007;
+        const travel = (at + clock + h.id * 0.071) % 1;
+        const knot = 0.75 + Math.sin(performance.now() * 0.012 + phase) * 0.25;
+        child.scale.setScalar(w * 0.16 * knot * cool);
         child.position.set(
-          (phase % 2 === 0 ? 1 : -1) * w * 0.42 * lick,
+          Math.sin(travel * Math.PI * 2 + phase) * w * 0.34,
           child.position.y,
-          -len / 2 + len * at,
+          -len / 2 + len * travel,
         );
-        mat.opacity = Math.max(0, base * t * lick * spark);
+        mat.opacity = Math.max(0, base * t * cool * knot);
       }
     }
   }
@@ -1451,6 +1460,50 @@ export class SurvivorRenderer {
       arc.userData.spin = i === 0 ? 3.1 : -4.4;
       g.add(arc);
     }
+    // Lensing core: a physical void above the floor, crossed by two tilted accretion
+    // planes. Depth testing stays on so enemies visibly pass in front of their own pull.
+    const voidCore = this.ownMesh(
+      new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), this.effectMat('#030108', 0.96)),
+    );
+    voidCore.name = 'gravity-void';
+    voidCore.userData.baseOpacity = 0.96;
+    voidCore.userData.wellRole = 'void';
+    voidCore.userData.wellScale = 0.12;
+    voidCore.position.y = 0.5;
+    g.add(voidCore);
+    for (let i = 0; i < 2; i += 1) {
+      const lens = this.ownMesh(
+        new THREE.Mesh(
+          new THREE.TorusGeometry(1, 0.055, 8, 48),
+          this.effectMat(i === 0 ? '#c9a4ff' : '#55e6ff', 0.72, true),
+        ),
+      );
+      lens.name = `gravity-lens-${i}`;
+      lens.userData.baseOpacity = 0.72;
+      lens.userData.wellRole = 'lens';
+      lens.userData.wellScale = 0.31 + i * 0.07;
+      lens.userData.spin = i === 0 ? 2.6 : -2.1;
+      lens.rotation.x = Math.PI * (0.37 + i * 0.18);
+      lens.position.y = 0.48;
+      g.add(lens);
+    }
+    // Bounded orbiting fragments provide parallax and show inward motion in a crowd.
+    for (let i = 0; i < 8; i += 1) {
+      const shard = this.ownMesh(
+        new THREE.Mesh(
+          new THREE.TetrahedronGeometry(1, 0),
+          this.effectMat(i % 2 === 0 ? '#b77cff' : '#70eaff', 0.72, true),
+        ),
+      );
+      shard.name = `gravity-shard-${i}`;
+      shard.userData.baseOpacity = 0.72;
+      shard.userData.wellRole = 'shard';
+      shard.userData.wellScale = 0.025 + (i % 3) * 0.008;
+      shard.userData.orbit = 0.4 + (i % 4) * 0.12;
+      shard.userData.phase = (i / 8) * Math.PI * 2;
+      shard.userData.spin = i % 2 === 0 ? 2.2 : -2.8;
+      g.add(shard);
+    }
     return g;
   }
 
@@ -1470,11 +1523,23 @@ export class SurvivorRenderer {
       if (!(child instanceof THREE.Mesh)) continue;
       const role = child.userData.wellRole as string | undefined;
       const base = (child.userData.baseOpacity as number | undefined) ?? 0.4;
-      const scale =
-        role === 'core' ? h.radius * coreFraction : role === 'arc' ? h.radius : h.radius;
+      const authoredScale = (child.userData.wellScale as number | undefined) ?? 1;
+      const scale = role === 'core' ? h.radius * coreFraction : h.radius * authoredScale;
       child.scale.setScalar(Math.max(0.001, scale * (0.35 + 0.65 * settle)));
       if (role === 'arc') {
         child.rotation.z = (child.userData.spin as number) * (h.maxLife - h.life);
+      } else if (role === 'lens') {
+        child.rotation.z = (child.userData.spin as number) * (h.maxLife - h.life);
+        child.position.y = 0.38 + h.radius * 0.035;
+      } else if (role === 'void') {
+        child.rotation.y = (h.maxLife - h.life) * 1.7;
+        child.position.y = 0.34 + h.radius * 0.045;
+      } else if (role === 'shard') {
+        const phase = (child.userData.phase as number) + (h.maxLife - h.life) * (child.userData.spin as number);
+        const orbit = (child.userData.orbit as number) * h.radius * (0.45 + 0.55 * settle);
+        child.position.set(Math.cos(phase) * orbit, 0.2 + (Math.sin(phase * 1.7) * 0.5 + 0.5) * h.radius * 0.09, Math.sin(phase) * orbit);
+        child.rotation.x = phase * 1.3;
+        child.rotation.y = phase * 1.8;
       }
       if (child.material instanceof THREE.MeshBasicMaterial) {
         // Hold opacity flat, then fade only over the last fifth of the life.
@@ -1912,6 +1977,26 @@ export class SurvivorRenderer {
     makeCone(-0.28, '#fffef5');
     makeCone(0.28, this.heroAccent);
     root.add(thruster);
+    const weapons = new THREE.Group();
+    weapons.name = 'gunship-weapons';
+    for (const side of [-1, 1]) {
+      const podMat = this.effectMat('#18283e', 0.96);
+      this.gunshipMats.push(podMat);
+      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.78, 8), podMat);
+      pod.rotation.x = Math.PI / 2;
+      pod.position.set(side * 0.54, -0.08, 0.35);
+      pod.userData.ownsGeometry = true;
+      pod.userData.ownsMaterial = false;
+      const muzzleMat = this.effectMat('#ffd46a', 0.2, true);
+      this.gunshipMats.push(muzzleMat);
+      const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), muzzleMat);
+      muzzle.name = `gunship-muzzle-${side}`;
+      muzzle.position.set(side * 0.54, -0.08, 0.78);
+      muzzle.userData.ownsGeometry = true;
+      muzzle.userData.ownsMaterial = false;
+      weapons.add(pod, muzzle);
+    }
+    root.add(weapons);
     this.root.add(root);
     this.gunshipRoot = root;
     return root;
@@ -1929,11 +2014,22 @@ export class SurvivorRenderer {
     // During warning, park just off the start edge slightly raised; then fly the lane.
     root.position.set(g.x, height, g.z);
     root.rotation.y = Math.atan2(g.facingX, g.facingZ);
-    root.scale.setScalar(SURVIVOR.actorScale.ship * 1.35);
+    // The cache flyby is air support, not a boss collider. Keep it clearly larger than
+    // the player's ship while leaving the firing lane, cannon beams and ground threats
+    // visible beneath it.
+    root.scale.setScalar(SURVIVOR.actorScale.ship * 0.78);
     const thr = root.getObjectByName('gunship-thrusters');
     if (thr) {
       const flicker = 0.85 + Math.sin(performance.now() * 0.05) * 0.2;
       thr.scale.set(1, 1, g.firing ? 1.2 * flicker : 0.7);
+    }
+    for (const side of [-1, 1]) {
+      const muzzle = root.getObjectByName(`gunship-muzzle-${side}`);
+      if (muzzle instanceof THREE.Mesh && muzzle.material instanceof THREE.MeshBasicMaterial) {
+        const cadence = Math.max(0, Math.sin((g.t - g.warnDuration) * Math.PI * 2 / SURVIVOR.gunship.fireInterval));
+        muzzle.material.opacity = g.firing ? 0.2 + cadence * 0.8 : 0.08;
+        muzzle.scale.setScalar(g.firing ? 0.8 + cadence * 0.9 : 0.55);
+      }
     }
   }
 
@@ -1987,7 +2083,9 @@ export class SurvivorRenderer {
        * holds its authored radius, a blast expands to it and stops. Nothing that stands
        * for a gameplay boundary is ever drawn wider than the region that damages.
        */
-      if (isBoundaryEffect(e.kind)) {
+      if (e.kind === 'gunship-shot') {
+        obj.scale.setScalar(1);
+      } else if (isBoundaryEffect(e.kind)) {
         obj.scale.setScalar(groundEffectScale(e.kind, t));
       } else if (e.kind === 'fleet-ship') {
         obj.scale.setScalar(1);
@@ -1996,12 +2094,47 @@ export class SurvivorRenderer {
         const len = e.length ?? 30;
         obj.position.set(e.x + fx * len * t, 6.5 + Math.sin(t * Math.PI) * 1.2, e.z + fz * len * t);
       } else if (e.kind === 'singularity') {
-        const pulse = 0.96 + Math.sin(t * 20) * 0.06;
-        obj.scale.setScalar((0.35 + Math.min(1, t * 2.8) * 0.65) * pulse);
-        const ring = obj.getObjectByName('singularity-ring');
-        if (ring) ring.rotation.z = t * 7.5;
+        // The outer ring is the true pull radius, so hold the group at full scale. The
+        // motion lives inside it: accretion planes counter-rotate and motes spiral in.
+        obj.scale.setScalar(1);
+        obj.children.forEach((child) => {
+          if (child.name.startsWith('singularity-ring-')) {
+            child.rotation.z =
+              ((child.userData.baseZ as number | undefined) ?? 0) +
+              t * Math.PI * 2 * ((child.userData.spin as number | undefined) ?? 1);
+          } else if (child.name.startsWith('singularity-mote-')) {
+            const phase = (child.userData.phase as number) + t * Math.PI * 2 * (child.userData.spin as number);
+            const orbit = (child.userData.orbit as number) * (1 - t * 0.7) * (e.radius ?? 16);
+            child.position.set(
+              Math.cos(phase) * orbit,
+              0.25 + Math.sin(phase * 1.8) * 0.45 + (e.radius ?? 16) * 0.035,
+              Math.sin(phase) * orbit,
+            );
+            child.rotation.x = phase * 1.4;
+            child.rotation.y = phase * 1.9;
+          } else if (child.name === 'singularity-lens') {
+            child.scale.setScalar(0.9 + Math.sin(t * 28) * 0.12);
+          }
+        });
       } else {
         obj.scale.setScalar(groundEffectScale(e.kind, t));
+      }
+      if (e.kind === 'pulsar') {
+        const a = obj.getObjectByName('pulsar-ring-a');
+        const b = obj.getObjectByName('pulsar-ring-b');
+        const star = obj.getObjectByName('pulsar-star');
+        if (a) a.rotation.z = t * 2.6;
+        if (b) b.rotation.z = -t * 4.1;
+        if (star) {
+          star.rotation.y = t * 8;
+          star.rotation.x = t * 5;
+        }
+      } else if (e.kind === 'gravity-collapse') {
+        const ring = obj.getObjectByName('gravity-collapse-ring');
+        if (ring) ring.rotation.z = -t * 5.5;
+      } else if (e.kind === 'boomerang-rift') {
+        const arc = obj.getObjectByName('boomerang-rift-arc');
+        if (arc) arc.rotation.z = t * 9;
       }
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
@@ -2051,6 +2184,103 @@ export class SurvivorRenderer {
   private createEffect(e: SurvivorState['effects'][0]): THREE.Object3D {
     const g = new THREE.Group();
     const color = e.color;
+    if (e.kind === 'gravity-collapse') {
+      const r = e.radius ?? e.scale ?? 3;
+      const well = this.ownMesh(new THREE.Mesh(new THREE.CircleGeometry(r, 56), this.effectMat('#5f2bb8', 0.24)));
+      well.rotation.x = -Math.PI / 2;
+      well.position.y = 0.07;
+      const horizon = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.72, r, 64), this.effectMat('#c69cff', 0.82, true)));
+      horizon.rotation.x = -Math.PI / 2;
+      horizon.position.y = 0.09;
+      horizon.name = 'gravity-collapse-ring';
+      const core = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(r * 0.13, 20, 12), this.effectMat('#07000e', 0.94)));
+      core.scale.y = 0.38;
+      core.position.y = r * 0.08;
+      g.add(well, horizon, core);
+      for (let i = 0; i < 10; i += 1) {
+        const ray = this.ownMesh(new THREE.Mesh(
+          new THREE.BoxGeometry(r * 0.035, 0.035, r * 0.52),
+          this.effectMat(i % 2 ? '#68ecff' : '#d6b2ff', 0.48, true),
+        ));
+        const a = (i / 10) * Math.PI * 2;
+        ray.position.set(Math.sin(a) * r * 0.45, 0.12, Math.cos(a) * r * 0.45);
+        ray.rotation.y = a;
+        ray.name = 'gravity-collapse-ray';
+        g.add(ray);
+      }
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'pulsar') {
+      const r = e.radius ?? e.scale ?? 8;
+      const wash = this.ownMesh(new THREE.Mesh(new THREE.CircleGeometry(r, 72), this.effectMat('#174f70', 0.16)));
+      wash.rotation.x = -Math.PI / 2;
+      wash.position.y = 0.06;
+      const outer = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.89, r, 80), this.effectMat('#83f7ff', 0.92, true)));
+      outer.rotation.x = -Math.PI / 2;
+      outer.position.y = 0.1;
+      outer.name = 'pulsar-ring-a';
+      const harmonic = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.48, r * 0.54, 64), this.effectMat('#bc8cff', 0.56, true)));
+      harmonic.rotation.x = -Math.PI / 2;
+      harmonic.position.y = 0.11;
+      harmonic.name = 'pulsar-ring-b';
+      const star = this.ownMesh(new THREE.Mesh(new THREE.IcosahedronGeometry(Math.max(0.45, r * 0.1), 2), this.effectMat('#e8ffff', 0.84, true)));
+      star.position.y = Math.max(0.55, r * 0.075);
+      star.name = 'pulsar-star';
+      g.add(wash, outer, harmonic, star);
+      for (let i = 0; i < 12; i += 1) {
+        const spoke = this.ownMesh(new THREE.Mesh(
+          new THREE.ConeGeometry(r * 0.022, r * 0.46, 4, 1, true),
+          this.effectMat(i % 3 === 0 ? '#d4a3ff' : '#61eaff', 0.46, true),
+        ));
+        const a = (i / 12) * Math.PI * 2;
+        spoke.rotation.z = Math.PI / 2;
+        spoke.rotation.y = -a;
+        spoke.position.set(Math.sin(a) * r * 0.44, 0.15, Math.cos(a) * r * 0.44);
+        spoke.name = 'pulsar-spoke';
+        g.add(spoke);
+      }
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'boomerang-rift') {
+      const r = e.radius ?? e.scale ?? 1.3;
+      const arc = this.ownMesh(new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.42, r, 48, 1, -0.55, Math.PI * 1.45),
+        this.effectMat(color, 0.78, true),
+      ));
+      arc.rotation.x = -Math.PI / 2;
+      arc.position.y = 0.15;
+      arc.name = 'boomerang-rift-arc';
+      const inner = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.18, r * 0.28, 36), this.effectMat('#8ffcff', 0.62, true)));
+      inner.rotation.x = -Math.PI / 2;
+      inner.position.y = 0.16;
+      g.add(arc, inner);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'gunship-shot') {
+      const fx = e.facingX ?? 0;
+      const fz = e.facingZ ?? 1;
+      const side = e.width ?? 0;
+      const px = -fz;
+      const pz = fx;
+      const len = e.length ?? 5;
+      const beam = this.ownMesh(new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055, 0.13, Math.hypot(len, SURVIVOR.gunship.flyHeight), 6),
+        this.effectMat('#ffd46a', 0.96, true),
+      ));
+      const start = new THREE.Vector3(px * side, SURVIVOR.gunship.flyHeight - 0.45, pz * side);
+      const end = new THREE.Vector3(fx * len + px * side, 0.08, fz * len + pz * side);
+      beam.position.copy(start).add(end).multiplyScalar(0.5);
+      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(start).normalize());
+      beam.name = 'gunship-cannon-beam';
+      const flash = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 7), this.effectMat('#fff5c7', 0.92, true)));
+      flash.position.copy(start);
+      g.add(beam, flash);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
     if (e.kind === 'rail') {
       const len = e.length ?? 10;
       const mesh = this.ownMesh(
@@ -2261,23 +2491,74 @@ export class SurvivorRenderer {
     }
     if (e.kind === 'singularity') {
       const r = e.radius ?? 16;
-      const core = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 18), this.effectMat('#080016', 0.95, false)));
-      core.position.y = 2.8;
-      const accretion = this.ownMesh(new THREE.Mesh(new THREE.TorusGeometry(r * 0.42, 0.28, 12, 64), this.effectMat('#a881ff', 0.78, true)));
-      accretion.rotation.x = Math.PI / 2.25;
-      accretion.position.y = 2.6;
-      accretion.name = 'singularity-ring';
-      const reach = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.82, r, 72), this.effectMat('#66eaff', 0.25, true)));
+      const core = this.ownMesh(new THREE.Mesh(new THREE.IcosahedronGeometry(r * 0.105, 3), this.effectMat('#010005', 0.98, false)));
+      core.position.y = r * 0.11;
+      core.name = 'singularity-core';
+      const lens = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(r * 0.16, 28, 18), this.effectMat('#7447b8', 0.16, true)));
+      lens.position.copy(core.position);
+      lens.name = 'singularity-lens';
+      const reach = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.91, r, 80), this.effectMat('#72efff', 0.34, true)));
       reach.rotation.x = -Math.PI / 2;
       reach.position.y = 0.06;
-      g.add(reach, accretion, core);
+      reach.name = 'singularity-reach';
+      g.add(reach, lens, core);
+      for (let i = 0; i < 3; i += 1) {
+        const accretion = this.ownMesh(new THREE.Mesh(
+          new THREE.TorusGeometry(r * (0.22 + i * 0.085), r * (0.014 + i * 0.003), 8, 72),
+          this.effectMat(['#fff0b0', '#b27dff', '#55eaff'][i]!, 0.78 - i * 0.12, true),
+        ));
+        accretion.rotation.x = Math.PI * (0.38 + i * 0.09);
+        accretion.rotation.z = i * 0.8;
+        accretion.position.y = r * 0.105;
+        accretion.name = `singularity-ring-${i}`;
+        accretion.userData.spin = i % 2 === 0 ? 1.8 + i * 0.6 : -2.2;
+        accretion.userData.baseZ = i * 0.8;
+        g.add(accretion);
+      }
+      for (let i = 0; i < 12; i += 1) {
+        const mote = this.ownMesh(new THREE.Mesh(
+          new THREE.TetrahedronGeometry(r * (0.018 + (i % 3) * 0.006), 0),
+          this.effectMat(i % 2 ? '#ca9dff' : '#6af0ff', 0.72, true),
+        ));
+        mote.name = `singularity-mote-${i}`;
+        mote.userData.phase = (i / 12) * Math.PI * 2;
+        mote.userData.orbit = 0.26 + (i % 4) * 0.12;
+        mote.userData.spin = i % 2 ? 2.1 : -2.7;
+        g.add(mote);
+      }
       g.position.set(e.x, 0, e.z);
       g.traverse((o) => {
         if (o instanceof THREE.Mesh) {
-          o.material.depthTest = false;
-          o.renderOrder = 26;
+          o.material.depthTest = true;
+          o.renderOrder = 14;
         }
       });
+      return g;
+    }
+    if (e.kind === 'singularity-collapse') {
+      const r = e.radius ?? 16;
+      const voidFlash = this.ownMesh(new THREE.Mesh(new THREE.SphereGeometry(r * 0.13, 26, 18), this.effectMat('#f1e7ff', 0.9, true)));
+      voidFlash.scale.y = 0.55;
+      voidFlash.position.y = r * 0.08;
+      const wave = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.78, r, 96), this.effectMat('#d7baff', 0.86, true)));
+      wave.rotation.x = -Math.PI / 2;
+      wave.position.y = 0.1;
+      const inner = this.ownMesh(new THREE.Mesh(new THREE.RingGeometry(r * 0.36, r * 0.48, 72), this.effectMat('#5eeaff', 0.5, true)));
+      inner.rotation.x = -Math.PI / 2;
+      inner.position.y = 0.12;
+      g.add(wave, inner, voidFlash);
+      for (let i = 0; i < 16; i += 1) {
+        const shard = this.ownMesh(new THREE.Mesh(
+          new THREE.ConeGeometry(r * 0.018, r * 0.17, 4),
+          this.effectMat(i % 2 ? '#fff0b2' : '#b998ff', 0.74, true),
+        ));
+        const a = (i / 16) * Math.PI * 2;
+        shard.position.set(Math.sin(a) * r * 0.63, r * 0.035, Math.cos(a) * r * 0.63);
+        shard.rotation.z = Math.PI / 2;
+        shard.rotation.y = -a;
+        g.add(shard);
+      }
+      g.position.set(e.x, 0, e.z);
       return g;
     }
     if (e.kind === 'titan-deploy') {
@@ -2501,10 +2782,12 @@ export class SurvivorRenderer {
 
   dispose(): void {
     for (const obj of this.effects.values()) this.disposeEffectObject(obj);
+    for (const obj of this.hazards.values()) this.disposeEffectObject(obj);
     for (const mesh of this.projectiles.values()) {
       if (mesh instanceof THREE.Group) this.disposeEffectObject(mesh);
     }
     for (const pickup of this.pickups.values()) this.disposeEffectObject(pickup);
+    if (this.gunshipRoot) this.disposeEffectObject(this.gunshipRoot);
     for (const mesh of this.railPool) {
       const m = mesh.material;
       if (m instanceof THREE.Material && m.userData?.owned) m.dispose();
@@ -2550,10 +2833,10 @@ export class SurvivorRenderer {
     this.pickupRepairShellGeo.dispose();
     // Shared Cosmic Boomerang silhouette: owned by the renderer, not by any disc.
     if (this.boomerangGeo) {
-      this.boomerangGeo.arm.dispose();
-      this.boomerangGeo.edge.dispose();
-      this.boomerangGeo.elbow.dispose();
-      this.boomerangGeo.chevron.dispose();
+      this.boomerangGeo.blade.dispose();
+      this.boomerangGeo.energy.dispose();
+      this.boomerangGeo.core.dispose();
+      this.boomerangGeo.ghost.dispose();
       this.boomerangGeo = null;
     }
     // Shared Plasma Wake ribbon geometry: owned by the renderer, not by any segment.

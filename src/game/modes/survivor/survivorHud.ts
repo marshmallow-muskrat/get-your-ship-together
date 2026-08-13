@@ -254,13 +254,23 @@ export class SurvivorHud {
         </div>
       </div>
       <div id="sv-leaderboard-modal" class="sv-modal sv-leaderboard hidden">
-        <p class="eyebrow">LOCAL RECORDS</p>
-        <h2>Leaderboards</h2>
-        <div id="sv-lb-view-tabs" class="sv-lb-tabs"></div>
-        <div id="sv-lb-tabs" class="sv-lb-tabs"></div>
-        <div id="sv-lb-list" class="sv-lb-list"></div>
-        <div class="sv-end-actions">
-          <button type="button" id="sv-close-lb" class="sv-btn">BACK</button>
+        <div class="sv-lb-frame">
+          <header class="sv-lb-header"><div><p class="eyebrow">REACTOR PLATFORM 7 // LOCAL ARCHIVE</p><h2>Hall of Survivors</h2></div><span><i></i> RECORD SYSTEM ONLINE</span></header>
+          <div class="sv-lb-shell">
+            <aside class="sv-lb-profile">
+              <div id="sv-lb-monogram" class="sv-lb-monogram">BB</div>
+              <small id="sv-lb-species">THE BEE</small>
+              <strong id="sv-lb-hero">BOSWELL</strong>
+              <dl><div><dt>PERSONAL BEST</dt><dd id="sv-lb-best">—</dd></div><div><dt>RECORDED RUNS</dt><dd id="sv-lb-runs">0</dd></div><div><dt>CAREER KILLS</dt><dd id="sv-lb-kills">0</dd></div></dl>
+            </aside>
+            <main class="sv-lb-records">
+              <div id="sv-lb-view-tabs" class="sv-lb-tabs"></div>
+              <div id="sv-lb-tabs" class="sv-lb-tabs"></div>
+              <div class="sv-lb-column-labels"><span>RANK</span><span>ENDURANCE</span><span>RUN DATA</span></div>
+              <div id="sv-lb-list" class="sv-lb-list"></div>
+            </main>
+          </div>
+          <footer class="sv-lb-footer"><span>INDEPENDENT RECORDS BY OPERATIVE · CURRENT BALANCE LINE</span><button type="button" id="sv-close-lb" class="sv-btn">RETURN</button></footer>
         </div>
       </div>
 
@@ -380,6 +390,21 @@ export class SurvivorHud {
 
   private renderLeaderboard(hero: HeroId): void {
     this._lbHero = hero;
+    const heroDef = HEROES[hero];
+    const history = getRunHistory(hero);
+    const best = getHeroLeaderboard(hero)[0];
+    const set = (selector: string, value: string): void => {
+      const element = this.root.querySelector(selector);
+      if (element) element.textContent = value;
+    };
+    set('#sv-lb-monogram', heroDef.name.slice(0, 1) + heroDef.species.replace('The ', '').slice(0, 1));
+    set('#sv-lb-species', heroDef.species);
+    set('#sv-lb-hero', heroDef.name);
+    set('#sv-lb-best', best ? formatSurvivalTime(best.survivalTime) : '—');
+    set('#sv-lb-runs', String(history.length));
+    set('#sv-lb-kills', history.reduce((total, run) => total + run.kills, 0).toLocaleString());
+    const frame = this.root.querySelector<HTMLElement>('.sv-lb-frame');
+    frame?.style.setProperty('--lb-accent', heroDef.accent);
     const viewTabs = this.root.querySelector('#sv-lb-view-tabs');
     const tabs = this.root.querySelector('#sv-lb-tabs');
     const list = this.root.querySelector('#sv-lb-list');
@@ -426,18 +451,18 @@ export class SurvivorHud {
       } else {
         runs.forEach((r, i) => {
           const row = document.createElement('div');
-          row.className = 'sv-lb-row';
+          row.className = `sv-lb-row${!this._lbHistory && i < 3 ? ` podium podium-${i + 1}` : ''}`;
           const add = (tag: string, text: string, cls?: string) => {
             const el = document.createElement(tag);
             if (cls) el.className = cls;
             el.textContent = text;
             row.appendChild(el);
           };
-          add('strong', this._lbHistory ? `RUN ${runs.length - i}` : `#${i + 1}`);
-          add('span', formatSurvivalTime(r.survivalTime));
-          add('span', `K ${r.kills}`);
-          add('span', `L${r.level}`);
-          add('span', `B ${r.bossesDefeated}`);
+          add('strong', this._lbHistory ? `RUN ${runs.length - i}` : `#${i + 1}`, 'sv-lb-rank');
+          add('span', formatSurvivalTime(r.survivalTime), 'sv-lb-time');
+          add('span', `${r.kills.toLocaleString()} KILLS`, 'sv-lb-data');
+          add('span', `LEVEL ${r.level}`, 'sv-lb-data');
+          add('span', `${r.bossesDefeated} BOSSES`, 'sv-lb-data');
           add(
             'span',
             `${new Date(r.timestamp).toLocaleDateString()} · ${r.balanceVersion}`,

@@ -162,7 +162,8 @@ export const SURVIVOR = {
   orbitalUnlockTime: 900,
   cacheInterval: 120,
   cacheLeadBeforeBoss: 15,
-  cacheLifetime: 38,
+  /** Expanded-station routing window; +7s from the playtest baseline. */
+  cacheLifetime: 45,
   cacheOfferDuration: 0,
   /** Collection radius for Protocol Cache (world units). */
   cacheCollectRadius: 3.25,
@@ -362,6 +363,11 @@ export const SURVIVOR = {
     fleetBossFraction: 0.06,
     fleetMegaFraction: 0.03,
     singularityDuration: 5.5,
+    /** Readable suction window before the collapse resolves damage. */
+    singularityPullDuration: 1.3,
+    singularityPullSpeed: 7.2,
+    singularityElitePullMul: 0.48,
+    singularityMinibossPullMul: 0.2,
     singularityRadius: 16,
     singularityTick: 0.25,
     singularityDamage: 34,
@@ -442,7 +448,7 @@ export const SURVIVOR = {
        * damage lands at parity with Carrier Wing, which the release brief holds fixed as
        * the reference "already feels good" armament.
        */
-      damageMul: 0.29,
+      damageMul: 0.278,
       cadenceMul: 1.28,
       /** Boss damage multiplier applied on top, matching ordinary weapon boss ratios. */
       bossMul: 0.8,
@@ -629,6 +635,8 @@ export const SURVIVOR = {
    */
   boomerang: {
     turnDistancePerLife: 4.2,
+    /** Maximum lateral bow as a fraction of turn distance. */
+    curveBulge: 0.04,
     /** Decorative silhouette only; collision remains the authored projectile radius. */
     visualRadiusMul: 1.55,
     /** Diverging bearing between the pair at Twin Orbit, in radians. */
@@ -882,10 +890,10 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
        * well at L5 as the declared breakpoint; duration is a property of the mechanic.
        */
       { level: 1, damage: 44, cadence: 2.25, count: 1, radius: 2.7, life: 1.05 },
-      { level: 2, damage: 49, cadence: 1.952, count: 1, radius: 2.8, life: 1.05 },
+      { level: 2, damage: 48, cadence: 1.952, count: 1, radius: 2.8, life: 1.05 },
       { level: 3, damage: 54, cadence: 1.764, count: 1, radius: 2.9, life: 1.05 },
       { level: 4, damage: 60, cadence: 1.633, count: 1, radius: 3.0, life: 1.05 },
-      { tier: 'Event Horizon', level: 5, damage: 69, cadence: 2.605, count: 2, radius: 3.1, life: 1.05 },
+      { tier: 'Event Horizon', level: 5, damage: 73, cadence: 2.605, count: 2, radius: 3.1, life: 1.05 },
     ],
   },
   boomerang: {
@@ -906,10 +914,13 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
        * cone rather than doubling one lane.
        */
       { level: 1, damage: 34, cadence: 1.55, count: 1, speed: 15, radius: 0.5, life: 2.6 },
-      { level: 2, damage: 39, cadence: 1.42, count: 1, speed: 15.5, radius: 0.55, life: 2.8 },
+      { level: 2, damage: 38, cadence: 1.42, count: 1, speed: 15.5, radius: 0.55, life: 2.8 },
       { level: 3, damage: 44, cadence: 1.34, count: 1, speed: 16, radius: 0.6, life: 3.0 },
-      { level: 4, damage: 50, cadence: 1.24, count: 1, speed: 16.5, radius: 0.63, life: 3.15 },
-      { tier: 'Twin Orbit', level: 5, damage: 57, cadence: 1.42, count: 2, speed: 17, radius: 0.66, life: 3.4 },
+      { level: 4, damage: 48, cadence: 1.24, count: 1, speed: 16.5, radius: 0.63, life: 3.15 },
+      // Curved return geometry adds real coverage. Keep Twin Orbit inside the authored
+      // 3.0–4.2 effective progression band instead of letting that coverage become a
+      // hidden fifth growth axis.
+      { tier: 'Twin Orbit', level: 5, damage: 49, cadence: 1.44, count: 2, speed: 17, radius: 0.66, life: 3.4 },
     ],
   },
   rocket: {
@@ -2417,6 +2428,10 @@ export type SurvivorFixture =
   | 'survivor-identity'
   | 'survivor-rotary'
   | 'survivor-boomerang'
+  | 'survivor-gravity'
+  | 'survivor-pulsar'
+  | 'survivor-singularity'
+  | 'survivor-singularity-collapse'
   | 'survivor-plasma-l1'
   | 'survivor-plasma-ship'
   | 'survivor-ship-ram'
@@ -2450,6 +2465,10 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-identity',
   'survivor-rotary',
   'survivor-boomerang',
+  'survivor-gravity',
+  'survivor-pulsar',
+  'survivor-singularity',
+  'survivor-singularity-collapse',
   'survivor-plasma-l1',
   'survivor-plasma-ship',
   'survivor-ship-ram',

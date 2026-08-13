@@ -1,5 +1,6 @@
 import type { HeroId } from '../game/content/heroes';
 import { isHeroId } from '../game/content/heroes';
+import { AudioBus } from '../game/audio/AudioBus';
 import { SurvivorMode } from '../game/modes/survivor/SurvivorMode';
 import {
   ALL_SURVIVOR_FIXTURES,
@@ -46,6 +47,7 @@ function parseLaunch(): {
 export class AppController {
   private readonly host: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
+  private readonly audio = new AudioBus();
   private selection: CrewSelectScreen | null = null;
   private survivor: SurvivorMode | null = null;
   private transitioning = false;
@@ -75,11 +77,16 @@ export class AppController {
     if (this.transitioning) return;
     this.transitioning = true;
     this.disposeAllModes();
-    this.selection = new CrewSelectScreen(this.host, this.canvas, {
-      onLaunch: (id) => {
-        void this.mountSurvivor(id, null);
+    this.selection = new CrewSelectScreen(
+      this.host,
+      this.canvas,
+      {
+        onLaunch: (id) => {
+          void this.mountSurvivor(id, null);
+        },
       },
-    });
+      this.audio,
+    );
     await this.selection.mount();
     this.transitioning = false;
   }
@@ -93,6 +100,7 @@ export class AppController {
       host: this.host,
       canvas: this.canvas,
       fixture,
+      audio: this.audio,
       handlers: {
         onReturnToCrew: () => {
           void this.mountSelection();

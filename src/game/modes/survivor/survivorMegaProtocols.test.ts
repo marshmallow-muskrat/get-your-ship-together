@@ -99,6 +99,24 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     expect(state.pickups.find((p) => p.id === 103)?.active).toBe(true);
   });
 
+  it('Singularity Engine pulls first and resolves one visible collapse second', () => {
+    const state = quietState();
+    state.weapons = [];
+    state.player.invuln = 1e9;
+    const target = addEnemy(state, 9, 0);
+    target.health = target.maxHealth = 10_000;
+    forceStartProtocol(state, 'singularity-engine', 1.5);
+    const startDistance = Math.hypot(target.x - state.megaProtocol.x, target.z - state.megaProtocol.z);
+    const before = target.health;
+    for (let i = 0; i < 45; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.megaProtocol.singularityPhase).toBe('pull');
+    expect(target.health).toBe(before);
+    expect(Math.hypot(target.x - state.megaProtocol.x, target.z - state.megaProtocol.z)).toBeLessThan(startDistance);
+    for (let i = 0; i < 60; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(target.health).toBeLessThan(before);
+    expect(state.effects.some((e) => e.kind === 'singularity-collapse')).toBe(true);
+  });
+
   it('does not block ordinary level-up modals while a Titan armament is active', () => {
     const state = quietState();
     state.xpNext = 5;

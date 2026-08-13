@@ -1081,6 +1081,11 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     originX: 0,
     originZ: 0,
     turnDistance: 0,
+    flightDistance: 0,
+    flightSpeed: 0,
+    launchFx: 0,
+    launchFz: 1,
+    curveSign: 1,
     hitIds: null,
   };
   state.projectiles.push(p);
@@ -1261,6 +1266,94 @@ function densestPoint(state: SurvivorState, originX: number, originZ: number): {
   }
   const s = scores.get(bestKey)!;
   return { x: s.sx / s.count, z: s.sz / s.count };
+}
+
+/**
+ * Threat-weighted, non-overlapping Gravity Pulse destinations.
+ *
+ * The former L5 loop asked the generic targeter twice without reserving its first
+ * answer, so both wells occupied the same coordinates. Event Horizon therefore looked
+ * like one undersized cast and discarded its authored second control field. Boss focus
+ * is preserved (both centres still overlap the boss collider); horde casts reserve the
+ * bodies covered by the first well before scoring the second.
+ */
+function gravityClusterTargets(
+  state: SurvivorState,
+  slot: SurvivorWeaponSlot,
+  originX: number,
+  originZ: number,
+  count: number,
+  radius: number,
+): Array<{ x: number; z: number }> {
+  const preferred = selectWeaponTarget(state, slot, originX, originZ, 14);
+  const preferredPos = targetPosition(preferred);
+  if (preferred?.kind === 'boss' && preferredPos) {
+    const dx = preferredPos.x - originX;
+    const dz = preferredPos.z - originZ;
+    const d = Math.hypot(dx, dz) || 1;
+    const px = -dz / d;
+    const pz = dx / d;
+    return Array.from({ length: count }, (_, i) => {
+      const offset = (i - (count - 1) / 2) * radius * 0.64;
+      return { x: preferredPos.x + px * offset, z: preferredPos.z + pz * offset };
+    });
+  }
+
+  const candidates = state.enemies.filter(
+    (e) => e.alive && (e.x - originX) ** 2 + (e.z - originZ) ** 2 <= 14 ** 2,
+  );
+  const reserved = new Set<number>();
+  const result: Array<{ x: number; z: number }> = [];
+  const weight = (e: SurvivorEnemy): number => (e.isMiniboss ? 5 : e.isElite ? 3 : 1);
+
+  for (let well = 0; well < count; well += 1) {
+    let best: SurvivorEnemy | null = null;
+    let bestScore = -Infinity;
+    for (const candidate of candidates) {
+      let score = 0;
+      for (const e of candidates) {
+        if ((e.x - candidate.x) ** 2 + (e.z - candidate.z) ** 2 > (radius + e.radius) ** 2) continue;
+        score += weight(e) * (reserved.has(e.id) ? 0.08 : 1);
+      }
+      score -= Math.hypot(candidate.x - originX, candidate.z - originZ) * 0.006;
+      if (
+        score > bestScore + 1e-9 ||
+        (Math.abs(score - bestScore) <= 1e-9 && candidate.id < (best?.id ?? Infinity))
+      ) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+
+    if (!best) {
+      if (preferredPos && result.length === 0) result.push(preferredPos);
+      else {
+        const side = well - (count - 1) / 2;
+        result.push({
+          x: originX + state.player.facingX * 3 - state.player.facingZ * side * radius,
+          z: originZ + state.player.facingZ * 3 + state.player.facingX * side * radius,
+        });
+      }
+      continue;
+    }
+
+    let sx = 0;
+    let sz = 0;
+    let sw = 0;
+    for (const e of candidates) {
+      if ((e.x - best.x) ** 2 + (e.z - best.z) ** 2 > (radius + e.radius) ** 2) continue;
+      const w = weight(e) * (reserved.has(e.id) ? 0.08 : 1);
+      sx += e.x * w;
+      sz += e.z * w;
+      sw += w;
+    }
+    const point = sw > 0 ? { x: sx / sw, z: sz / sw } : { x: best.x, z: best.z };
+    result.push(point);
+    for (const e of candidates) {
+      if ((e.x - point.x) ** 2 + (e.z - point.z) ** 2 <= (radius + e.radius) ** 2) reserved.add(e.id);
+    }
+  }
+  return result;
 }
 
 /** Ranked, motion-led clusters so a rocket salvo covers threats instead of overkilling one cell. */
@@ -1644,13 +1737,11 @@ function fireWeapons(state: SurvivorState, dt: number): void {
        * only controls — is what lets this be a control rework rather than a stealth
        * damage buff, and it leaves the documented progression contract untouched.
        */
+      const radius = (def.radius ?? 3) * area;
+      const destinations = gravityClusterTargets(state, slot, p.x, p.z, count, radius);
       for (let i = 0; i < count; i += 1) {
-        const radius = (def.radius ?? 3) * area;
-        const aim = selectWeaponTarget(state, slot, p.x, p.z, 14);
-        const pos = targetPosition(aim);
-        const cx = pos ? pos.x : p.x + state.player.facingX * (2 + i * 0.8);
-        const cz = pos ? pos.z : p.z + state.player.facingZ * (2 + i * 0.8);
-        pushEffect(state, 'pulse', cx, cz, 0.32, WEAPONS.gravity.color, radius, { radius });
+        const { x: cx, z: cz } = destinations[i]!;
+        pushEffect(state, 'gravity-collapse', cx, cz, 0.44, WEAPONS.gravity.color, radius, { radius });
         const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
         for (const e of state.enemies) {
           if (!e.alive) continue;
@@ -1746,6 +1837,9 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const proj = acquireProjectile(state);
         if (!proj) break;
         const ang = base + (i - (count - 1) / 2) * cfgB.twinSpread;
+        const launchFx = Math.sin(ang);
+        const launchFz = Math.cos(ang);
+        const curveSign: -1 | 1 = count > 1 ? (i % 2 === 0 ? -1 : 1) : state.nextId % 2 === 0 ? 1 : -1;
         resetProj(proj, state, 'boomerang', 'boomerang', p.x, p.z, Math.sin(ang) * spd, Math.cos(ang) * spd, {
           damage: dmg,
           radius: (def.radius ?? 0.5) * area,
@@ -1757,8 +1851,14 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           // Reach scales with the authored life, so a longer throw goes further rather
           // than merely lingering at the same distance.
           turnDistance: (def.life ?? 2.6) * cfgB.turnDistancePerLife * area,
+          flightDistance: 0,
+          flightSpeed: spd,
+          launchFx,
+          launchFz,
+          curveSign,
         });
       }
+      pushEffect(state, 'boomerang-rift', p.x, p.z, 0.28, '#9f68ff', 1.35, { radius: 1.35 });
     } else if (slot.weaponId === 'rotary') {
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 20, { forceBoss: state.time >= 600 });
       const pos = targetPosition(aim);
@@ -1789,7 +1889,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       for (let pulse = 0; pulse < count; pulse += 1) {
         const pulseDamage = def.damage * (pulse === 0 ? 1 : 0.45) * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
         const pulseRadius = radius * (pulse === 0 ? 1 : 0.82);
-        pushEffect(state, 'pulse', p.x, p.z, 0.55 + pulse * 0.12, WEAPONS.pulsar.color, pulseRadius, { radius: pulseRadius });
+        pushEffect(state, 'pulsar', p.x, p.z, 0.7 + pulse * 0.14, WEAPONS.pulsar.color, pulseRadius, { radius: pulseRadius });
         for (const e of state.enemies) {
           if (!e.alive || (e.x - p.x) ** 2 + (e.z - p.z) ** 2 > (pulseRadius + e.radius) ** 2) continue;
           damageEnemy(state, e, pulseDamage, { src: weaponSrc('pulsar') });
@@ -2321,6 +2421,11 @@ function resetProj(
   proj.originX = opts.originX ?? x;
   proj.originZ = opts.originZ ?? z;
   proj.turnDistance = opts.turnDistance ?? 0;
+  proj.flightDistance = opts.flightDistance ?? 0;
+  proj.flightSpeed = opts.flightSpeed ?? Math.hypot(vx, vz);
+  proj.launchFx = opts.launchFx ?? (Math.hypot(vx, vz) > 0 ? vx / Math.hypot(vx, vz) : 0);
+  proj.launchFz = opts.launchFz ?? (Math.hypot(vx, vz) > 0 ? vz / Math.hypot(vx, vz) : 1);
+  proj.curveSign = opts.curveSign ?? 1;
   if (kind === 'boomerang') {
     // Reused in place so a recycled pool slot never inherits the previous throw's hits.
     if (proj.hitIds) proj.hitIds.clear();
@@ -2654,25 +2759,42 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       const player = state.player;
       let caught = false;
       proj.life -= dt;
-      proj.x += proj.vx * dt;
-      proj.z += proj.vz * dt;
-      const spd = Math.hypot(proj.vx, proj.vz) || 1;
-
+      const spd = proj.flightSpeed || Math.hypot(proj.vx, proj.vz) || 1;
+      const oldX = proj.x;
+      const oldZ = proj.z;
+      const turn = Math.max(0.01, proj.turnDistance);
       if (!proj.returning) {
-        const travelled = Math.hypot(proj.x - proj.originX, proj.z - proj.originZ);
-        if (travelled >= proj.turnDistance) {
-          proj.returning = true;
-          proj.hitIds?.clear();
-          pushEffect(state, 'pulse', proj.x, proj.z, 0.22, proj.color, 1.1, { radius: 1.1 });
-        }
+        proj.flightDistance = Math.min(turn, proj.flightDistance + spd * dt);
       } else {
-        // Steer home. The disc expires on reaching the player rather than lingering.
-        const dx = player.x - proj.x;
-        const dz = player.z - proj.z;
-        const d = Math.hypot(dx, dz) || 1;
-        proj.vx = (dx / d) * spd;
-        proj.vz = (dz / d) * spd;
-        if (d <= proj.radius + SURVIVOR.playerRadius) caught = true;
+        proj.flightDistance = Math.max(0, proj.flightDistance - spd * dt);
+      }
+
+      /*
+       * Authored crescent flight, evaluated by simulation.
+       *
+       * `along` advances on the launch vector while a sine bow adds a perpendicular
+       * displacement. It begins and ends on the attack lane but is visibly off-vector
+       * between those points. The return evaluates the same curve backwards and blends
+       * its endpoint toward the player's live position, so moving after the throw still
+       * bends the catch lane without turning the weapon into a straight homing shot.
+       */
+      const u = proj.flightDistance / turn;
+      const along = proj.flightDistance;
+      const px = -proj.launchFz;
+      const pz = proj.launchFx;
+      const side = Math.sin(Math.PI * u) * turn * SURVIVOR.boomerang.curveBulge * proj.curveSign;
+      const homeBlend = proj.returning ? 1 - u : 0;
+      proj.x = proj.originX + proj.launchFx * along + px * side + (player.x - proj.originX) * homeBlend;
+      proj.z = proj.originZ + proj.launchFz * along + pz * side + (player.z - proj.originZ) * homeBlend;
+      proj.vx = (proj.x - oldX) / Math.max(dt, 1e-6);
+      proj.vz = (proj.z - oldZ) / Math.max(dt, 1e-6);
+
+      if (!proj.returning && proj.flightDistance >= turn - 1e-6) {
+        proj.returning = true;
+        proj.hitIds?.clear();
+        pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, { radius: 1.35 });
+      } else if (proj.returning && proj.flightDistance <= 1e-6) {
+        caught = true;
       }
 
       /*
@@ -4038,6 +4160,9 @@ function resetMegaProtocol(state: SurvivorState): void {
   state.megaProtocol.fleetTelegraphed = 0;
   state.megaProtocol.fleetNextAt = 0;
   state.megaProtocol.fleetDamageDue = [];
+  state.megaProtocol.tickCd = 0;
+  state.megaProtocol.singularityPhase = 'idle';
+  state.megaProtocol.singularityPhaseTime = 0;
   state.megaProtocol.orbIds = [];
   state.megaProtocol.hitIds = [];
   // Replacing or restarting a Titan removes any allied squad immediately.
@@ -4572,9 +4697,69 @@ function startSingularityEngine(state: SurvivorState): void {
   m.x = state.player.x;
   m.z = state.player.z;
   m.tickCd = 0;
-  pushEffect(state, 'singularity', m.x, m.z, 1.8, '#9a7bff', SURVIVOR.megaProtocol.singularityRadius, {
-    radius: SURVIVOR.megaProtocol.singularityRadius,
+  m.singularityPhase = 'idle';
+  m.singularityPhaseTime = 0;
+  pushEffect(state, 'titan-deploy', m.x, m.z, 0.9, '#9a7bff', 5.2, { radius: 5.2 });
+}
+
+function beginSingularity(state: SurvivorState): void {
+  const m = state.megaProtocol;
+  const cfg = SURVIVOR.megaProtocol;
+  const dense = densestPoint(state, state.player.x, state.player.z);
+  m.x = dense.x;
+  m.z = dense.z;
+  m.singularityPhase = 'pull';
+  m.singularityPhaseTime = cfg.singularityPullDuration;
+  m.tickCd = cfg.singularityDuration;
+  pushEffect(state, 'singularity', m.x, m.z, cfg.singularityPullDuration, '#9a6dff', cfg.singularityRadius, {
+    radius: cfg.singularityRadius,
   });
+}
+
+/** Continuous, visible suction. Boss commitments are never displaced. */
+function pullIntoSingularity(state: SurvivorState, dt: number): void {
+  const m = state.megaProtocol;
+  const cfg = SURVIVOR.megaProtocol;
+  const core = Math.max(1.15, cfg.singularityRadius * 0.09);
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    const dx = m.x - e.x;
+    const dz = m.z - e.z;
+    const d = Math.hypot(dx, dz);
+    if (d > cfg.singularityRadius + e.radius || d <= core) continue;
+    const resistance = e.isMiniboss
+      ? cfg.singularityMinibossPullMul
+      : e.isElite
+        ? cfg.singularityElitePullMul
+        : 1;
+    const step = Math.min(d - core, cfg.singularityPullSpeed * resistance * dt);
+    e.x += (dx / d) * step;
+    e.z += (dz / d) * step;
+    const clamped = clampArena(e.x, e.z, e.radius * 0.5);
+    e.x = clamped.x;
+    e.z = clamped.z;
+  }
+}
+
+function detonateSingularity(state: SurvivorState): void {
+  const m = state.megaProtocol;
+  const cfg = SURVIVOR.megaProtocol;
+  pushEffect(state, 'singularity-collapse', m.x, m.z, 0.78, '#d9c5ff', cfg.singularityRadius, {
+    radius: cfg.singularityRadius,
+  });
+  for (const e of state.enemies) {
+    if (!e.alive || (e.x - m.x) ** 2 + (e.z - m.z) ** 2 > (cfg.singularityRadius + e.radius) ** 2) continue;
+    damageEnemy(state, e, cfg.singularityDamage * playerPowerScale(state), {
+      kind: 'ability', pop: 0.85, src: 'titan-singularity',
+    });
+  }
+  for (const b of livingBosses(state)) {
+    if ((b.x - m.x) ** 2 + (b.z - m.z) ** 2 <= (cfg.singularityRadius + b.colliderRadius) ** 2) {
+      damageBoss(state, b.maxHealth * cfg.singularityBossFraction, {
+        kind: 'ability', pop: 1, boss: b, src: 'titan-singularity',
+      });
+    }
+  }
 }
 
 function startGraviticRecall(state: SurvivorState): void {
@@ -4687,32 +4872,16 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
   if (m.id === 'singularity-engine') {
     const cfg = SURVIVOR.megaProtocol;
     m.tickCd -= dt;
-    if (m.tickCd <= 0) {
-      m.tickCd += 5.5;
-      const dense = densestPoint(state, state.player.x, state.player.z);
-      m.x = dense.x;
-      m.z = dense.z;
-      const pullRadius = cfg.singularityRadius * 0.72;
-      pushEffect(state, 'singularity', m.x, m.z, 1.65, '#b18cff', pullRadius, { radius: pullRadius });
-      for (const e of state.enemies) {
-        if (!e.alive || (e.x - m.x) ** 2 + (e.z - m.z) ** 2 > pullRadius ** 2) continue;
-        const dx = m.x - e.x;
-        const dz = m.z - e.z;
-        const d = Math.hypot(dx, dz) || 1;
-        const resistance = e.isMiniboss ? 0.2 : e.isElite ? 0.45 : 1;
-        e.x += (dx / d) * 4.5 * resistance;
-        e.z += (dz / d) * 4.5 * resistance;
-        damageEnemy(state, e, cfg.singularityDamage * playerPowerScale(state), {
-          kind: 'ability', pop: 0.75, src: 'titan-singularity',
-        });
-      }
-      for (const b of livingBosses(state)) {
-        if ((b.x - m.x) ** 2 + (b.z - m.z) ** 2 <= (pullRadius + b.colliderRadius) ** 2) {
-          damageBoss(state, b.maxHealth * 0.018, { kind: 'ability', pop: 0.9, boss: b, src: 'titan-singularity' });
-        }
+    if (m.singularityPhase === 'idle' && m.tickCd <= 0 && m.remaining > 0) beginSingularity(state);
+    if (m.singularityPhase === 'pull') {
+      pullIntoSingularity(state, dt);
+      m.singularityPhaseTime = Math.max(0, m.singularityPhaseTime - dt);
+      if (m.singularityPhaseTime <= 0) {
+        detonateSingularity(state);
+        m.singularityPhase = 'idle';
       }
     }
-    if (m.remaining <= 0) {
+    if (m.remaining <= 0 && m.singularityPhase === 'idle') {
       pushEffect(state, 'mega', m.x, m.z, 1.1, '#d8c0ff', cfg.singularityRadius, { radius: cfg.singularityRadius });
       resetMegaProtocol(state);
     }
@@ -5626,6 +5795,21 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     g.firing = g.t >= warn && g.t < g.duration;
 
     if (g.firing) {
+      // Presentation cadence comes from the same fixed-step clock as the strike. The
+      // cannon tracers carry no damage; they make the already-authoritative corridor
+      // damage visible without creating a second combat path in the renderer.
+      g.fireCd -= dt;
+      while (g.fireCd <= 0) {
+        g.fireCd += cfg.fireInterval;
+        const shot = Math.floor(strafeT / cfg.fireInterval);
+        const side = shot % 2 === 0 ? -0.62 : 0.62;
+        pushEffect(state, 'gunship-shot', g.x, g.z, 0.24, '#ffd46a', 1, {
+          facingX: g.facingX,
+          facingZ: g.facingZ,
+          length: 5.2,
+          width: side,
+        });
+      }
       const halfW = cfg.laneHalfWidth * (g.potency > 1 ? 1.15 : 1);
       const pot = g.potency;
       for (const e of state.enemies) {

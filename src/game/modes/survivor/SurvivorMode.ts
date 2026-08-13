@@ -48,13 +48,16 @@ export class SurvivorMode {
   private readonly canvas: HTMLCanvasElement;
   private readonly heroId: HeroId;
   private readonly fixture: SurvivorFixture;
+  /** QA-only: keep a deterministic fixture state alive while the renderer still animates it. */
+  private readonly freezeFixture: boolean;
   private readonly handlers: SurvivorHandlers;
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.OrthographicCamera | null = null;
   private assets = new AssetLibrary();
-  private audio = new AudioBus();
+  private readonly audio: AudioBus;
+  private readonly ownsAudio: boolean;
   private arena: SurvivorArena | null = null;
   private actors: SurvivorRenderer | null = null;
   private hud: SurvivorHud | null = null;
@@ -123,6 +126,7 @@ export class SurvivorMode {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    void this.audio.unlock();
     const code = this.resolveCode(e);
     if (this.rebindingAction) {
       e.preventDefault();
@@ -197,17 +201,26 @@ export class SurvivorMode {
     host: HTMLElement;
     canvas: HTMLCanvasElement;
     fixture?: SurvivorFixture;
+    audio?: AudioBus;
     handlers: SurvivorHandlers;
   }) {
     this.heroId = opts.heroId;
     this.host = opts.host;
     this.canvas = opts.canvas;
     this.fixture = opts.fixture ?? null;
+    this.freezeFixture =
+      this.fixture !== null &&
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('freeze') === '1';
     this.handlers = opts.handlers;
+    this.audio = opts.audio ?? new AudioBus();
+    this.ownsAudio = !opts.audio;
   }
 
   async start(): Promise<void> {
     if (this.disposed) return;
+    this.audio.setMode('combat');
+    this.audio.preload();
     this.keybinds = loadSettings().keybinds;
 
     this.renderer = new THREE.WebGLRenderer({
@@ -253,6 +266,7 @@ export class SurvivorMode {
     await this.actors.setupPlayer(this.heroId);
 
     this.state = createSurvivorState(this.heroId, this.fixture);
+    this.state.muted = this.audio.isMuted();
     this.applyFixtureSpawn(this.state);
 
     this.hud = new SurvivorHud(this.host, {
@@ -414,6 +428,68 @@ export class SurvivorMode {
         stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
         if (state.effects.some((effect) => effect.kind === 'orbital-strike')) break;
       }
+    } else if (this.fixture === 'survivor-boomerang') {
+      // Stop with both production projectiles well clear of the hero, preserving the
+      // asymmetric curve and opposite Twin Orbit handedness for visual review.
+      let launched = false;
+      for (let i = 0; i < Math.round(2.5 / SURVIVOR.fixedDt); i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        if (state.projectiles.some((p) => p.active && p.kind === 'boomerang')) {
+          if (launched && i % 14 === 0) break;
+          launched = true;
+        }
+      }
+    } else if (this.fixture === 'survivor-gravity' || this.fixture === 'survivor-pulsar') {
+      const effectKind = this.fixture === 'survivor-gravity' ? 'gravity-collapse' : 'pulsar';
+      for (let i = 0; i < Math.round(3 / SURVIVOR.fixedDt); i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        if (state.effects.some((effect) => effect.kind === effectKind)) {
+          // Let the authored expansion become legible without approaching expiry. The
+          // gravity collapse is deliberately shorter, so it needs a later review frame.
+          const settleSteps = this.fixture === 'survivor-gravity' ? 14 : 10;
+          for (let settle = 0; settle < settleSteps; settle += 1) {
+            stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+          }
+          break;
+        }
+      }
+    } else if (this.fixture === 'survivor-gunship') {
+      for (let i = 0; i < Math.round(2 / SURVIVOR.fixedDt); i += 1) {
+        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        if (state.effects.some((effect) => effect.kind === 'gunship-shot')) break;
+      }
+    } else if (
+      this.fixture === 'survivor-singularity' ||
+      this.fixture === 'survivor-singularity-collapse'
+    ) {
+      forceStartProtocol(state, 'singularity-engine', 1.5);
+      if (this.fixture === 'survivor-singularity') {
+        // Stop inside the production pull window so both the inward motion and full
+        // authored radius are visible immediately; the collapse follows moments later.
+        const steps = Math.round((SURVIVOR.megaProtocol.singularityPullDuration * 0.48) / SURVIVOR.fixedDt);
+        for (let i = 0; i < steps; i += 1) {
+          stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        }
+        // Stage the fixture camera around the actual densest-point choice. Production
+        // gameplay still lets the engine hunt edge clusters; this only keeps the full
+        // sixteen-unit effect in frame for a reproducible visual review.
+        state.player.x = state.megaProtocol.x;
+        state.player.z = state.megaProtocol.z;
+      } else {
+        // The companion fixture captures the authoritative secondary detonation rather
+        // than faking a renderer-only explosion.
+        const maxSteps = Math.round((SURVIVOR.megaProtocol.singularityPullDuration + 0.5) / SURVIVOR.fixedDt);
+        for (let i = 0; i < maxSteps; i += 1) {
+          stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+          if (state.effects.some((effect) => effect.kind === 'singularity-collapse')) break;
+        }
+        state.player.x = state.megaProtocol.x;
+        state.player.z = state.megaProtocol.z;
+        // Capture the outward blast rather than its nearly point-sized first tick.
+        for (let settle = 0; settle < 18; settle += 1) {
+          stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+        }
+      }
     } else if (this.fixture === 'survivor-plasma-l1' || this.fixture === 'survivor-plasma-ship') {
       /*
        * Fast-forward a curved run so the trail already exists on the first frame.
@@ -458,6 +534,7 @@ export class SurvivorMode {
   private restart(): void {
     if (this.state) clearShipHazards(this.state);
     this.state = createSurvivorState(this.heroId, this.fixture);
+    this.state.muted = this.audio.isMuted();
     this.applyFixtureSpawn(this.state);
     this.accumulator = 0;
     this.choiceIndex = null;
@@ -542,19 +619,21 @@ export class SurvivorMode {
       input.moveY = 0;
     }
 
-    this.accumulator += rawDt;
-    let steps = 0;
-    while (this.accumulator >= SURVIVOR.fixedDt && steps < 5) {
-      stepSurvivor(this.state, input, SURVIVOR.fixedDt);
-      input.mechPressed = false;
-      input.shipPressed = false;
-      input.repulsorPressed = false;
-      input.dodgePressed = false;
-      input.pausePressed = false;
-      input.mutePressed = false;
-      input.choiceIndex = null;
-      this.accumulator -= SURVIVOR.fixedDt;
-      steps += 1;
+    if (!this.freezeFixture) {
+      this.accumulator += rawDt;
+      let steps = 0;
+      while (this.accumulator >= SURVIVOR.fixedDt && steps < 5) {
+        stepSurvivor(this.state, input, SURVIVOR.fixedDt);
+        input.mechPressed = false;
+        input.shipPressed = false;
+        input.repulsorPressed = false;
+        input.dodgePressed = false;
+        input.pausePressed = false;
+        input.mutePressed = false;
+        input.choiceIndex = null;
+        this.accumulator -= SURVIVOR.fixedDt;
+        steps += 1;
+      }
     }
     if (this.choiceIndex != null && this.state.phase !== 'levelup') {
       this.choiceIndex = null;
@@ -564,6 +643,8 @@ export class SurvivorMode {
       this.state.xp = this.state.xpNext;
     }
 
+    this.audio.setMuted(this.state.muted);
+    this.audio.sync(this.state);
     this.actors?.sync(this.state, rawDt);
     // Renderer resource counters for the F3 overlay / GPU stability procedure.
     const info = this.renderer.info;
@@ -636,7 +717,7 @@ export class SurvivorMode {
     this.hud?.dispose();
     this.actors?.dispose();
     this.arena?.dispose();
-    this.audio.dispose();
+    if (this.ownsAudio) this.audio.dispose();
     this.assets.dispose();
     this.scene?.clear();
     this.renderer?.dispose();

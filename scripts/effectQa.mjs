@@ -6,25 +6,30 @@
  * errors plus live renderer counters from the F3 overlay. Existing to make "visual
  * inspection of every changed effect" reproducible rather than a claim.
  *
- *   node scripts/effectQa.mjs <baseUrl> [--screenshots <dir>]
+ *   node scripts/effectQa.mjs <baseUrl> [--screenshots <dir>] [--only id,id]
  */
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const baseUrl = process.argv[2];
 if (!baseUrl) {
-  console.error('usage: node scripts/effectQa.mjs <baseUrl> [--screenshots <dir>]');
+  console.error('usage: node scripts/effectQa.mjs <baseUrl> [--screenshots <dir>] [--only id,id]');
   process.exit(2);
 }
 const shotIdx = process.argv.indexOf('--screenshots');
 const shotDir = shotIdx === -1 ? null : process.argv[shotIdx + 1];
 if (shotDir) mkdirSync(shotDir, { recursive: true });
 
-/** Each entry: the fixture, the hero, and how long to let it run before looking. */
-const SCENES = [
-  { id: 'plasma-l1', fixture: 'survivor-plasma-l1', hero: 'bee', settle: 9 },
-  { id: 'plasma-ship', fixture: 'survivor-plasma-ship', hero: 'bee', settle: 9 },
-  { id: 'boomerang', fixture: 'survivor-boomerang', hero: 'bee', settle: 9 },
+/** `freeze` keeps simulation state fixed while shader/mesh animation continues. */
+const ALL_SCENES = [
+  { id: 'plasma-l1', fixture: 'survivor-plasma-l1', hero: 'bee', settle: 1, freeze: true },
+  { id: 'plasma-ship', fixture: 'survivor-plasma-ship', hero: 'bee', settle: 1, freeze: true },
+  { id: 'boomerang', fixture: 'survivor-boomerang', hero: 'bee', settle: 1, freeze: true },
+  { id: 'gravity', fixture: 'survivor-gravity', hero: 'flamingo', settle: 1, freeze: true },
+  { id: 'pulsar', fixture: 'survivor-pulsar', hero: 'bee', settle: 1, freeze: true },
+  { id: 'gunship', fixture: 'survivor-gunship', hero: 'red-panda', settle: 1, freeze: true },
+  { id: 'singularity', fixture: 'survivor-singularity', hero: 'frog', settle: 1, freeze: true },
+  { id: 'singularity-collapse', fixture: 'survivor-singularity-collapse', hero: 'frog', settle: 1, freeze: true },
   { id: 'orbital', fixture: 'survivor-orbital', hero: 'red-panda', settle: 12 },
   { id: 'arc', fixture: 'survivor-arc', hero: 'bee', settle: 10 },
   { id: 'boss', fixture: 'survivor-boss', hero: 'frog', settle: 12 },
@@ -34,11 +39,21 @@ const SCENES = [
   { id: 'levelup', fixture: 'survivor-levelup', hero: 'red-panda', settle: 4 },
   { id: 'stress', fixture: 'survivor-stress', hero: 'bee', settle: 16 },
 ];
+const onlyIdx = process.argv.indexOf('--only');
+const only = onlyIdx === -1 ? null : new Set((process.argv[onlyIdx + 1] ?? '').split(',').filter(Boolean));
+const SCENES = only ? ALL_SCENES.filter((scene) => only.has(scene.id)) : ALL_SCENES;
+if (SCENES.length === 0) {
+  console.error('No matching effect QA scenes.');
+  process.exit(2);
+}
 
 const proxyServer = process.env.HTTPS_PROXY || process.env.https_proxy || '';
 const useProxy = proxyServer && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(baseUrl);
 const browser = await chromium.launch({
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
+  ...(process.env.CHROME_EXECUTABLE_PATH
+    ? { executablePath: process.env.CHROME_EXECUTABLE_PATH }
+    : {}),
   ...(useProxy ? { proxy: { server: proxyServer, bypass: 'localhost,127.0.0.1,::1' } } : {}),
 });
 
@@ -59,11 +74,12 @@ for (const scene of SCENES) {
     }
   });
 
-  await page.goto(`${baseUrl}/?mode=survivor&fixture=${scene.fixture}&hero=${scene.hero}`, {
+  const freeze = scene.freeze ? '&freeze=1' : '';
+  await page.goto(`${baseUrl}/?mode=survivor&fixture=${scene.fixture}&hero=${scene.hero}${freeze}`, {
     waitUntil: 'networkidle',
     timeout: 90000,
   });
-  await page.waitForTimeout(2500 + scene.settle * 1000);
+  await page.waitForTimeout(1500 + scene.settle * 1000);
 
   // F3 opens the GPU stability overlay: live entity counts and renderer.info.
   await page.keyboard.press('F3');

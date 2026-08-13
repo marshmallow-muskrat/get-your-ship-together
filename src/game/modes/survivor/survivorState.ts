@@ -141,6 +141,15 @@ export interface SurvivorProjectile {
   originX: number;
   originZ: number;
   turnDistance: number;
+  /** Distance advanced along the authored curved flight path. */
+  flightDistance: number;
+  /** Constant authored travel speed; curve geometry must not accelerate the disc. */
+  flightSpeed: number;
+  /** Unit launch bearing retained so the curve never depends on render state. */
+  launchFx: number;
+  launchFz: number;
+  /** Handedness of the curve. Twin Orbit deliberately uses opposite signs. */
+  curveSign: -1 | 1;
   hitIds: Set<number> | null;
   /**
    * Telemetry bucket override.
@@ -359,8 +368,16 @@ export interface SurvivorEffect {
     | 'cache'
     | 'mega'
     | 'gunship'
+    /** Visible cannon cadence for the Cache gunship; damage remains simulation-owned. */
+    | 'gunship-shot'
     | 'fleet-ship'
+    /** Singularity Engine pull window and its separately resolved collapse. */
     | 'singularity'
+    | 'singularity-collapse'
+    /** Weapon-specific boundaries; no generic pulse is used for these signatures. */
+    | 'gravity-collapse'
+    | 'pulsar'
+    | 'boomerang-rift'
     | 'titan-deploy'
     | 'toxic-burst'
     | 'plasma-flare'
@@ -750,6 +767,9 @@ export interface SurvivorState {
     x: number;
     z: number;
     tickCd: number;
+    /** Staged Singularity lifecycle: readable pull first, one detonation second. */
+    singularityPhase: 'idle' | 'pull';
+    singularityPhaseTime: number;
     /** Current Energy snapshot; later spawns are excluded. */
     orbIds: number[];
     hitIds: number[];
@@ -1117,6 +1137,8 @@ export function createSurvivorState(
       x: 0,
       z: 0,
       tickCd: 0,
+      singularityPhase: 'idle',
+      singularityPhaseTime: 0,
       orbIds: [],
       hitIds: [],
     },
@@ -1284,6 +1306,46 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;
     seedFixtureHorde(state, 10, 12);
+  } else if (fixture === 'survivor-gravity') {
+    state.time = 360;
+    grantBuild(state, [{ id: 'gravity', level: 5 }], { area: 2 }, 14);
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 12; i += 1) {
+        const e = emptyEnemy();
+        e.id = state.nextId++;
+        e.alive = true;
+        e.x = side * (5.5 + (i % 3) * 0.55);
+        e.z = 5 + Math.floor(i / 3) * 0.52;
+        e.defId = i === 0 ? 'elite' : 'basic';
+        e.role = i === 0 ? 'elite' : 'fodder';
+        e.isElite = i === 0;
+        e.health = e.maxHealth = e.isElite ? 800 : 220;
+        e.radius = e.isElite ? 0.85 : 0.58;
+        e.xp = 0;
+        state.enemies.push(e);
+      }
+    }
+  } else if (fixture === 'survivor-pulsar') {
+    state.time = 420;
+    grantBuild(state, [{ id: 'pulsar', level: 5 }], { area: 2, 'weapon-haste': 1 }, 18);
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 34, 7.5);
+  } else if (fixture === 'survivor-singularity' || fixture === 'survivor-singularity-collapse') {
+    state.time = 720;
+    grantBuild(state, [{ id: 'pulse', level: 1 }], {}, 20);
+    state.weapons = [];
+    state.player.invuln = 1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    seedFixtureHorde(state, 48, 12.5);
     // ------------------------------------------------------------ endless-2.7.0
   } else if (fixture === 'survivor-plasma-l1') {
     /*

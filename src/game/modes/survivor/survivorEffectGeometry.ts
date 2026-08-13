@@ -49,6 +49,10 @@ const MOTION: Record<string, GroundEffectMotion> = {
   'titan-deploy': 'static',
   // Resolved blasts. They expand to the boundary and stop there.
   pulse: 'expanding',
+  pulsar: 'expanding',
+  'gravity-collapse': 'expanding',
+  'singularity-collapse': 'expanding',
+  'boomerang-rift': 'expanding',
   impact: 'expanding',
   repulsor: 'expanding',
   'orbital-shock': 'expanding',
@@ -59,6 +63,10 @@ const MOTION: Record<string, GroundEffectMotion> = {
 /** Opening fraction for each expanding kind, so a blast still reads as a blast. */
 const EXPAND_FROM: Record<string, number> = {
   pulse: 0.3,
+  pulsar: 0.08,
+  'gravity-collapse': 0.18,
+  'singularity-collapse': 0.06,
+  'boomerang-rift': 0.2,
   impact: 0.35,
   repulsor: 0.12,
   'orbital-shock': 0.28,
