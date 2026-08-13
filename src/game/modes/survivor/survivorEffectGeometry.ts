@@ -46,11 +46,13 @@ const MOTION: Record<string, GroundEffectMotion> = {
   // Authored-length shapes: the arc's own geometry is built at the true jump length,
   // and the Titan deploy column at its true footprint. Neither is a ramp.
   arc: 'static',
+  'mech-prism': 'static',
   'titan-deploy': 'static',
   // Resolved blasts. They expand to the boundary and stop there.
   pulse: 'expanding',
   pulsar: 'expanding',
   'gravity-collapse': 'expanding',
+  'mech-gravity': 'expanding',
   'singularity-collapse': 'expanding',
   'boomerang-rift': 'expanding',
   impact: 'expanding',
@@ -65,6 +67,7 @@ const EXPAND_FROM: Record<string, number> = {
   pulse: 0.3,
   pulsar: 0.08,
   'gravity-collapse': 0.18,
+  'mech-gravity': 0.12,
   'singularity-collapse': 0.06,
   'boomerang-rift': 0.2,
   impact: 0.35,

@@ -27,6 +27,8 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.8.0-final-expert | expert | 64 | 11:55 | 7:07 | 27:12 | 34:20 | 3.7 | 17.9% | 25.1 |
 | game-polish-followup-baseline | competent | 24 | 10:18 | 5:35 | 21:28 | 27:03 | 3.4 | 16.9% | — |
 | game-polish-followup-candidate | competent | 24 | 6:19 | 8:46 | 29:00 | 37:46 | 3.3 | 16.5% | — |
+| cosmic-cleanup-baseline | competent | 24 | 6:19 | 8:46 | 29:00 | 37:46 | 3.3 | 16.5% | — |
+| cosmic-cleanup-post | competent | 24 | 12:25 | 6:11 | 26:14 | 32:25 | 3.1 | 17.3% | — |
 
 ## Per-hero medians
 
@@ -54,28 +56,41 @@ experiments remain here as evidence even when their implementation is discarded.
 | endless-2.8.0-final-expert (expert) | 19:51 | 4:59 | 13:12 | 11:19 |
 | game-polish-followup-baseline (competent) | 8:20 | 15:13 | 7:21 | 10:22 |
 | game-polish-followup-candidate (competent) | 6:19 | 13:38 | 9:23 | 5:14 |
+| cosmic-cleanup-baseline (competent) | 6:19 | 13:38 | 9:23 | 5:14 |
+| cosmic-cleanup-post (competent) | 14:15 | 12:16 | 11:25 | 11:49 |
 
-## Game-polish follow-up — 2026-08-13
+## Cosmic Cleanup playtest pass — matched A/B
 
-The baseline was captured before changing production values and the candidate was
-captured after the final coherent polish pass. Both use the same machine, Node 24.16,
-competent policy, 24 seeds (six per hero), and 30-minute censor limit.
+`cosmic-cleanup-baseline` and `cosmic-cleanup-post` use the same competent policy,
+six seeds per hero, 30-minute censor, machine and Node build. The baseline was captured
+before changing production values; the candidate reran those exact seeds afterward.
 
-- Overall mean moved from **10:17 to 11:28** (+1:11), median from **10:18 to 6:19**
-  (-3:59), and standard deviation from **5:35 to 8:46** (+3:11). Neither snapshot has
-  a censored run. This small regression sample therefore flags a materially wider
-  survival distribution; it is not evidence that global pressure became better.
-  Enemy/director curves were not tuned around that signal because the requested work
-  was on specific combat systems and the simulated policies are not calibrated enough
-  to overrule the completed Test Center playtests.
-- The paired eight-seed repair scenarios held ordinary supply at **40.0–41.0 kills per
-  drop** in the baseline and **40.4–41.9** in the candidate. Both snapshots record
-  **zero deaths with no orb available**, so the larger arena did not justify a blind
-  repair spawn-rate change.
-- The final same-code weapon benchmark measures Gravity Pulse at **3.03× L5/L1** and
-  Cosmic Boomerang at **3.72× L5/L1**. Every authored tier stays inside its declared
-  gain band; the new Boomerang path and Gravity cluster selection are therefore covered
-  without hiding a progression regression.
+- Overall median moved **6:19 → 12:25**, within 25 seconds of the provisional 12:00
+  competent target. Mean moved 11:28 → 13:51.
+- Standard deviation narrowed **8:46 → 6:11** and mean + 2σ narrowed 29:00 → 26:14.
+  The distribution is still wider than the provisional target, but improved materially;
+  a 24-run instrument is not grounds for another blind production change after the
+  requested playtest corrections.
+- Plasma Wake fell from **23.9% → 9.4%** of recorded output (−14.5 percentage points)
+  after the universal 0.50x monster multiplier and overlap refresh. It no longer stands
+  out as the dominant damage source.
+- The four new automatic Mech specials account for **3.5%** of total output. They add
+  identity and useful burst/control without replacing the shared weapon build.
+- Permanent, stackable Mega armaments rose from **11.3% → 19.5%** of output, as expected
+  from accumulating multiple rewards. Their individual output is re-based to 60% of the
+  former timed versions, and the 30-minute censor produced no immortal run.
+- Ordinary repair tap width remains stable: **40.4–41.9 → 41.3–43.0 kills per drop**.
+  Percentage healing raises late delivered healing as intended (max-integrity builds no
+  longer make an orb negligible), while the dense-late scenario still records 6 deaths
+  in 8 seeds and only 1.8 mean active orbs. No supply faucet appeared.
+- The boss damage hierarchy and committed-traversal census are unchanged: body remains
+  1.20x the reference ranged hit, charge 1.467x, and every committed traversal bills one
+  primary impact. Faster boss movement did not alter damage law or double-hit behavior.
+
+Conclusion: the candidate fixes the two obvious outliers from the human run—Plasma Wake
+share and weak fixed-value repairs—while landing the simulated median near target. Keep
+the remaining distribution width and permanent-Mega contribution under Test Center
+observation; do not tune them further until another real run supplies calibration.
 
 ## Interpretation guardrail
 

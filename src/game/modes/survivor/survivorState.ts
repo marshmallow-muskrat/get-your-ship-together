@@ -325,6 +325,8 @@ export interface SurvivorPickup {
   x: number;
   z: number;
   value: number;
+  /** Repair potency as a fraction of current max integrity; 0 keeps legacy flat fixtures. */
+  healFraction?: number;
   active: boolean;
   magnetized: boolean;
   /** Remaining life for expiring pickups (repair). Infinity for non-expiring. */
@@ -381,7 +383,12 @@ export interface SurvivorEffect {
     | 'titan-deploy'
     | 'toxic-burst'
     | 'plasma-flare'
-    | 'elite-aura';
+    | 'elite-aura'
+    /** Hero-specific Mech armament signatures. */
+    | 'mech-hive'
+    | 'mech-prism'
+    | 'mech-gravity'
+    | 'mech-meteor';
   x: number;
   z: number;
   life: number;
@@ -558,6 +565,8 @@ export interface SurvivorState {
     /** Cooldown length used for the current cycle (HUD readiness ring). */
     mechCdMax: number;
     mechDuration: number;
+    /** Automatic hero-specific Mech armament cadence. */
+    mechSpecialCd: number;
     shipDuration: number;
     repulsorCd: number;
     shipCd: number;
@@ -624,6 +633,8 @@ export interface SurvivorState {
     banner: number;
     /** Extra elites authored by the current Elite Surge (ordinary budget excluded). */
     eliteBonusSpawned: number;
+    /** Surge Fliers still owed from the one-time pack. */
+    packRemaining: number;
   };
   /**
    * Bounded repair economy (see SURVIVOR.repair).
@@ -716,6 +727,8 @@ export interface SurvivorState {
     orbitalBanner: number;
   };
   megaBanner: number;
+  /** Readable Cache availability notification. */
+  cacheBanner: number;
   megasDefeated: number;
   /** Temporary gunship presentation state. */
   gunship: {
@@ -751,7 +764,7 @@ export interface SurvivorState {
     orbIds: number[];
     totalXp: number;
   };
-  /** Exclusive Mega-Cache effects. Ordinary Cache state remains separate. */
+  /** Permanent, independently scheduled Mega-Cache effects. */
   megaProtocol: {
     id: 'carrier-wing' | 'cleanup-crew' | 'singularity-engine' | null;
     remaining: number;
@@ -773,6 +786,10 @@ export interface SurvivorState {
     /** Current Energy snapshot; later spawns are excluded. */
     orbIds: number[];
     hitIds: number[];
+    /** Unique armaments already owned; all three may coexist. */
+    owned: Array<'carrier-wing' | 'cleanup-crew' | 'singularity-engine'>;
+    /** +10% activated-ability recharge per post-collection Mega Cache. */
+    cooldownRefits: number;
   };
 
   enemies: SurvivorEnemy[];
@@ -1006,6 +1023,7 @@ export function createSurvivorState(
       mechCd: SURVIVOR.mech.initialCooldown,
       mechCdMax: SURVIVOR.mech.initialCooldown,
       mechDuration: 0,
+      mechSpecialCd: 0,
       shipDuration: 0,
       repulsorCd: 0,
       shipCd: 0,
@@ -1052,6 +1070,7 @@ export function createSurvivorState(
       recoveryTarget: 0,
       banner: 0,
       eliteBonusSpawned: 0,
+      packRemaining: 0,
     },
     repairEconomy: {
       sinceDrop: 0,
@@ -1104,6 +1123,7 @@ export function createSurvivorState(
       orbitalBanner: 0,
     },
     megaBanner: 0,
+    cacheBanner: 0,
     megasDefeated: 0,
     gunship: {
       active: false,
@@ -1141,6 +1161,8 @@ export function createSurvivorState(
       singularityPhaseTime: 0,
       orbIds: [],
       hitIds: [],
+      owned: [],
+      cooldownRefits: 0,
     },
     enemies: [],
     projectiles: [],
@@ -1406,13 +1428,11 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     seedFixtureHorde(state, 20, 9);
   } else if (
     fixture === 'survivor-cleanup-arrival' ||
-    fixture === 'survivor-cleanup-combat' ||
-    fixture === 'survivor-cleanup-departure'
+    fixture === 'survivor-cleanup-combat'
   ) {
     /*
-     * Three separate Cleanup Crew fixtures, because the three moments have different
-     * failure modes: arrival is choreography, combat is readability under load, and
-     * departure is the part that must not look like actors being deleted.
+     * Separate Cleanup Crew fixtures cover its two permanent-runtime failure modes:
+     * arrival choreography and combat readability under load.
      *
      * The protocol itself is started by the mode after construction (see SurvivorMode),
      * because activation runs through the real `applyProtocol` path rather than being

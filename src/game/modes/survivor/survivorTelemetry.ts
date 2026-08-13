@@ -116,8 +116,8 @@ export function hordeDisplayName(defId: string): string {
       return 'Sprinter';
     case 'spiky':
       return 'Spiker';
-    case 'flyer':
-      return 'Goleling';
+    case 'surge-flier':
+      return 'Surge Flier';
     case 'ghost':
       return 'Wraith';
     case 'bee':
@@ -154,6 +154,8 @@ export type DamageSourceId =
   | 'titan-carrier'
   /** One bucket per Cleanup Crew ally, so individual contribution is preserved. */
   | `titan-cleanup:${string}`
+  /** One bucket per hero's automatic Mech armament. */
+  | `mech-special:${string}`
   | 'titan-singularity'
   | 'aegis-pulse';
 
@@ -509,6 +511,9 @@ export function sourceLabel(id: string, weaponName: (id: string) => string): str
   if (id === 'titan-cleanup') return CLEANUP_CREW_LABEL;
   if (isCleanupCrewSource(id)) {
     return `${CLEANUP_CREW_LABEL} · ${cleanupHeroName(id.slice(CLEANUP_CREW_PREFIX.length))}`;
+  }
+  if (id.startsWith('mech-special:')) {
+    return `${cleanupHeroName(id.slice('mech-special:'.length))} Mech Special`;
   }
   switch (id) {
     case 'repulsor':

@@ -341,7 +341,6 @@ describe('endless-2.3.0 systems', () => {
     const miniboss = placeTarget(state, { x: -1.4, z: 15, hp: 4000, miniboss: true });
     const offLane = placeTarget(state, { x: 22, z: 9, hp: 60 });
 
-    const minibossMax = miniboss.maxHealth;
     const kills0 = state.kills;
     const collector = collectDamageEvents(state);
 
@@ -366,16 +365,16 @@ describe('endless-2.3.0 systems', () => {
     );
     expect(SURVIVOR.gunship.spawnSuppressRateMul).toBeLessThanOrEqual(0.05);
 
-    // Ordinary and elite die; miniboss loses ~80% of max HP; off-lane untouched.
+    // Every non-boss in the lane dies; the off-lane target is untouched.
     expect(ordinary.alive).toBe(false);
     expect(elite.alive).toBe(false);
-    expect(miniboss.alive).toBe(true);
-    expect(1 - miniboss.health / minibossMax).toBeCloseTo(0.8, 2);
+    expect(miniboss.alive).toBe(false);
+    expect(miniboss.health).toBeLessThanOrEqual(0);
     expect(offLane.alive).toBe(true);
     expect(offLane.health).toBe(offLane.maxHealth);
 
     // Normal death/reward path ran (kill counter + energy drops), not a bespoke shortcut.
-    expect(state.kills - kills0).toBe(2);
+    expect(state.kills - kills0).toBe(3);
     expect(state.pickups.some((p) => p.active && p.kind === 'xp')).toBe(true);
 
     // Exactly one damage number per struck target, and none for the off-lane target.

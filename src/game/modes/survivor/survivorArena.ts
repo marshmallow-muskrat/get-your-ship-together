@@ -14,10 +14,9 @@ type Placement = {
 /**
  * Reactor Platform 7 — a 128 x 128 containment station assembled from unchanged kit art.
  *
- * The map is deliberately navigable: a clear central deployment pad, two crossing
- * transit spines, four recognizable operational sectors, and a perimeter service ring.
- * Imported geometry and materials remain untouched; layout and generated floor markings
- * carry the new visual hierarchy.
+ * The map is deliberately readable: a clear central deployment pad, two painted transit
+ * lanes, and a perimeter service ring. Imported geometry and materials remain untouched;
+ * the floor layout carries the hierarchy without decorative prop piles in combat space.
  */
 export class SurvivorArena {
   readonly root = new THREE.Group();
@@ -49,42 +48,15 @@ export class SurvivorArena {
       'ThreeWindows_Wall_SideA',
       'LongWindow_Wall_SideA',
       'DoorDouble_Wall_SideA',
-      'Column_1',
       'Column_2',
-      'Column_3',
-      'Column_Slim',
-      'Props_Computer',
       'Props_ComputerSmall',
-      'Props_Crate',
-      'Props_CrateLong',
-      'Props_ContainerFull',
-      'Props_Vessel_Tall',
-      'Props_Vessel_Short',
-      'Props_Pod',
-      'Props_Shelf',
-      'Props_Shelf_Tall',
       'Props_Laser',
-      'Props_Teleporter_1',
-      'Props_Teleporter_2',
-      'Props_Base',
-      'Props_Capsule',
-      'Details_Pipes_Long',
-      'Details_Pipes_Medium',
-      'Details_Pipes_Small',
-      'Details_Vent_1',
-      'Details_Vent_2',
-      'Details_Plate_Large',
-      'Details_Plate_Long',
-      'Pipes',
     ];
     await this.lib.preloadAll(pieces, [], []);
 
     this.addFloor();
     this.addWayfinding();
     this.addPerimeter();
-    this.addContainmentHub();
-    this.addTransitSpine();
-    this.addOperationalSectors();
     this.addLighting();
     return this.root;
   }
@@ -306,88 +278,6 @@ export class SurvivorArena {
       this.mod('Props_ComputerSmall', gate.x + Math.cos(gate.ry) * 2.2, gate.z + Math.sin(gate.ry) * 2.2, { ry: gate.ry });
       this.mod('Props_Laser', gate.x - Math.cos(gate.ry) * 2.2, gate.z - Math.sin(gate.ry) * 2.2, { ry: gate.ry });
     }
-  }
-
-  private addContainmentHub(): void {
-    // The deployment pad at (0,0) stays clear; the reactor is an adjacent landmark.
-    const z = -14;
-    this.mod('Props_Base', 0, z, { scale: 1.45 });
-    this.mod('Column_3', 0, z, { y: 0.1 });
-    this.mod('Props_Teleporter_1', 0, z, { y: 0.05, scale: 1.12 });
-    this.mod('Props_Laser', 2.1, z, { ry: Math.PI / 2 });
-    this.mod('Props_Laser', -2.1, z, { ry: -Math.PI / 2 });
-    this.mod('Props_ComputerSmall', 0, z + 3.2, { ry: Math.PI });
-
-    const core = new THREE.PointLight('#3fd8c8', 2.2, 18, 2);
-    core.position.set(0, 3.2, z);
-    this.lights.push(core);
-    this.root.add(core);
-  }
-
-  private addTransitSpine(): void {
-    for (const d of [-48, -24, 24, 48]) {
-      this.mod('Column_Slim', d, 4.2, { scale: 0.8 });
-      this.mod('Details_Plate_Long', d, -4.1, { ry: Math.PI / 2, y: 0.05 });
-      this.mod('Column_Slim', 4.2, d, { scale: 0.8 });
-      this.mod('Details_Plate_Long', -4.1, d, { y: 0.05 });
-    }
-  }
-
-  private addOperationalSectors(): void {
-    this.addCargoSector(-34, -34);
-    this.addResearchSector(34, -34);
-    this.addMaintenanceSector(-34, 34);
-    this.addQuarantineSector(34, 34);
-  }
-
-  private addSectorBeacon(x: number, z: number, color: string): void {
-    const ring = this.generatedMesh(new THREE.Mesh(
-      new THREE.RingGeometry(5.5, 5.85, 48),
-      this.wayfindingMaterial(color, color, 1.1),
-    ));
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(x, 0.105, z);
-    this.root.add(ring);
-    const light = new THREE.PointLight(color, 0.7, 15, 2);
-    light.position.set(x, 2.8, z);
-    this.lights.push(light);
-    this.root.add(light);
-  }
-
-  private addCargoSector(x: number, z: number): void {
-    this.addSectorBeacon(x, z, '#d18b32');
-    this.mod('Props_ContainerFull', x - 3.1, z - 2.7, { ry: 0.3 });
-    this.mod('Props_CrateLong', x + 2.4, z - 2.2, { ry: Math.PI / 2 });
-    this.mod('Props_Crate', x + 3, z + 1.8, { ry: -0.35 });
-    this.mod('Props_Shelf_Tall', x - 3.2, z + 2.1, { ry: Math.PI / 2 });
-    this.mod('Props_ComputerSmall', x, z + 4.4, { ry: Math.PI });
-  }
-
-  private addResearchSector(x: number, z: number): void {
-    this.addSectorBeacon(x, z, '#43b6c8');
-    this.mod('Props_Vessel_Tall', x - 2.8, z - 2.4);
-    this.mod('Props_Vessel_Short', x + 2.7, z - 2.1);
-    this.mod('Props_Pod', x + 2.8, z + 2.3, { ry: Math.PI / 2 });
-    this.mod('Props_Computer', x - 2.8, z + 2.5, { ry: Math.PI / 2 });
-    this.mod('Details_Vent_2', x, z + 4.5, { y: 0.08 });
-  }
-
-  private addMaintenanceSector(x: number, z: number): void {
-    this.addSectorBeacon(x, z, '#78a4bd');
-    this.mod('Pipes', x - 3.4, z, { y: 0.35 });
-    this.mod('Details_Pipes_Long', x + 2.6, z - 2.7, { y: 0.7 });
-    this.mod('Details_Pipes_Medium', x + 2.8, z + 2.4, { ry: Math.PI / 2, y: 0.5 });
-    this.mod('Details_Pipes_Small', x - 2.4, z + 2.8, { y: 0.45 });
-    this.mod('Props_ComputerSmall', x, z - 4.4);
-  }
-
-  private addQuarantineSector(x: number, z: number): void {
-    this.addSectorBeacon(x, z, '#aa6cc4');
-    this.mod('Props_Teleporter_2', x, z, { scale: 1.05 });
-    this.mod('Props_Capsule', x - 3.2, z - 2.6, { ry: 0.3 });
-    this.mod('Props_Pod', x + 3.1, z - 2.4, { ry: -0.4 });
-    this.mod('Props_Shelf', x - 3.2, z + 2.7, { ry: Math.PI / 2 });
-    this.mod('Props_Computer', x + 3, z + 2.6, { ry: -Math.PI / 2 });
   }
 
   private addLighting(): void {

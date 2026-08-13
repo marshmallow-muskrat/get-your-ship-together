@@ -42,6 +42,7 @@ import {
   BOSS_DAMAGE_BASE,
   computeShieldDuration,
   shipDamageTakenMul,
+  shipCooldownAtLevel,
   type PassiveId,
   type ProtocolId,
   type TempBuffId,
@@ -201,6 +202,18 @@ function passiveLevel(state: SurvivorState, id: PassiveId): number {
 
 function moveMul(state: SurvivorState): number {
   return 1 + moveSpeedBonus(passiveLevel(state, 'move-speed'));
+}
+
+/** Permanent Mega-Cache refits accelerate activated abilities with a 50% safety floor. */
+export function abilityCooldownMul(state: SurvivorState): number {
+  return Math.max(
+    SURVIVOR.megaProtocol.abilityCooldownFloor,
+    1 - state.megaProtocol.cooldownRefits * 0.1,
+  );
+}
+
+export function shipCooldownFor(state: SurvivorState): number {
+  return shipCooldownAtLevel(passiveLevel(state, 'reinforced-airframe')) * abilityCooldownMul(state);
 }
 
 /** Energy/XP magnet radius. */
@@ -470,6 +483,7 @@ function livingSpecialistCount(state: SurvivorState): number {
  */
 export function canSpawnEnemyNow(state: SurvivorState, defId: string): boolean {
   if (!HORDE[defId]) return false;
+  if (defId === 'surge-flier') return state.surge.phase === 'surge';
   if (!isEnemyEligibleAt(defId, state.time)) return false;
   if (isFodderEnemy(defId)) return true;
   if (state.time < FIRST_MINUTE_SPECIALIST_WINDOW) {
@@ -486,7 +500,8 @@ export function canSpawnEnemyNow(state: SurvivorState, defId: string): boolean {
  */
 function resolveEligibleDef(state: SurvivorState, defId: string): string {
   if (canSpawnEnemyNow(state, defId)) return defId;
-  return rng(state) < 0.72 ? 'basic' : 'mush';
+  const fallback = compositionAt(state.time).filter((entry) => isEnemyEligibleAt(entry.id, state.time));
+  return fallback[Math.floor(rng(state) * Math.max(1, fallback.length))]?.id ?? 'basic';
 }
 
 function spawnEnemy(state: SurvivorState, defId: string, x: number, z: number): SurvivorEnemy | null {
@@ -584,7 +599,10 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
     state.miniboss.health = 0;
     dropPickup(state, e.x, e.z + 0.4, 'xp', 55, { premium: true });
     // Miniboss repair is guaranteed and larger; it never touches the ordinary budget.
-    dropPickup(state, e.x - 0.4, e.z, 'repair', SURVIVOR.repair.minibossValue, { premium: true });
+    dropPickup(state, e.x - 0.4, e.z, 'repair', 0, {
+      premium: true,
+      healFraction: SURVIVOR.repair.minibossFraction,
+    });
     state.repairStats.premiumSpawned += 1;
   }
   // Every enemy death is a tick of the kill-driven budget, whether or not it drops.
@@ -658,7 +676,7 @@ function tryOrdinaryRepairDrop(state: SurvivorState, x: number, z: number, weigh
 
 /** Place one ordinary repair orb and reset the economy timers. */
 function emitRepairOrb(state: SurvivorState, x: number, z: number): void {
-  dropPickup(state, x, z, 'repair', SURVIVOR.repair.value);
+  dropPickup(state, x, z, 'repair', 0, { healFraction: SURVIVOR.repair.fraction });
   const rs = state.repairStats;
   // Close out the drought that this orb ends, before the counters reset.
   rs.longestTimeDryStreak = Math.max(rs.longestTimeDryStreak, state.repairEconomy.sinceDrop);
@@ -762,7 +780,7 @@ function dropPickup(
   z: number,
   kind: SurvivorPickup['kind'],
   value: number,
-  opts?: { premium?: boolean },
+  opts?: { premium?: boolean; healFraction?: number },
 ): void {
   const pos = safePickupPosition(x, z);
   // Light deterministic de-stack: nudge if another active pickup shares the exact cell.
@@ -855,6 +873,7 @@ function dropPickup(
   slot.x = px;
   slot.z = pz;
   slot.value = value;
+  slot.healFraction = opts?.healFraction ?? 0;
   slot.active = true;
   slot.magnetized = false;
   // One world lifetime for every ordinary orb: long enough to be banked and
@@ -1478,7 +1497,7 @@ export function tryRepulsor(state: SurvivorState): boolean {
   const dmg = cfg.damage * progressionMul * (mech ? cfg.mechDamageMul : 1);
   const push = cfg.push * (mech ? cfg.mechPushMul : 1);
 
-  p.repulsorCd = cfg.cooldown;
+  p.repulsorCd = cfg.cooldown * abilityCooldownMul(state);
   // Multi-layer shockwave visual matching true gameplay radius
   pushEffect(state, 'repulsor', p.x, p.z, cfg.effectLife, state.accent, radius, { radius });
   pushEffect(state, 'pulse', p.x, p.z, cfg.effectLife * 0.7, '#ffffff', radius * 0.45, {
@@ -1549,13 +1568,14 @@ export function tryMech(state: SurvivorState): boolean {
   if (!p.alive) return false;
   if (p.form === 'ship' || p.form === 'mech') return false;
   if (p.mechCd > 0) return false;
-  const cd = mechCooldownFor(state);
+  const cd = mechCooldownFor(state) * abilityCooldownMul(state);
   p.form = 'mech';
   // Set on activation and ticked even while Mech is active: the cycle is
   // activation-to-activation, so 14s of Mech costs ~31s of astronaut/ship time.
   p.mechCd = cd;
   p.mechCdMax = cd;
   p.mechDuration = mechDurationFor(state);
+  p.mechSpecialCd = 0;
   p.invuln = Math.max(p.invuln, 0.4);
   pushEffect(state, 'transform', p.x, p.z, 0.65, state.accent, 2.2);
   return true;
@@ -1566,9 +1586,142 @@ function endShipForm(state: SurvivorState): void {
   if (p.form !== 'ship') return;
   p.form = 'astronaut';
   p.shipDuration = 0;
-  p.shipCd = SURVIVOR.ship.cooldown;
+  p.shipCd = shipCooldownFor(state);
   clearShipHazards(state);
   pushEffect(state, 'transform', p.x, p.z, 0.4, '#88e0ff', 1.4);
+}
+
+function mechSpecialSource(heroId: HeroId): string {
+  return `mech-special:${heroId}`;
+}
+
+/**
+ * Automatic hero-specific Mech armaments. These are simulation-owned attacks; the
+ * renderer only presents the bounded effects/projectiles authored here.
+ */
+function updateMechSpecial(state: SurvivorState, dt: number): void {
+  const p = state.player;
+  if (p.form !== 'mech' || !p.alive) return;
+  p.mechSpecialCd = Math.max(0, p.mechSpecialCd - dt);
+  if (p.mechSpecialCd > 0) return;
+
+  const cfg = SURVIVOR.mech.specials[state.heroId];
+  const src = mechSpecialSource(state.heroId);
+  const power = Math.min(2.5, 1 + Math.max(0, state.level - 1) * 0.04) * p.damageMul;
+  const damage = cfg.damage * power;
+  p.mechSpecialCd = cfg.cadence;
+
+  if (state.heroId === 'bee') {
+    const target = nearestEnemy(state, p.x, p.z, cfg.range);
+    const boss = nearestBoss(state, p.x, p.z, cfg.range);
+    const pos = target
+      ? { x: target.x, z: target.z }
+      : boss
+        ? { x: boss.x, z: boss.z }
+        : null;
+    if (!pos) {
+      p.mechSpecialCd = 0.25;
+      return;
+    }
+    const base = Math.atan2(pos.x - p.x, pos.z - p.z);
+    for (let i = 0; i < cfg.count; i += 1) {
+      const proj = acquireProjectile(state);
+      if (!proj) break;
+      const angle = base + (i - (cfg.count - 1) / 2) * 0.17;
+      const speed = 18;
+      resetProj(proj, state, 'drone', 'microdrone', p.x, p.z, Math.sin(angle) * speed, Math.cos(angle) * speed, {
+        damage,
+        radius: 0.22,
+        visualRadius: cfg.radius,
+        life: 1.45,
+        homing: true,
+        color: state.accent,
+        srcOverride: src,
+      });
+    }
+    pushEffect(state, 'mech-hive', p.x, p.z, 0.7, state.accent, 4.8, { radius: 4.8 });
+    return;
+  }
+
+  if (state.heroId === 'flamingo') {
+    const { fx, fz } = bestRailDirection(state, state.weapons[0]!, p.x, p.z, cfg.range, cfg.radius);
+    for (let i = 0; i < cfg.count; i += 1) {
+      const side = (i - (cfg.count - 1) / 2) * 0.72;
+      const ox = -fz * side;
+      const oz = fx * side;
+      const x1 = p.x + ox + fx * cfg.range;
+      const z1 = p.z + oz + fz * cfg.range;
+      state.rails.push({ x0: p.x + ox, z0: p.z + oz, x1, z1, life: 0.28, color: state.accent });
+      for (const e of state.enemies) {
+        if (e.alive && segmentHit(p.x + ox, p.z + oz, x1, z1, e.x, e.z, e.radius + cfg.radius * 0.5)) {
+          damageEnemy(state, e, damage, { kind: 'ability', pop: 0.9, src });
+          if (e.alive) applyKnockback(e, fx, fz, e.isMiniboss ? 1 : e.isElite ? 2.5 : 5.5);
+        }
+      }
+      for (const b of livingBosses(state)) {
+        if (segmentHit(p.x + ox, p.z + oz, x1, z1, b.x, b.z, b.colliderRadius + cfg.radius * 0.5)) {
+          damageBoss(state, damage * 0.62, { kind: 'ability', pop: 1, boss: b, src });
+        }
+      }
+    }
+    pushEffect(state, 'mech-prism', p.x, p.z, 0.72, state.accent, cfg.range, {
+      facingX: fx,
+      facingZ: fz,
+      length: cfg.range,
+      width: cfg.radius * 2,
+    });
+    return;
+  }
+
+  if (state.heroId === 'frog') {
+    pushEffect(state, 'mech-gravity', p.x, p.z, 0.95, state.accent, cfg.radius, { radius: cfg.radius });
+    for (const e of state.enemies) {
+      if (!e.alive) continue;
+      const dx = p.x - e.x;
+      const dz = p.z - e.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > cfg.radius + e.radius) continue;
+      damageEnemy(state, e, damage, { kind: 'ability', pop: 0.85, src });
+      if (e.alive && dist > 0.2) {
+        const pull = e.isMiniboss ? 0.8 : e.isElite ? 1.8 : 4.6;
+        e.kbX += (dx / dist) * pull;
+        e.kbZ += (dz / dist) * pull;
+      }
+    }
+    for (const b of livingBosses(state)) {
+      if (Math.hypot(b.x - p.x, b.z - p.z) <= cfg.radius + b.colliderRadius) {
+        damageBoss(state, damage * 0.55, { kind: 'ability', pop: 0.95, boss: b, src });
+      }
+    }
+    return;
+  }
+
+  const targets = rocketClusterTargets(state, p.x, p.z, cfg.count, 0.42);
+  for (let i = 0; i < cfg.count; i += 1) {
+    const target = targets[i % Math.max(1, targets.length)] ?? {
+      x: p.x + Math.sin((i / cfg.count) * Math.PI * 2) * 6,
+      z: p.z + Math.cos((i / cfg.count) * Math.PI * 2) * 6,
+    };
+    const proj = acquireProjectile(state);
+    if (!proj) break;
+    const dx = target.x - p.x;
+    const dz = target.z - p.z;
+    const dist = Math.hypot(dx, dz) || 1;
+    const travel = 0.38 + i * 0.025;
+    resetProj(proj, state, 'rocket', 'rocket', p.x, p.z, (dx / dist) * (dist / travel), (dz / dist) * (dist / travel), {
+      damage,
+      radius: 0.25,
+      visualRadius: 0.55,
+      life: travel + 0.08,
+      color: state.accent,
+      armTimer: travel,
+      fuseDelay: 0.1,
+      explodeRadius: cfg.radius,
+      srcOverride: src,
+    });
+    pushEffect(state, 'telegraph', target.x, target.z, travel, state.accent, cfg.radius, { radius: cfg.radius });
+  }
+  pushEffect(state, 'mech-meteor', p.x, p.z, 0.8, state.accent, 5.4, { radius: 5.4 });
 }
 
 /** Clear active thruster wakes (exhaust is presentation-only; wakes are hazards). */
@@ -1981,6 +2134,42 @@ function resetPlasmaAnchors(state: SurvivorState): void {
   tr.prevSet = false;
 }
 
+/** Refresh an existing near-coincident ribbon instead of stacking damage and glow. */
+function refreshOverlappingPlasma(
+  state: SurvivorState,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  radius: number,
+  life: number,
+  damage: number,
+  bossDamageMul: number,
+): SurvivorHazard | null {
+  const ndx = bx - ax;
+  const ndz = bz - az;
+  const nlen = Math.hypot(ndx, ndz) || 1;
+  const nmx = (ax + bx) * 0.5;
+  const nmz = (az + bz) * 0.5;
+  for (const h of state.hazards) {
+    if (!h.active || h.kind !== 'plasma-wake' || !h.capsule) continue;
+    const hdx = h.x1 - h.x;
+    const hdz = h.z1 - h.z;
+    const hlen = Math.hypot(hdx, hdz) || 1;
+    if (Math.abs((ndx * hdx + ndz * hdz) / (nlen * hlen)) < 0.82) continue;
+    const hmx = (h.x + h.x1) * 0.5;
+    const hmz = (h.z + h.z1) * 0.5;
+    const reuseRadius = Math.max(0.55, Math.min(radius, h.radius) * 0.72);
+    if ((hmx - nmx) ** 2 + (hmz - nmz) ** 2 > reuseRadius ** 2) continue;
+    h.life = Math.max(h.life, life);
+    h.maxLife = Math.max(h.maxLife, life);
+    h.damage = Math.max(h.damage, damage);
+    h.bossDamageMul = Math.max(h.bossDamageMul ?? 0, bossDamageMul);
+    return h;
+  }
+  return null;
+}
+
 /**
  * Lay down the Plasma Wake trail.
  *
@@ -2058,14 +2247,17 @@ export function updatePlasmaTrails(state: SurvivorState, dt: number): void {
 
     const ax = tr.anchorX[i]!;
     const az = tr.anchorZ[i]!;
-    const seg = spawnHazard(state, 'plasma-wake', ax, az, halfWidth, life, damage, WEAPONS['plasma-wake'].color, {
-      capsule: true,
-      x1: ex,
-      z1: ez,
-      facingX: ex - ax,
-      facingZ: ez - az,
-      bossDamageMul: cfg.bossDamageMul * (ship ? cfg.shipBossDamageMul : 1),
-    });
+    const bossDamageMul = cfg.bossDamageMul * (ship ? cfg.shipBossDamageMul : 1);
+    const seg =
+      refreshOverlappingPlasma(state, ax, az, ex, ez, halfWidth, life, damage, bossDamageMul) ??
+      spawnHazard(state, 'plasma-wake', ax, az, halfWidth, life, damage, WEAPONS['plasma-wake'].color, {
+        capsule: true,
+        x1: ex,
+        z1: ez,
+        facingX: ex - ax,
+        facingZ: ez - az,
+        bossDamageMul,
+      });
     // Continuity is structural: the next segment begins where this one ended, whether
     // or not the pool could satisfy this request.
     tr.anchorX[i] = ex;
@@ -2652,8 +2844,13 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
     b.x + 0.5,
     b.z,
     'repair',
-    SURVIVOR.repair.bossValue + (b.isMega ? SURVIVOR.repair.megaBonus : 0),
-    { premium: true },
+    0,
+    {
+      premium: true,
+      healFraction:
+        SURVIVOR.repair.bossFraction +
+        (b.isMega ? SURVIVOR.repair.megaBonusFraction : 0),
+    },
   );
   state.repairStats.premiumSpawned += 1;
   dropPickup(state, b.x - 0.5, b.z, 'xp', 70, { premium: true });
@@ -2677,6 +2874,8 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
       mega: true,
       potency: 1.5,
     };
+    state.cacheBanner = 3.4;
+    state.megaBanner = 3.4;
     pushEffect(state, 'cache', b.x, b.z, 1.4, '#ffd46a', 4);
   }
   // Boss kills deliberately do not refund Mech cooldown in endless-2.3.0.
@@ -3241,7 +3440,8 @@ function updateHazards(state: SurvivorState, dt: number): void {
     for (const e of state.enemies) {
       if (!e.alive || e.hazardHitCd > 0) continue;
       if (hazardHitsPoint(h, e.x, e.z, e.radius)) {
-        damageEnemy(state, e, h.damage * potency, { src: hazardSrc(h) });
+        const enemyMul = h.kind === 'plasma-wake' ? SURVIVOR.plasmaTrail.enemyDamageMul : 1;
+        damageEnemy(state, e, h.damage * potency * enemyMul, { src: hazardSrc(h) });
         if (h.kind === 'puddle') {
           e.slowTimer = Math.max(e.slowTimer, 0.7);
           e.slowMul = Math.min(e.slowMul, 0.72);
@@ -3684,7 +3884,10 @@ function updatePickups(state: SurvivorState, dt: number): void {
       if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, hDirect)) {
         // Nanite Bleed makes every repair orb worth more, so the passive stays
         // attractive even for a player who is rarely alive long enough to regenerate.
-        const potency = pk.value * (1 + repairOrbBonusAtLevel(passiveLevel(state, 'regen')));
+        const basePotency = (pk.healFraction ?? 0) > 0
+          ? p.maxHealth * (pk.healFraction ?? 0)
+          : pk.value;
+        const potency = basePotency * (1 + repairOrbBonusAtLevel(passiveLevel(state, 'regen')));
         const restored = Math.min(potency, needNow);
         if (restored <= 0) {
           pk.magnetized = false;
@@ -4144,36 +4347,27 @@ function applyProtocol(state: SurvivorState, id: ProtocolId, potency: number): v
   } else if (id === 'singularity-engine') {
     startSingularityEngine(state);
     trackProtocol(state, id, SURVIVOR.megaProtocol.titanDuration, potency);
+  } else if (id === 'mega-cooldown-refit') {
+    const before = abilityCooldownMul(state);
+    state.megaProtocol.cooldownRefits += 1;
+    const after = abilityCooldownMul(state);
+    const ratio = after / before;
+    const p = state.player;
+    p.mechCd *= ratio;
+    p.mechCdMax *= ratio;
+    p.shipCd *= ratio;
+    p.dodgeCd *= ratio;
+    p.repulsorCd *= ratio;
+    trackProtocol(state, id, Number.POSITIVE_INFINITY, state.megaProtocol.cooldownRefits);
+    pushEffect(state, 'levelup', p.x, p.z, 0.8, '#70f4ff', 4.5, { radius: 4.5 });
   }
-}
-
-function resetMegaProtocol(state: SurvivorState): void {
-  if (state.megaProtocol.titanActive && state.player.form === 'mech') {
-    state.player.form = 'astronaut';
-    state.player.mechDuration = 0;
-  }
-  state.megaProtocol.id = null;
-  state.megaProtocol.remaining = 0;
-  state.megaProtocol.elapsed = 0;
-  state.megaProtocol.titanActive = false;
-  state.megaProtocol.fleetNextPass = 0;
-  state.megaProtocol.fleetTelegraphed = 0;
-  state.megaProtocol.fleetNextAt = 0;
-  state.megaProtocol.fleetDamageDue = [];
-  state.megaProtocol.tickCd = 0;
-  state.megaProtocol.singularityPhase = 'idle';
-  state.megaProtocol.singularityPhaseTime = 0;
-  state.megaProtocol.orbIds = [];
-  state.megaProtocol.hitIds = [];
-  // Replacing or restarting a Titan removes any allied squad immediately.
-  state.allies = [];
 }
 
 // --------------------------------------------------------------- Cleanup Crew
 //
 // The third Mega Protocol. Summons the three heroes the player is *not* piloting; they
 // arrive in their own ships, deploy as allied Mechs, fight with only their exclusive
-// signature weapon for five minutes, then transform back and fly out.
+// signature weapon, and remain for the rest of the run.
 //
 // Architecture note: there are no duplicate player states here. An ally is a small
 // bounded actor (position, facing, formation slot, one weapon slot, a phase timer). It
@@ -4193,8 +4387,9 @@ function allySrc(heroId: HeroId): string {
 }
 
 function startCleanupCrew(state: SurvivorState): void {
-  resetMegaProtocol(state);
   const m = state.megaProtocol;
+  if (m.owned.includes('cleanup-crew')) return;
+  m.owned.push('cleanup-crew');
   m.id = 'cleanup-crew';
   m.remaining = SURVIVOR.megaProtocol.titanDuration;
 
@@ -4375,7 +4570,7 @@ function departCleanupCrew(state: SurvivorState): void {
 function updateCleanupCrew(state: SurvivorState, dt: number): void {
   const cfg = SURVIVOR.megaProtocol.cleanup;
   const m = state.megaProtocol;
-  if (m.remaining <= 0) departCleanupCrew(state);
+  if (!m.owned.includes('cleanup-crew')) departCleanupCrew(state);
 
   for (const a of state.allies) {
     if (!a.active) continue;
@@ -4476,7 +4671,7 @@ function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
   const cfg = SURVIVOR.megaProtocol.cleanup;
   const def = wdef(a.slot.weaponId, a.slot.level);
   const power = playerPowerScale({ weapons: state.weapons, passives: state.passives });
-  const dmg = def.damage * cfg.damageMul * power;
+  const dmg = def.damage * cfg.damageMul * SURVIVOR.megaProtocol.permanentPowerMul * power;
   const src = allySrc(a.heroId);
   const accent = HEROES[a.heroId].accent;
   a.slot.cooldown = def.cadence * cfg.cadenceMul;
@@ -4570,7 +4765,11 @@ function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
         splash: def.splash ?? 1.3,
         puddleRadius: def.puddleRadius ?? 1.1,
         puddleLife: def.puddleLife ?? 1.6,
-        puddleDamage: (def.puddleDamage ?? 6) * cfg.damageMul * power,
+        puddleDamage:
+          (def.puddleDamage ?? 6) *
+          cfg.damageMul *
+          SURVIVOR.megaProtocol.permanentPowerMul *
+          power,
         bounceLeft: def.bounce ?? 0,
         splitOnHit: def.split ?? 0,
         srcOverride: src,
@@ -4644,11 +4843,12 @@ function telegraphFleetPass(state: SurvivorState, pass: number): void {
 }
 
 function startCarrierWing(state: SurvivorState): void {
-  resetMegaProtocol(state);
   const m = state.megaProtocol;
+  if (m.owned.includes('carrier-wing')) return;
+  m.owned.push('carrier-wing');
   m.id = 'carrier-wing';
   m.remaining = SURVIVOR.megaProtocol.titanDuration;
-  m.fleetNextAt = SURVIVOR.megaProtocol.fleetWarn;
+  m.fleetNextAt = m.elapsed + SURVIVOR.megaProtocol.fleetWarn;
   telegraphFleetPass(state, 0);
   m.fleetTelegraphed = 1;
   pushEffect(state, 'mega', state.player.x, state.player.z, 0.9, '#ffd46a', 4.5, { radius: 4.5 });
@@ -4678,20 +4878,26 @@ function damageFleetLane(state: SurvivorState, pass: number): void {
   const half = SURVIVOR.megaProtocol.fleetLaneHalfWidth;
   for (const e of state.enemies) {
     if (!e.alive || distPointToSegment(e.x, e.z, lane.x0, lane.z0, lane.x1, lane.z1) > half + e.radius) continue;
-    const dmg = e.isMiniboss ? e.maxHealth * SURVIVOR.megaProtocol.fleetMinibossFraction : e.maxHealth * 1.1;
+    const power = SURVIVOR.megaProtocol.permanentPowerMul;
+    const dmg = e.isMiniboss
+      ? e.maxHealth * SURVIVOR.megaProtocol.fleetMinibossFraction * power
+      : e.maxHealth * power;
     damageEnemy(state, e, dmg, { kind: 'gunship', pop: 1, src: 'titan-carrier' });
     pushEffect(state, 'impact', e.x, e.z, 0.36, '#fff0a0', 2.1);
   }
   for (const b of livingBosses(state)) {
     if (distPointToSegment(b.x, b.z, lane.x0, lane.z0, lane.x1, lane.z1) > half + b.colliderRadius) continue;
     const frac = b.isMega ? SURVIVOR.megaProtocol.fleetMegaFraction : SURVIVOR.megaProtocol.fleetBossFraction;
-    damageBoss(state, b.maxHealth * frac, { kind: 'gunship', pop: 1, boss: b, src: 'titan-carrier' });
+    damageBoss(state, b.maxHealth * frac * SURVIVOR.megaProtocol.permanentPowerMul, {
+      kind: 'gunship', pop: 1, boss: b, src: 'titan-carrier',
+    });
   }
 }
 
 function startSingularityEngine(state: SurvivorState): void {
-  resetMegaProtocol(state);
   const m = state.megaProtocol;
+  if (m.owned.includes('singularity-engine')) return;
+  m.owned.push('singularity-engine');
   m.id = 'singularity-engine';
   m.remaining = SURVIVOR.megaProtocol.titanDuration;
   m.x = state.player.x;
@@ -4749,13 +4955,18 @@ function detonateSingularity(state: SurvivorState): void {
   });
   for (const e of state.enemies) {
     if (!e.alive || (e.x - m.x) ** 2 + (e.z - m.z) ** 2 > (cfg.singularityRadius + e.radius) ** 2) continue;
-    damageEnemy(state, e, cfg.singularityDamage * playerPowerScale(state), {
+    damageEnemy(
+      state,
+      e,
+      cfg.singularityDamage * SURVIVOR.megaProtocol.permanentPowerMul * playerPowerScale(state),
+      {
       kind: 'ability', pop: 0.85, src: 'titan-singularity',
-    });
+      },
+    );
   }
   for (const b of livingBosses(state)) {
     if ((b.x - m.x) ** 2 + (b.z - m.z) ** 2 <= (cfg.singularityRadius + b.colliderRadius) ** 2) {
-      damageBoss(state, b.maxHealth * cfg.singularityBossFraction, {
+      damageBoss(state, b.maxHealth * cfg.singularityBossFraction * SURVIVOR.megaProtocol.permanentPowerMul, {
         kind: 'ability', pop: 1, boss: b, src: 'titan-singularity',
       });
     }
@@ -4828,11 +5039,11 @@ function updateGraviticRecall(state: SurvivorState, dt: number): void {
 
 function updateMegaProtocol(state: SurvivorState, dt: number): void {
   const m = state.megaProtocol;
-  if (!m.id) return;
+  if (m.owned.length === 0) return;
   m.elapsed += dt;
-  m.remaining = Math.max(0, m.remaining - dt);
+  m.remaining = Number.POSITIVE_INFINITY;
 
-  if (m.id === 'carrier-wing') {
+  if (m.owned.includes('carrier-wing')) {
     const cfg = SURVIVOR.megaProtocol;
     if (m.fleetTelegraphed <= m.fleetNextPass && m.elapsed + 1e-6 >= m.fleetNextAt - cfg.fleetWarn) {
       telegraphFleetPass(state, m.fleetNextPass % cfg.fleetPasses);
@@ -4848,29 +5059,13 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
       damageFleetLane(state, due.pass);
       m.fleetDamageDue.splice(m.fleetDamageDue.indexOf(due), 1);
     }
-    if (m.remaining <= 0 && m.fleetDamageDue.length === 0) {
-      pushEffect(state, 'mega', state.player.x, state.player.z, 0.8, '#fff2a8', 5.5, { radius: 5.5 });
-      resetMegaProtocol(state);
-    }
-    return;
   }
 
-  if (m.id === 'cleanup-crew') {
+  if (m.owned.includes('cleanup-crew')) {
     updateCleanupCrew(state, dt);
-    /*
-     * Hold the protocol open until the departure choreography finishes. Expiring the
-     * armament the instant its timer hits zero would delete three actors mid-frame,
-     * which is exactly the "actors simply disappearing" the brief rules out.
-     */
-    if (m.remaining <= 0 && state.allies.length === 0) {
-      pushEffect(state, 'mega', state.player.x, state.player.z, 1.1, '#fff2a8', 6.5, { radius: 6.5 });
-      resetMegaProtocol(state);
-    }
-    return;
   }
 
-  if (m.id === 'singularity-engine') {
-    const cfg = SURVIVOR.megaProtocol;
+  if (m.owned.includes('singularity-engine')) {
     m.tickCd -= dt;
     if (m.singularityPhase === 'idle' && m.tickCd <= 0 && m.remaining > 0) beginSingularity(state);
     if (m.singularityPhase === 'pull') {
@@ -4881,10 +5076,6 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
         m.singularityPhase = 'idle';
       }
     }
-    if (m.remaining <= 0 && m.singularityPhase === 'idle') {
-      pushEffect(state, 'mega', m.x, m.z, 1.1, '#d8c0ff', cfg.singularityRadius, { radius: cfg.singularityRadius });
-      resetMegaProtocol(state);
-    }
   }
 }
 
@@ -4893,15 +5084,9 @@ export function forceStartProtocol(state: SurvivorState, id: ProtocolId, potency
   applyProtocol(state, id, potency);
 }
 
-/**
- * Gunship originates at the player/cache collection point (on-camera), then flies
- * toward the primary boss or densest cluster and exits at the local combat edge.
- * The station can be much larger than the active encounter pocket; tying this pass
- * to the world edge would stretch its travel speed and timing as the map grows.
- */
+/** Full-station gunship chord through the best horde/boss corridor. */
 function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: number; z1: number } {
   const worldHalf = SURVIVOR.arenaHalf * 0.95;
-  const localReach = Math.min(SURVIVOR.combatSpawnHalf * 0.95, worldHalf);
   const ox = state.player.x;
   const oz = state.player.z;
   const directions: Array<{ x: number; z: number }> = [];
@@ -4918,11 +5103,17 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
     if (len > 0.1) directions.push({ x: dx / len, z: dz / len });
   }
 
-  const exitAlong = (dx: number, dz: number): { x: number; z: number } => {
-    return {
-      x: Math.max(-worldHalf, Math.min(worldHalf, ox + dx * localReach)),
-      z: Math.max(-worldHalf, Math.min(worldHalf, oz + dz * localReach)),
-    };
+  const boundaryAlong = (dx: number, dz: number, sign: -1 | 1): { x: number; z: number } => {
+    const sx = dx * sign;
+    const sz = dz * sign;
+    const tx = Math.abs(sx) > 1e-6
+      ? (sx > 0 ? worldHalf - ox : -worldHalf - ox) / sx
+      : Number.POSITIVE_INFINITY;
+    const tz = Math.abs(sz) > 1e-6
+      ? (sz > 0 ? worldHalf - oz : -worldHalf - oz) / sz
+      : Number.POSITIVE_INFINITY;
+    const travel = Math.max(0, Math.min(tx, tz));
+    return { x: ox + sx * travel, z: oz + sz * travel };
   };
 
   const facingLen = Math.hypot(state.player.facingX, state.player.facingZ) || 1;
@@ -4932,17 +5123,18 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
   };
   let bestScore = -Infinity;
   for (const dir of directions) {
-    const exit = exitAlong(dir.x, dir.z);
+    const entry = boundaryAlong(dir.x, dir.z, -1);
+    const exit = boundaryAlong(dir.x, dir.z, 1);
     let score = 0;
     for (const e of state.enemies) {
       if (!e.alive) continue;
-      if (distPointToSegment(e.x, e.z, ox, oz, exit.x, exit.z) > SURVIVOR.gunship.laneHalfWidth + e.radius) continue;
+      if (distPointToSegment(e.x, e.z, entry.x, entry.z, exit.x, exit.z) > SURVIVOR.gunship.laneHalfWidth + e.radius) continue;
       score += e.isMiniboss ? 5 : e.isElite ? 2.5 : 1;
     }
     for (const boss of livingBosses(state)) {
       // Match the collision corridor used during the actual strike. A broader
       // scoring width can select a plausible-looking lane that can never land.
-      if (distPointToSegment(boss.x, boss.z, ox, oz, exit.x, exit.z) <= SURVIVOR.gunship.laneHalfWidth + boss.colliderRadius * 0.5) {
+      if (distPointToSegment(boss.x, boss.z, entry.x, entry.z, exit.x, exit.z) <= SURVIVOR.gunship.laneHalfWidth + boss.colliderRadius * 0.5) {
         score += boss.isMega ? 5 : 6;
       }
     }
@@ -4951,18 +5143,15 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
       best = dir;
     }
   }
-  const exit = exitAlong(best.x, best.z);
-  // Start slightly behind the player so thrusters read on launch.
-  const x0 = ox - best.x * 1.2;
-  const z0 = oz - best.z * 1.2;
-  return { x0, z0, x1: exit.x, z1: exit.z };
+  const entry = boundaryAlong(best.x, best.z, -1);
+  const exit = boundaryAlong(best.x, best.z, 1);
+  return { x0: entry.x, z0: entry.z, x1: exit.x, z1: exit.z };
 }
 
 function startGunship(state: SurvivorState, potency: number): void {
   const lane = pickGunshipLane(state);
   const g = SURVIVOR.gunship;
-  // Short engine-ignite hold on camera, then accelerate away.
-  const warn = Math.min(g.warnDuration, 0.55);
+  const warn = g.warnDuration;
   const strafe = g.strafeDuration * (potency > 1 ? 1.25 : 1);
   const fx = lane.x1 - lane.x0;
   const fz = lane.z1 - lane.z0;
@@ -5071,7 +5260,7 @@ export function tryDodge(state: SurvivorState, moveX: number, moveY: number): bo
   p.dodgeDirX = dx / len;
   p.dodgeDirZ = dz / len;
   p.dodgeActive = SURVIVOR.dodge.duration;
-  p.dodgeCd = SURVIVOR.dodge.cooldown;
+  p.dodgeCd = SURVIVOR.dodge.cooldown * abilityCooldownMul(state);
   p.invuln = Math.max(p.invuln, SURVIVOR.dodge.invuln);
   p.facingX = p.dodgeDirX;
   p.facingZ = p.dodgeDirZ;
@@ -5251,33 +5440,19 @@ export function applyShipExhaust(state: SurvivorState, _dt: number): void {
   }
 }
 
-/** Every surge kind the director can author. */
-export const SURGE_KINDS = ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood'] as const;
+/** Every surge now has one instantly recognizable, event-exclusive flying silhouette. */
+export const SURGE_KINDS = ['swarm'] as const;
 export type SurgeKind = (typeof SURGE_KINDS)[number];
-
-/** The specialist each surge kind is built around; a gated lead downgrades to flood. */
-const SURGE_LEAD: Record<string, string> = {
-  sprinters: 'fast',
-  bruiser: 'bruiser',
-  elite: 'elite',
-  pincer: 'flyer',
-  encircle: 'flyer',
-};
 
 /** Player-facing surge names for the incoming banner. */
 export const SURGE_LABEL: Record<string, string> = {
-  sprinters: 'SPRINTER SURGE',
-  pincer: 'PINCER SURGE',
-  bruiser: 'BRUISER SURGE',
-  encircle: 'ENCIRCLEMENT',
-  elite: 'ELITE SURGE',
-  flood: 'FLOOD SURGE',
+  swarm: 'SWARM SURGE',
 };
 
 /** Edges a surge kind draws from. 0=-Z, 1=+Z, 2=-X, 3=+X. */
 export function surgeEdgesFor(kind: string, edgeA: number, edgeB: number): number[] {
-  if (kind === 'encircle') return [0, 1, 2, 3];
-  if (kind === 'pincer') return [edgeA, edgeB];
+  void kind;
+  void edgeB;
   return [edgeA];
 }
 
@@ -5300,6 +5475,7 @@ function endSurgeIntoRecovery(state: SurvivorState): void {
   s.phase = 'recovery';
   s.phaseEndsAt = state.time + SURVIVOR.surgeRecovery;
   s.banner = 0;
+  s.packRemaining = 0;
   s.recoveryTarget = recoveryPopulationTarget(state);
 }
 
@@ -5324,13 +5500,7 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
   if (s.phase === 'normal') {
     // Never begin an ordinary surge while a boss is alive, and never stack one.
     if (t < s.nextSurgeAt || aliveBossCount(state) > 0) return;
-    let kind: string = SURGE_KINDS[Math.floor(rng(state) * SURGE_KINDS.length)]!;
-    // A surge whose whole identity is gated would just be a fodder wave with a
-    // misleading name — roll it forward to an honest early-pressure flood instead.
-    const lead = SURGE_LEAD[kind];
-    if (lead && !isEnemyEligibleAt(lead, t)) kind = 'flood';
-    // Specialist-heavy surges wait out the opening minute entirely.
-    if (t < FIRST_MINUTE_SPECIALIST_WINDOW && kind !== 'flood') kind = 'flood';
+    const kind: string = 'swarm';
     s.kind = kind;
     s.phase = 'telegraph';
     s.phaseEndsAt = t + SURVIVOR.surgeTelegraph;
@@ -5340,6 +5510,7 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
     s.edgeB = s.edgeA ^ 1;
     s.edgeCursor = 0;
     s.eliteBonusSpawned = 0;
+    s.packRemaining = 0;
     s.activeEdges = surgeEdgesFor(kind, s.edgeA, s.edgeB);
     s.banner = SURVIVOR.surgeTelegraph;
     // Illuminate the exact edges the wave will arrive from, for the full telegraph.
@@ -5359,6 +5530,8 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
     if (t >= s.phaseEndsAt) {
       s.phase = 'surge';
       s.phaseEndsAt = t + SURVIVOR.surgeDuration;
+      s.packRemaining = SURVIVOR.surgePackSize;
+      state.spawnAcc = Math.max(state.spawnAcc, SURVIVOR.surgePackSize);
     }
     return;
   }
@@ -5375,6 +5548,7 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
     s.phase = 'normal';
     s.kind = '';
     s.activeEdges = [];
+    s.packRemaining = 0;
     s.recoveryTarget = 0;
     const span = SURVIVOR.surgeIntervalMax - SURVIVOR.surgeIntervalMin;
     s.nextSurgeAt = t + SURVIVOR.surgeIntervalMin + rng(state) * span;
@@ -5446,7 +5620,9 @@ function edgeSpawnWeighted(state: SurvivorState, kind: string): { x: number; z: 
     if (r < 0.35) side = facingSide;
     else if (r < 0.6) side = (facingSide + (rng(state) < 0.5 ? 1 : 3)) % 4;
   }
-  const t = (rng(state) * 2 - 1) * SURVIVOR.combatSpawnHalf;
+  // A surge arrives as one dense flock, while ordinary spawns use the full perimeter.
+  const spread = kind === 'swarm' ? 7.5 : SURVIVOR.combatSpawnHalf;
+  const t = (rng(state) * 2 - 1) * spread;
   return localEngagementEdge(state, side, t);
 }
 
@@ -5460,30 +5636,7 @@ function edgeSpawnWeighted(state: SurvivorState, kind: string): { x: number; z: 
  * opening specialist gates.
  */
 function surgeCompositionBias(state: SurvivorState, baseId: string): string {
-  const k = state.surge.kind;
-  if (state.surge.phase !== 'surge') return baseId;
-  const bias = (id: string): string | null => (canSpawnEnemyNow(state, id) ? id : null);
-  if (k === 'sprinters') {
-    if (rng(state) < 0.8) return bias(rng(state) < 0.55 ? 'fast' : 'spiky') ?? baseId;
-    return baseId;
-  }
-  if (k === 'bruiser') {
-    if (rng(state) < 0.7) return bias('bruiser') ?? baseId;
-    return baseId;
-  }
-  if (k === 'elite') {
-    if (rng(state) < 0.4) return bias('bruiser') ?? baseId;
-    return baseId;
-  }
-  if (k === 'flood') {
-    if (rng(state) < 0.85) return rng(state) < 0.5 ? 'basic' : 'mush';
-    return baseId;
-  }
-  if (k === 'pincer' || k === 'encircle') {
-    if (rng(state) < 0.55) return bias(rng(state) < 0.5 ? 'flyer' : 'bee') ?? baseId;
-    if (rng(state) < 0.3) return bias('ghost') ?? baseId;
-  }
-  return baseId;
+  return state.surge.phase === 'surge' ? 'surge-flier' : baseId;
 }
 
 function updateSpawns(state: SurvivorState, dt: number): void {
@@ -5503,11 +5656,9 @@ function updateSpawns(state: SurvivorState, dt: number): void {
     state.gunship.spawnSuppress = Math.max(0, state.gunship.spawnSuppress - dt);
     rate *= SURVIVOR.gunship.spawnSuppressRateMul;
   }
-  // Director phase multipliers
+  // Director phase multipliers. The flock is a single pack, not a ten-second faucet.
   if (s.phase === 'surge') {
-    if (s.kind === 'flood') rate *= 1.7;
-    else if (s.kind === 'bruiser') rate *= 0.9;
-    else rate *= 1.45;
+    rate = s.packRemaining > 0 ? Math.max(rate, SURVIVOR.surgePackSize / 0.7) : 0;
   } else if (s.phase === 'recovery') {
     /*
      * Recovery is a real breathing window, not a slightly slower stream.
@@ -5524,32 +5675,31 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   }
 
   state.spawnAcc += dt * rate;
+  if (s.phase === 'surge' && s.packRemaining <= 0) {
+    // Do not let fractional carry-over turn the authored flock into a trailing
+    // stream of stragglers after the pack has fully entered the arena.
+    state.spawnAcc = Math.min(state.spawnAcc, 0.999);
+  }
   let spawnedThisFrame = 0;
   let livingElites = state.enemies.reduce(
     (n, e) => n + (e.alive && e.isElite && !e.isMiniboss ? 1 : 0),
     0,
   );
   const ordinaryEliteBudget = elitePopulationBudgetAt(state.time);
-  const surgeEliteBudget = s.phase === 'surge' && s.kind === 'elite'
-    ? Math.min(SURVIVOR.elite.surgeBonusCap, Math.max(2, Math.ceil(ordinaryEliteBudget * 0.6)))
-    : 0;
   const surging = s.phase === 'surge';
-  while (state.spawnAcc >= 1 && alive + spawnedThisFrame < state.enemyCap && spawnedThisFrame < 4) {
+  const frameSpawnCap = surging ? 10 : 4;
+  while (
+    state.spawnAcc >= 1 &&
+    (!surging || s.packRemaining > 0) &&
+    alive + spawnedThisFrame < state.enemyCap &&
+    spawnedThisFrame < frameSpawnCap
+  ) {
     state.spawnAcc -= 1;
     const pos = edgeSpawnWeighted(state, surging ? s.kind : '');
     let defId = surgeCompositionBias(state, pickComposition(state));
-    let surgeElite = false;
     if (
-      s.phase === 'surge' &&
-      s.kind === 'elite' &&
-      s.eliteBonusSpawned < surgeEliteBudget &&
-      rng(state) < 0.38 &&
-      canSpawnEnemyNow(state, 'elite')
-    ) {
-      defId = 'elite';
-      surgeElite = true;
-    } else if (
       s.phase !== 'recovery' &&
+      !surging &&
       state.eliteTimer <= 0 &&
       livingElites < ordinaryEliteBudget &&
       rng(state) < diff.eliteChance &&
@@ -5563,7 +5713,6 @@ function updateSpawns(state: SurvivorState, dt: number): void {
       spawnedThisFrame += 1;
       if (spawned.isElite && !spawned.isMiniboss) {
         livingElites += 1;
-        if (surgeElite) s.eliteBonusSpawned += 1;
       }
       /*
        * A surge wave hits harder than the standing horde, but the bonus rides on the
@@ -5572,6 +5721,7 @@ function updateSpawns(state: SurvivorState, dt: number): void {
        * event that has already ended.
        */
       if (surging) spawned.speedMul *= 1 + SURVIVOR.surgeWaveSpeedBonus;
+      if (surging) s.packRemaining = Math.max(0, s.packRemaining - 1);
     }
   }
 
@@ -5580,7 +5730,8 @@ function updateSpawns(state: SurvivorState, dt: number): void {
     state.eliteTimer <= -SURVIVOR.elite.droughtGrace &&
     livingElites < ordinaryEliteBudget &&
     canSpawnEnemyNow(state, 'elite') &&
-    s.phase !== 'recovery'
+    s.phase !== 'recovery' &&
+    !surging
   ) {
     // Drought protection only fills a missing ordinary-budget slot. It is never an
     // additive timer spawn and therefore cannot push the population over budget.
@@ -5739,6 +5890,7 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
   if (state.unlocks.arcBanner > 0) state.unlocks.arcBanner = Math.max(0, state.unlocks.arcBanner - dt);
   if (state.unlocks.orbitalBanner > 0) state.unlocks.orbitalBanner = Math.max(0, state.unlocks.orbitalBanner - dt);
   if (state.megaBanner > 0) state.megaBanner = Math.max(0, state.megaBanner - dt);
+  if (state.cacheBanner > 0) state.cacheBanner = Math.max(0, state.cacheBanner - dt);
 
   if (state.player.shieldTime > 0) {
     state.player.shieldTime = Math.max(0, state.player.shieldTime - dt);
@@ -5769,8 +5921,10 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     }
   }
 
-  // Protocol active timers (HUD build panel)
-  for (const pa of state.protocolActive) pa.remaining -= dt;
+  // Protocol active timers (HUD build panel); permanent armaments stay at Infinity.
+  for (const pa of state.protocolActive) {
+    if (Number.isFinite(pa.remaining)) pa.remaining -= dt;
+  }
   state.protocolActive = state.protocolActive.filter((pa) => pa.remaining > 0);
 
   updateGraviticRecall(state, dt);
@@ -5819,8 +5973,7 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
         if (d <= halfW + e.radius && along <= cfg.impactRadius + 1.4) {
           g.hitIds.push(e.id);
           // Once-per-target: delete ordinary; fraction miniboss/boss max HP.
-          let dmg = e.maxHealth * 1.05;
-          if (e.isMiniboss) dmg = e.maxHealth * 0.8 * pot;
+          const dmg = e.maxHealth * 1.1;
           // Single authoritative damage-number path — normal death/reward processing included.
           damageEnemy(state, e, dmg, { kind: 'gunship', pop: 1, src: 'gunship' });
           pushEffect(state, 'impact', e.x, e.z, 0.28, '#ffd46a', 1.6);
@@ -5878,6 +6031,7 @@ function spawnProtocolCache(state: SurvivorState, mega: boolean): void {
     mega,
     potency: mega ? 1.5 : 1,
   };
+  state.cacheBanner = 3.4;
   // Brief spawn flash — persistent cache actor is owned by the renderer for full lifetime.
   pushEffect(state, 'cache', pick.x, pick.z, 0.55, '#ffd46a', 2.2);
 }
@@ -5900,7 +6054,18 @@ function openProtocolCache(state: SurvivorState): void {
       energyXp += pk.value;
     }
   }
-  const offered = megaCache ? MEGA_PROTOCOLS : PROTOCOLS;
+  const owned = new Set(state.megaProtocol.owned);
+  const remainingMegas = MEGA_PROTOCOLS.filter((protocol) => !owned.has(protocol.id as never));
+  const offered = megaCache
+    ? remainingMegas.length > 0
+      ? remainingMegas
+      : [{
+          id: 'mega-cooldown-refit' as const,
+          title: 'Temporal Refit',
+          body: 'Permanently accelerate all activated abilities by 10%.',
+          duration: Number.POSITIVE_INFINITY,
+        }]
+    : PROTOCOLS;
   state.protocolChoices = offered.map((p) => {
     let body = p.body;
     if (p.id === 'aegis-barrier') {
@@ -5913,12 +6078,15 @@ function openProtocolCache(state: SurvivorState): void {
           ? `Recall ${energyXp} energy from ${energyOrbs} orbs.`
           : 'No energy currently on the field.';
     } else if (p.id === 'carrier-wing') {
-      body = 'For 5:00, a fighter squadron repeatedly strafes distributed threats. Dedicated Titan slot; cannot be upgraded.';
+      body = 'Permanent fighter support repeatedly strafes distributed threats. Stacks with other Mega armaments.';
     } else if (p.id === 'cleanup-crew') {
       body =
-        'For 5:00, the rest of the crew arrive in their ships and fight beside you as allied Mechs, each using only their own signature weapon. Dedicated Titan slot; cannot be upgraded.';
+        'Permanent allied Mechs join the run, each using their signature weapon. Stacks with other Mega armaments.';
     } else if (p.id === 'singularity-engine') {
-      body = 'For 5:00, repeated anomalies pull and detonate the horde. Dedicated Titan slot; cannot be upgraded.';
+      body = 'Permanent anomalies repeatedly pull and detonate the horde. Stacks with other Mega armaments.';
+    } else if (p.id === 'mega-cooldown-refit') {
+      const next = Math.round((1 - Math.max(SURVIVOR.megaProtocol.abilityCooldownFloor, abilityCooldownMul(state) - 0.1)) * 100);
+      body = `Permanent +10% activated-ability recharge (Mech, Ship, Dodge, Repulsor). ${next}% total after this refit; capped at 50%.`;
     }
     return {
       kind: 'protocol' as const,
@@ -6150,6 +6318,7 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
   updatePlayer(state, input, dt);
   rebuildHash(state);
   updatePlasmaTrails(state, dt);
+  updateMechSpecial(state, dt);
   fireWeapons(state, dt);
   updateProjectiles(state, dt);
   updateHazards(state, dt);

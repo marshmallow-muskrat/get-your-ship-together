@@ -1,8 +1,8 @@
-# Get Your Ship Together — Game Concept
+# Cosmic Cleanup! — Game Concept
 
 **Status:** Selected product direction (authoritative)
 
-Get Your Ship Together is a one-map, endless sci-fi survival game. Select one of four animal astronauts and survive an increasingly impossible containment breach for as long as possible.
+Cosmic Cleanup! is a one-map, endless sci-fi survival game. Select one of four animal astronauts and survive an increasingly impossible containment breach for as long as possible.
 
 **Containment Protocol is the game.** The former manual-combat campaign prototype is retired and is not a second mode, a peer experiment, or part of the product roadmap.
 

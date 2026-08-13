@@ -1,4 +1,4 @@
-# Get Your Ship Together
+# Cosmic Cleanup!
 
 An endless isometric sci-fi survival game built with TypeScript and Three.js.
 

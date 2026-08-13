@@ -73,16 +73,13 @@ function runStress(
     input.moveY = Math.sin(ang);
     stepSurvivor(state, input, SURVIVOR.fixedDt);
     renderer.sync(state, SURVIVOR.fixedDt);
-    // Keep the protocol effects churning so their visuals are created and released.
+    // Keep ordinary protocol effects churning; permanent Mega effects are activated once.
     if (i % 900 === 0) forceStartProtocol(state, 'gravitic-recall', 1);
     if (i % 1500 === 700) forceStartProtocol(state, 'gunship-flyby', 1);
     if (i % 1800 === 1200) forceStartProtocol(state, 'aegis-barrier', 1);
     if (i % 2100 === 1500) forceStartProtocol(state, 'cleanup-crew', 1.5);
     if (i % 2400 === 1800) forceStartProtocol(state, 'carrier-wing', 1.5);
     if (i % 2700 === 2100) forceStartProtocol(state, 'singularity-engine', 1.5);
-    // Force Cleanup Crew squads to expire, so arrival and departure actors churn too
-    // rather than one squad living for the whole run.
-    if (i % 2100 === 2050) state.megaProtocol.remaining = 0;
     if (i > 0 && i % sampleEvery === 0) {
       const c = countResources(renderer);
       samples.push(c);
@@ -95,9 +92,9 @@ function runStress(
 /**
  * Step without the protocol churn `runStress` applies.
  *
- * The stress runner deliberately re-triggers protocols on a cadence, which would
- * re-summon a Cleanup Crew squad mid-teardown and make an actor-lifecycle assertion
- * meaningless.
+ * The stress runner deliberately re-triggers protocols on a cadence. Permanent Mega
+ * rewards ignore duplicate activation, while this quieter helper makes actor stability
+ * easier to inspect.
  */
 function runQuiet(state: SurvivorState, renderer: SurvivorRenderer, seconds: number): void {
   const steps = Math.floor(seconds / SURVIVOR.fixedDt);
@@ -106,8 +103,7 @@ function runQuiet(state: SurvivorState, renderer: SurvivorRenderer, seconds: num
     const ang = i * SURVIVOR.fixedDt * 0.9;
     input.moveX = Math.cos(ang);
     input.moveY = Math.sin(ang);
-    // Level-up and Protocol modals halt the simulation, which would stall a squad
-    // mid-departure; resolve them immediately so the lifecycle actually advances.
+    // Level-up and Protocol modals halt the simulation; resolve them immediately.
     input.choiceIndex = state.phase === 'levelup' || state.phase === 'protocol' ? 0 : null;
     stepSurvivor(state, input, SURVIVOR.fixedDt);
     renderer.sync(state, SURVIVOR.fixedDt);
@@ -159,7 +155,7 @@ describe('renderer resource stability', () => {
   }, 120000);
 
 
-  it('builds and releases Cleanup Crew actors and long-lived Plasma trails', () => {
+  it('keeps permanent Cleanup Crew actors and long-lived Plasma trails bounded', () => {
     const renderer = new SurvivorRenderer(new AssetLibrary());
     const state = stressState(9301);
     // No Mega Cache interruptions: this test owns the protocol lifecycle.
@@ -168,17 +164,17 @@ describe('renderer resource stability', () => {
     runStress(state, renderer, 20);
     const warm = countResources(renderer);
 
+    forceStartProtocol(state, 'cleanup-crew', 1.5);
+    expect(state.allies.length).toBe(3);
+    // Arrival ships, then permanently deployed Mechs firing ally projectiles.
+    runQuiet(state, renderer, 12);
     const peaks: number[] = [];
     for (let cycle = 0; cycle < 9; cycle += 1) {
+      // Duplicate grants cannot create duplicate actors or allocations.
       forceStartProtocol(state, 'cleanup-crew', 1.5);
-      expect(state.allies.length).toBe(3);
-      // Arrival ships, then deployed Mechs firing ally projectiles.
-      runQuiet(state, renderer, 12);
-      peaks.push(countResources(renderer).geometries);
-      // Departure choreography, then full teardown of the squad.
-      state.megaProtocol.remaining = 0;
       runQuiet(state, renderer, 8);
-      expect(state.allies.length).toBe(0);
+      expect(state.allies.length).toBe(3);
+      peaks.push(countResources(renderer).geometries);
     }
 
     const after = countResources(renderer);
@@ -188,7 +184,7 @@ describe('renderer resource stability', () => {
     expect(trailSegments).toBeLessThanOrEqual(SURVIVOR.hazardCap);
     expect(state.hazards.length).toBeLessThanOrEqual(SURVIVOR.hazardCap);
 
-    // Five full arrive/fight/depart cycles must not ratchet geometry upward.
+    // Sustained permanent combat must not ratchet geometry upward.
     /*
      * The opening cycles are the horde ramping to `enemyCap`, so scene geometry
      * legitimately climbs before it saturates. What must not happen is a *continuing*

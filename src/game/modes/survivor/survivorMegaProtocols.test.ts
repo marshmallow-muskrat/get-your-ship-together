@@ -3,8 +3,11 @@ import { SURVIVOR } from './survivorContent';
 import { createSurvivorState, emptyEnemy } from './survivorState';
 import {
   EMPTY_SURVIVOR_INPUT,
+  abilityCooldownMul,
   applyAegisBarrier,
+  applyProtocolChoice,
   forceStartProtocol,
+  shipCooldownFor,
   stepSurvivor,
 } from './survivorSim';
 
@@ -60,7 +63,52 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     ]);
   });
 
-  it('Cleanup Crew is a five-minute armament and leaves ordinary Mech untouched', () => {
+  it('removes owned armaments from later Mega Cache choices and lets all three stack', () => {
+    const state = quietState();
+    for (const expected of [
+      ['carrier-wing', 'cleanup-crew', 'singularity-engine'],
+      ['cleanup-crew', 'singularity-engine'],
+      ['singularity-engine'],
+    ]) {
+      state.phase = 'playing';
+      state.cache = { active: true, x: 0, z: 0, life: 999, maxLife: 999, mega: true, potency: 1.5 };
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      expect(state.protocolChoices.map((choice) => choice.protocolId)).toEqual(expected);
+      applyProtocolChoice(state, 0);
+    }
+    expect(state.megaProtocol.owned).toEqual([
+      'carrier-wing',
+      'cleanup-crew',
+      'singularity-engine',
+    ]);
+    expect(state.allies).toHaveLength(3);
+    expect(state.megaProtocol.remaining).toBe(Infinity);
+  });
+
+  it('offers only Temporal Refit after all armaments and stacks 10% cooldown cuts to a 50% floor', () => {
+    const state = quietState();
+    forceStartProtocol(state, 'carrier-wing');
+    forceStartProtocol(state, 'cleanup-crew');
+    forceStartProtocol(state, 'singularity-engine');
+    state.cache = { active: true, x: 0, z: 0, life: 999, maxLife: 999, mega: true, potency: 1.5 };
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.protocolChoices.map((choice) => choice.protocolId)).toEqual(['mega-cooldown-refit']);
+    state.player.mechCd = state.player.mechCdMax = 30;
+    state.player.shipCd = 30;
+    state.player.dodgeCd = 10;
+    state.player.repulsorCd = 12;
+    applyProtocolChoice(state, 0);
+    expect(state.megaProtocol.cooldownRefits).toBe(1);
+    expect(abilityCooldownMul(state)).toBeCloseTo(0.9, 6);
+    expect(state.player.shipCd).toBeCloseTo(27, 6);
+    expect(state.player.dodgeCd).toBeCloseTo(9, 6);
+
+    for (let i = 0; i < 9; i += 1) forceStartProtocol(state, 'mega-cooldown-refit');
+    expect(abilityCooldownMul(state)).toBe(SURVIVOR.megaProtocol.abilityCooldownFloor);
+    expect(shipCooldownFor(state)).toBeCloseTo(15, 6);
+  });
+
+  it('Cleanup Crew is permanent and leaves ordinary Mech untouched', () => {
     const state = quietState();
     state.player.mechCd = 30;
     state.player.mechCdMax = 45;
@@ -69,7 +117,8 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     expect(state.player.mechCd).toBe(30);
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 0.1);
     expect(state.player.mechCd).toBeCloseTo(29.9, 4);
-    expect(state.megaProtocol.remaining).toBeGreaterThan(299);
+    expect(state.megaProtocol.remaining).toBe(Infinity);
+    expect(state.megaProtocol.owned).toEqual(['cleanup-crew']);
     expect(state.allies).toHaveLength(3);
   });
 
@@ -81,10 +130,10 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     expect(state.effects.some((e) => e.kind === 'fleet-ship')).toBe(true);
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.megaProtocol.fleetTravel * 0.5 + 0.02);
     expect(target.alive).toBe(false);
-    expect(state.megaProtocol.remaining).toBeGreaterThan(298);
+    expect(state.megaProtocol.remaining).toBe(Infinity);
   });
 
-  it('Singularity Engine is a non-upgradable five-minute damage armament, not an Energy recall', () => {
+  it('Singularity Engine is a permanent damage armament, not an Energy recall', () => {
     const state = quietState();
     state.pickups.push(
       { id: 101, kind: 'xp', x: 8, z: 0, value: 17, active: true, magnetized: false, life: Infinity },

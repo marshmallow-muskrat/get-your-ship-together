@@ -1,7 +1,13 @@
 import type { HeroId } from '../../content/heroes';
 import { isHeroId } from '../../content/heroes';
 import { SURVIVOR_BALANCE_VERSION, type PassiveId, type WeaponId } from './survivorContent';
-import { formReport, sourceReport, type RunTelemetry } from './survivorTelemetry';
+import {
+  formReport,
+  sourceFormReport,
+  sourceReport,
+  type BossKillRecord,
+  type RunTelemetry,
+} from './survivorTelemetry';
 
 export const RECORDS_STORAGE_KEY = 'gyst.survivor.records.v1';
 export const LEADERBOARDS_STORAGE_KEY = 'gyst.survivor.leaderboards.v2';
@@ -26,11 +32,25 @@ export interface RunSummary {
 export interface RunReportSnapshot {
   sources: Array<{ id: string; damage: number; bossDamage: number; hits: number; kills: number; maxHit: number }>;
   forms: Array<{ form: string; damage: number; time: number }>;
+  sourceForms: Array<{
+    sourceId: string;
+    form: string;
+    damage: number;
+    bossDamage: number;
+    hits: number;
+    kills: number;
+    maxHit: number;
+  }>;
+  elapsed: number;
   healedByOrbs: number;
   healedByRegen: number;
   shieldAbsorbed: number;
   eliteKills: number;
   minibossKills: number;
+  damageTaken: Array<{ id: string; amount: number }>;
+  bossKills: BossKillRecord[];
+  cacheChoices: Array<{ id: string; count: number }>;
+  megaChoices: Array<{ id: string; count: number }>;
 }
 
 export interface HeroLeaderboard {
@@ -79,6 +99,19 @@ function ensureId(s: RunSummary): RunSummary {
   };
 }
 
+function objectRows(raw: unknown): Record<string, unknown>[] {
+  return Array.isArray(raw)
+    ? raw.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object')
+    : [];
+}
+
+function countRows(raw: unknown): Array<{ id: string; count: number }> {
+  return objectRows(raw).map((row) => ({
+    id: String(row.id ?? 'unknown'),
+    count: Math.max(0, Math.floor(Number(row.count) || 0)),
+  }));
+}
+
 function normalizeSummary(raw: unknown): RunSummary | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
@@ -106,11 +139,36 @@ function normalizeSummary(raw: unknown): RunSummary | null {
             damage: Math.max(0, Number(f.damage) || 0),
             time: Math.max(0, Number(f.time) || 0),
           })),
+        sourceForms: objectRows(reportRaw.sourceForms).map((row) => ({
+          sourceId: String(row.sourceId ?? 'unknown'),
+          form: String(row.form ?? 'astronaut'),
+          damage: Math.max(0, Number(row.damage) || 0),
+          bossDamage: Math.max(0, Number(row.bossDamage) || 0),
+          hits: Math.max(0, Math.floor(Number(row.hits) || 0)),
+          kills: Math.max(0, Math.floor(Number(row.kills) || 0)),
+          maxHit: Math.max(0, Number(row.maxHit) || 0),
+        })),
+        elapsed: Math.max(0, Number(reportRaw.elapsed) || survivalTime),
         healedByOrbs: Math.max(0, Number(reportRaw.healedByOrbs) || 0),
         healedByRegen: Math.max(0, Number(reportRaw.healedByRegen) || 0),
         shieldAbsorbed: Math.max(0, Number(reportRaw.shieldAbsorbed) || 0),
         eliteKills: Math.max(0, Math.floor(Number(reportRaw.eliteKills) || 0)),
         minibossKills: Math.max(0, Math.floor(Number(reportRaw.minibossKills) || 0)),
+        damageTaken: objectRows(reportRaw.damageTaken).map((row) => ({
+          id: String(row.id ?? 'unknown'),
+          amount: Math.max(0, Number(row.amount) || 0),
+        })),
+        bossKills: objectRows(reportRaw.bossKills).map((row) => ({
+          index: Math.max(1, Math.floor(Number(row.index) || 1)),
+          displayName: String(row.displayName ?? 'Unknown Boss'),
+          isMega: Boolean(row.isMega),
+          timeToKill: Math.max(0, Number(row.timeToKill) || 0),
+          buildDps: Math.max(0, Number(row.buildDps) || 0),
+          heroId: String(row.heroId ?? heroId),
+          form: row.form === 'ship' || row.form === 'mech' ? row.form : 'astronaut',
+        })),
+        cacheChoices: countRows(reportRaw.cacheChoices),
+        megaChoices: countRows(reportRaw.megaChoices),
       }
     : undefined;
   return ensureId({
@@ -343,11 +401,29 @@ export function makeRunSummary(input: {
             id, damage, bossDamage, hits, kills, maxHit,
           })),
           forms: formReport(input.telemetry).map(({ form, damage, time }) => ({ form, damage, time })),
+          sourceForms: sourceFormReport(input.telemetry).map(
+            ({ sourceId, form, damage, bossDamage, hits, kills, maxHit }) => ({
+              sourceId,
+              form,
+              damage,
+              bossDamage,
+              hits,
+              kills,
+              maxHit,
+            }),
+          ),
+          elapsed: input.telemetry.elapsed,
           healedByOrbs: input.telemetry.healedByOrbs,
           healedByRegen: input.telemetry.healedByRegen,
           shieldAbsorbed: input.telemetry.shieldAbsorbed,
           eliteKills: input.telemetry.eliteKills,
           minibossKills: input.telemetry.minibossKills,
+          damageTaken: [...input.telemetry.damageTaken.entries()]
+            .map(([id, amount]) => ({ id, amount }))
+            .sort((a, b) => b.amount - a.amount),
+          bossKills: input.telemetry.bossKills.map((boss) => ({ ...boss })),
+          cacheChoices: [...input.telemetry.cacheChoices.entries()].map(([id, count]) => ({ id, count })),
+          megaChoices: [...input.telemetry.megaChoices.entries()].map(([id, count]) => ({ id, count })),
         }
       : undefined,
   };

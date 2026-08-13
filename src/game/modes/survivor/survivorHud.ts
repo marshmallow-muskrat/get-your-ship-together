@@ -8,6 +8,7 @@ import {
   formatOverclockLabel,
   isSignatureWeapon,
   overclockLevel,
+  shipCooldownAtLevel,
 } from './survivorContent';
 import type { SurvivorState } from './survivorState';
 import {
@@ -34,6 +35,7 @@ import {
   recordRun,
 } from './survivorRecords';
 import { aliveBossCount, primaryBoss } from './survivorState';
+import { renderStoredRunReport } from './storedRunReport';
 import type { HeroId } from '../../content/heroes';
 
 /** Run-report views. Source and form remain separate top-level views. */
@@ -209,6 +211,7 @@ export class SurvivorHud {
         </div>
       </div>
       <div id="sv-surge-banner" class="sv-surge-banner hidden">SURGE INCOMING</div>
+      <div id="sv-cache-banner" class="sv-cache-banner hidden">PROTOCOL CACHE AVAILABLE</div>
       <div id="sv-build" class="sv-build"></div>
       <div id="sv-mech-toast" class="sv-mech-toast hidden">MECH CORE READY</div>
 
@@ -475,12 +478,12 @@ export class SurvivorHud {
             const detail = document.createElement('div');
             detail.className = 'sv-lb-detail hidden';
             if (r.report) {
-              const totalDamage = r.report.sources.reduce((n, s) => n + s.damage, 0);
-              const top = r.report.sources
-                .slice(0, 5)
-                .map((s) => `${sourceLabel(s.id, (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id)} ${Math.round(s.damage).toLocaleString()}`)
-                .join(' · ');
-              detail.textContent = `Damage ${Math.round(totalDamage).toLocaleString()} · Elites ${r.report.eliteKills} · Minibosses ${r.report.minibossKills} · Orb healing ${Math.round(r.report.healedByOrbs).toLocaleString()} · Regen ${Math.round(r.report.healedByRegen).toLocaleString()} · Shielded ${Math.round(r.report.shieldAbsorbed).toLocaleString()}${top ? ` · Top sources: ${top}` : ''}`;
+              detail.appendChild(
+                renderStoredRunReport(
+                  r.report,
+                  (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id,
+                ),
+              );
             } else {
               detail.textContent = 'Detailed telemetry was not stored for this older run.';
             }
@@ -708,6 +711,10 @@ export class SurvivorHud {
 
   private publishAbilities(state: SurvivorState): void {
     const p = state.player;
+    const cooldownMul = Math.max(
+      SURVIVOR.megaProtocol.abilityCooldownFloor,
+      1 - state.megaProtocol.cooldownRefits * 0.1,
+    );
     const dEl = this.root.querySelector('#sv-ab-dodge');
     const dState = this.root.querySelector('#sv-dodge-state');
     const dReady = p.dodgeCd <= 0 && p.form !== 'ship' && p.alive && p.dodgeActive <= 0;
@@ -722,7 +729,7 @@ export class SurvivorHud {
       else if (p.dodgeCd > 0) dState.textContent = this.formatCd(p.dodgeCd);
       else dState.textContent = 'READY';
     }
-    this.setCooldownOverlay(dEl, p.dodgeCd, SURVIVOR.dodge.cooldown);
+    this.setCooldownOverlay(dEl, p.dodgeCd, SURVIVOR.dodge.cooldown * cooldownMul);
 
     // Mech ready flourish
     if (p.mechCd <= 0 && !p.mechReadyAnnounced && p.form === 'astronaut' && state.phase === 'playing') {
@@ -755,7 +762,7 @@ export class SurvivorHud {
       else if (p.repulsorCd > 0) qState.textContent = this.formatCd(p.repulsorCd);
       else qState.textContent = 'READY';
     }
-    this.setCooldownOverlay(qEl, p.repulsorCd, SURVIVOR.repulsor.cooldown);
+    this.setCooldownOverlay(qEl, p.repulsorCd, SURVIVOR.repulsor.cooldown * cooldownMul);
 
     const eReady = p.shipCd <= 0 && p.form === 'astronaut' && p.alive;
     const eActive = p.form === 'ship';
@@ -773,7 +780,13 @@ export class SurvivorHud {
       else eState.textContent = 'READY';
     }
     if (eActive) this.setCooldownOverlay(eEl, 0, 1);
-    else this.setCooldownOverlay(eEl, p.shipCd, SURVIVOR.ship.cooldown);
+    else {
+      this.setCooldownOverlay(
+        eEl,
+        p.shipCd,
+        shipCooldownAtLevel(state.passives['reinforced-airframe'] ?? 0) * cooldownMul,
+      );
+    }
 
     // Mech is a fixed-cooldown ultimate: the meter shows readiness, not kill charge.
     const rActive = p.form === 'mech';
@@ -801,11 +814,21 @@ export class SurvivorHud {
   /** Player-facing director warning. Internal surge types and recovery state stay hidden. */
   private publishPressure(state: SurvivorState): void {
     const banner = this.root.querySelector('#sv-surge-banner');
+    const cacheBanner = this.root.querySelector('#sv-cache-banner');
     const s = state.surge;
     if (banner) {
       const show = s.phase === 'telegraph' && state.phase === 'playing';
       banner.classList.toggle('hidden', !show);
       if (show) banner.textContent = 'SURGE INCOMING';
+    }
+    if (cacheBanner) {
+      const show = state.cacheBanner > 0 && state.phase === 'playing';
+      cacheBanner.classList.toggle('hidden', !show);
+      if (show) {
+        cacheBanner.textContent = state.cache.mega
+          ? 'TITAN CACHE AVAILABLE'
+          : 'PROTOCOL CACHE AVAILABLE';
+      }
     }
   }
 
@@ -939,6 +962,7 @@ export class SurvivorHud {
       state.tempBuffs.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|') +
       '|' +
       state.protocolActive.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|') +
+      `|mega:${state.megaProtocol.owned.join(',')}:${state.megaProtocol.cooldownRefits}` +
       `|sh:${state.player.shieldPoints.toFixed(0)}`;
     if (key === this.lastWeaponsKey) return;
     this.lastWeaponsKey = key;
@@ -971,16 +995,19 @@ export class SurvivorHud {
       .filter((t) => titanIds.has(t.id))
       .map(
         (t) =>
-          `<div class="sv-build-item temp titan-armament"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.floor(t.remaining / 60)}:${String(Math.ceil(t.remaining % 60)).padStart(2, '0')}</strong></div>`,
+          `<div class="sv-build-item temp titan-armament"><span>${t.id.replace(/-/g, ' ')}</span><strong>PERMANENT</strong></div>`,
       )
       .join('');
     const protos = state.protocolActive
-      .filter((t) => !titanIds.has(t.id))
+      .filter((t) => !titanIds.has(t.id) && t.id !== 'mega-cooldown-refit')
       .map(
         (t) =>
-          `<div class="sv-build-item temp protocol-fx"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Math.ceil(t.remaining)}s</strong></div>`,
+          `<div class="sv-build-item temp protocol-fx"><span>${t.id.replace(/-/g, ' ')}</span><strong>${Number.isFinite(t.remaining) ? `${Math.ceil(t.remaining)}s` : 'PERMANENT'}</strong></div>`,
       )
       .join('');
+    const refit = state.megaProtocol.cooldownRefits > 0
+      ? `<div class="sv-build-item temp titan-armament"><span>temporal refit</span><strong>×${state.megaProtocol.cooldownRefits} · ${Math.round((1 - Math.max(SURVIVOR.megaProtocol.abilityCooldownFloor, 1 - state.megaProtocol.cooldownRefits * 0.1)) * 100)}% FASTER</strong></div>`
+      : '';
     const shield =
       state.player.shieldPoints > 0
         ? `<div class="sv-build-item temp"><span>Aegis Shield</span><strong>${Math.ceil(state.player.shieldPoints)} · ${Math.ceil(state.player.shieldTime)}s</strong></div>`
@@ -992,8 +1019,8 @@ export class SurvivorHud {
       )
       .join('');
     const tempSection =
-      titan || protos || shield || temps
-        ? `${titan ? `<div class="sv-build-section">TITAN ARMAMENT</div>${titan}` : ''}<div class="sv-build-section">TEMP / PROTOCOL</div>${protos}${shield}${temps}`
+      titan || refit || protos || shield || temps
+        ? `${titan || refit ? `<div class="sv-build-section">TITAN ARMAMENTS</div>${titan}${refit}` : ''}<div class="sv-build-section">TEMP / PROTOCOL</div>${protos}${shield}${temps}`
         : '';
     build.innerHTML = `<div class="eyebrow">BUILD</div><div class="sv-build-scroll"><div class="sv-build-section">WEAPONS</div>${weps || '<div class="sv-build-item"><span>None</span></div>'}<div class="sv-build-section">PASSIVES</div>${pass || '<div class="sv-build-item passive"><span>None</span></div>'}${tempSection}</div>`;
   }

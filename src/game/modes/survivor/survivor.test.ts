@@ -56,6 +56,8 @@ import {
   tryShip,
   surroundPlayer,
   safePickupPosition,
+  shipCooldownFor,
+  updatePlasmaTrails,
 } from './survivorSim';
 import {
   BOSS_DEFS,
@@ -87,6 +89,8 @@ import {
   bossHealthMulFor,
   isMegaBossIndex,
   bossFocusBaseChance,
+  compositionAt,
+  shipCooldownAtLevel,
   ALL_BOSS_PATTERNS,
   isMegaOnlyPattern,
   type BossPatternId,
@@ -116,6 +120,7 @@ import {
   recordRun,
 } from './survivorRecords';
 import { allPatternsHandled } from './survivorBossPatterns';
+import { createTelemetry, recordCacheChoice, recordIncoming, recordOutgoing } from './survivorTelemetry';
 
 function installMemoryStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -546,6 +551,67 @@ describe('per-hero leaderboards', () => {
     const history = getRunHistory('frog');
     expect(history).toHaveLength(MAX_RUN_HISTORY_ENTRIES);
     expect(history[0]!.timestamp).toBeGreaterThanOrEqual(history.at(-1)!.timestamp);
+  });
+
+  it('persists the complete telemetry report for previous runs', () => {
+    const telemetry = createTelemetry();
+    telemetry.elapsed = 321;
+    telemetry.byForm.astronaut.time = 200;
+    telemetry.byForm.mech.time = 70;
+    telemetry.byForm.ship.time = 51;
+    telemetry.healedByOrbs = 120;
+    telemetry.healedByRegen = 32;
+    telemetry.eliteKills = 7;
+    telemetry.minibossKills = 2;
+    recordOutgoing(telemetry, {
+      sourceId: 'weapon:plasma-wake',
+      form: 'ship',
+      applied: 456,
+      isBoss: true,
+      killed: true,
+    });
+    recordIncoming(telemetry, {
+      time: 300,
+      source: TEST_BOSS_SOURCE,
+      raw: 40,
+      mitigated: 30,
+      shieldAbsorbed: 8,
+      applied: 22,
+      remaining: 12,
+    });
+    telemetry.bossKills.push({
+      index: 5,
+      displayName: 'MEGA Void Drake',
+      isMega: true,
+      timeToKill: 47,
+      buildDps: 123,
+      heroId: 'red-panda',
+      form: 'ship',
+    });
+    recordCacheChoice(telemetry, 'gunship-flyby', false);
+    recordCacheChoice(telemetry, 'carrier-wing', true);
+
+    recordRun(makeRunSummary({
+      survivalTime: 321,
+      kills: 444,
+      level: 19,
+      bossesDefeated: 5,
+      heroId: 'red-panda',
+      weapons: [{ weaponId: 'plasma-wake', level: 6 }],
+      passives: { 'max-health': 4 },
+      telemetry,
+    }));
+
+    const report = getRunHistory('red-panda')[0]?.report;
+    expect(report).toBeTruthy();
+    expect(report?.sources[0]).toMatchObject({ id: 'weapon:plasma-wake', damage: 456, bossDamage: 456 });
+    expect(report?.forms.find((row) => row.form === 'ship')).toMatchObject({ damage: 456, time: 51 });
+    expect(report?.sourceForms[0]).toMatchObject({ sourceId: 'weapon:plasma-wake', form: 'ship' });
+    expect(report?.damageTaken).toEqual([{ id: 'boss-body', amount: 22 }]);
+    expect(report?.bossKills[0]).toMatchObject({ index: 5, isMega: true, form: 'ship' });
+    expect(report?.cacheChoices).toEqual([{ id: 'gunship-flyby', count: 1 }]);
+    expect(report?.megaChoices).toEqual([{ id: 'carrier-wing', count: 1 }]);
+    expect(report).toMatchObject({ healedByOrbs: 120, healedByRegen: 32, shieldAbsorbed: 8, eliteKills: 7, minibossKills: 2 });
   });
 
   it('migrates v1 and handles malformed', () => {
@@ -1175,6 +1241,57 @@ describe('protocol cache and gunship', () => {
     expect(SURVIVOR.cacheLifetime).toBe(45);
   });
 
+  it('ordinary repair potency scales with current maximum integrity', () => {
+    const collectAtMaxHealth = (maxHealth: number): number => {
+      const state = createSurvivorState('bee', null, 5021 + maxHealth);
+      state.weapons = [];
+      state.nextBossTime = 1e9;
+      state.nextCacheTime = 1e9;
+      state.surge.nextSurgeAt = 1e9;
+      state.spawnAcc = -1e9;
+      state.player.maxHealth = maxHealth;
+      state.player.health = 1;
+      state.pickups.push({
+        id: state.nextId++,
+        kind: 'repair',
+        x: 0,
+        z: 0,
+        value: 0,
+        healFraction: SURVIVOR.repair.fraction,
+        active: true,
+        magnetized: false,
+        life: SURVIVOR.repairPickupLife,
+      });
+      const before = state.player.health;
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      return state.player.health - before;
+    };
+
+    const base = collectAtMaxHealth(100);
+    const plated = collectAtMaxHealth(300);
+    expect(base).toBeCloseTo(100 * SURVIVOR.repair.fraction, 5);
+    expect(plated).toBeCloseTo(300 * SURVIVOR.repair.fraction, 5);
+    expect(plated / base).toBeCloseTo(3, 5);
+  });
+
+  it('keeps legacy flat repair fixtures backward compatible', () => {
+    const state = createSurvivorState('bee', null, 5022);
+    state.player.maxHealth = 300;
+    state.player.health = 100;
+    state.pickups.push({
+      id: 5022,
+      kind: 'repair',
+      x: 0,
+      z: 0,
+      value: 20,
+      active: true,
+      magnetized: false,
+      life: SURVIVOR.repairPickupLife,
+    });
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.player.health).toBeCloseTo(120, 5);
+  });
+
   it('cache remains active for its lifetime until collected', () => {
     const state = createSurvivorState('bee', 'survivor-cache', 22);
     // Advance to spawn
@@ -1296,6 +1413,7 @@ describe('protocol cache and gunship', () => {
     }
     const hpAfter = tracked().reduce((s, e) => s + (e.alive ? e.health : 0), 0);
     expect(hpAfter).toBeLessThan(hpMid);
+    expect(tracked().every((enemy) => !enemy.alive)).toBe(true);
     expect(visibleShots).toBeGreaterThan(0);
     expect(state.gunship.active).toBe(false);
   });
@@ -1564,7 +1682,7 @@ describe('protocol presentation contracts', () => {
     expect(state.player.health).toBe(hp);
   });
 
-  it('gunship originates near the player not at a far edge', () => {
+  it('gunship traverses the full arena through the player lane', () => {
     const state = createSurvivorState('bee', null, 703);
     state.player.x = 3;
     state.player.z = -2;
@@ -1572,8 +1690,21 @@ describe('protocol presentation contracts', () => {
     state.player.facingZ = 1;
     forceStartProtocol(state, 'gunship-flyby', 1);
     expect(state.gunship.active).toBe(true);
-    const d0 = Math.hypot(state.gunship.x0 - state.player.x, state.gunship.z0 - state.player.z);
-    expect(d0).toBeLessThan(4);
+    const dx = state.gunship.x1 - state.gunship.x0;
+    const dz = state.gunship.z1 - state.gunship.z0;
+    const length = Math.hypot(dx, dz);
+    expect(length).toBeGreaterThan(SURVIVOR.arenaHalf * 1.85);
+    const cross = Math.abs(
+      (state.player.x - state.gunship.x0) * dz -
+      (state.player.z - state.gunship.z0) * dx,
+    ) / length;
+    expect(cross).toBeLessThan(0.1);
+    expect(Math.max(Math.abs(state.gunship.x0), Math.abs(state.gunship.z0))).toBeGreaterThan(
+      SURVIVOR.arenaHalf * 0.94,
+    );
+    expect(Math.max(Math.abs(state.gunship.x1), Math.abs(state.gunship.z1))).toBeGreaterThan(
+      SURVIVOR.arenaHalf * 0.94,
+    );
     // Ship position tracks start immediately
     expect(Math.hypot(state.gunship.x - state.gunship.x0, state.gunship.z - state.gunship.z0)).toBeLessThan(0.5);
   });
@@ -1594,8 +1725,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.9.0-test-center', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.9.0-test-center');
+  it('is endless-2.10.0-test-center', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.10.0-test-center');
   });
 });
 
@@ -1613,7 +1744,7 @@ describe('melee horde and endless-2.3.0 balance', () => {
       mush: 2.8,
       fast: 3.7,
       spiky: 3.8,
-      flyer: 3.5,
+      'surge-flier': 3.5,
       bee: 3.6,
       ghost: 3.55,
       bruiser: 2.6,
@@ -1623,7 +1754,7 @@ describe('melee horde and endless-2.3.0 balance', () => {
     for (const [id, speed] of Object.entries(expected)) {
       expect(HORDE[id]!.baseSpeed, `${id} opening speed`).toBeCloseTo(speed, 5);
     }
-    expect(SURVIVOR.playerSpeed).toBeCloseTo(6.4, 5);
+    expect(SURVIVOR.playerSpeed).toBeCloseTo(6.75, 5);
     // Every opening speed leaves real kiting headroom against the player.
     for (const def of Object.values(HORDE)) {
       expect(def.baseSpeed).toBeLessThan(SURVIVOR.playerSpeed * 0.62);
@@ -2242,41 +2373,41 @@ function pressureState(seed: number): SurvivorState {
 describe('early specialist gates', () => {
   it('exposes a single time-gate table', () => {
     expect(isEnemyEligibleAt('basic', 0)).toBe(true);
-    expect(isEnemyEligibleAt('mush', 0)).toBe(true);
-    expect(isEnemyEligibleAt('fast', 29)).toBe(false);
-    expect(isEnemyEligibleAt('fast', 30)).toBe(true);
-    expect(isEnemyEligibleAt('spiky', 59)).toBe(false);
-    expect(isEnemyEligibleAt('spiky', 60)).toBe(true);
-    expect(isEnemyEligibleAt('flyer', 59)).toBe(false);
-    expect(isEnemyEligibleAt('bee', 59)).toBe(false);
-    expect(isEnemyEligibleAt('flyer', 60)).toBe(true);
-    expect(isEnemyEligibleAt('elite', 89)).toBe(false);
-    expect(isEnemyEligibleAt('elite', 90)).toBe(true);
-    expect(isEnemyEligibleAt('ghost', 119)).toBe(false);
-    expect(isEnemyEligibleAt('ghost', 120)).toBe(true);
+    expect(isEnemyEligibleAt('mush', 44.9)).toBe(false);
+    expect(isEnemyEligibleAt('mush', 45)).toBe(true);
+    expect(isEnemyEligibleAt('fast', 89.9)).toBe(false);
+    expect(isEnemyEligibleAt('fast', 90)).toBe(true);
+    expect(isEnemyEligibleAt('spiky', 149.9)).toBe(false);
+    expect(isEnemyEligibleAt('spiky', 150)).toBe(true);
+    expect(isEnemyEligibleAt('bee', 209.9)).toBe(false);
+    expect(isEnemyEligibleAt('bee', 210)).toBe(true);
+    expect(isEnemyEligibleAt('bruiser', 269.9)).toBe(false);
+    expect(isEnemyEligibleAt('bruiser', 270)).toBe(true);
+    expect(isEnemyEligibleAt('ghost', 329.9)).toBe(false);
+    expect(isEnemyEligibleAt('ghost', 330)).toBe(true);
+    expect(isEnemyEligibleAt('elite', 119.9)).toBe(false);
+    expect(isEnemyEligibleAt('elite', 120)).toBe(true);
+    expect(isEnemyEligibleAt('surge-flier', 0)).toBe(true);
     // Unknown ids are treated as late specialists, never as free fodder.
     expect(isEnemyEligibleAt('not-a-real-enemy', 0)).toBe(false);
   });
 
-  it('spawns fodder only for the first 30 seconds', () => {
+  it('spawns exactly one silhouette for the first 45 seconds', () => {
     const state = pressureState(6101);
     const tracker = trackSpawns(state);
-    for (let i = 0; i < 30 * 60; i += 1) {
+    for (let i = 0; i < 44 * 60; i += 1) {
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
       tracker.sample();
     }
-    expect(tracker.defsSeen().length).toBeGreaterThan(0);
-    for (const defId of tracker.defsSeen()) {
-      expect(HORDE[defId]!.role).toBe('fodder');
-    }
+    expect(tracker.defsSeen()).toEqual(['basic']);
   });
 
-  it('caps living fast specialists to one during 30–60 seconds', () => {
+  it('keeps the first-minute specialist cap while the second silhouette arrives', () => {
     const state = pressureState(6102);
     let peak = 0;
     for (let i = 0; i < 60 * 60; i += 1) {
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-      if (state.time < 30 || state.time >= 60) continue;
+      if (state.time < 45 || state.time >= 60) continue;
       const specialists = state.enemies.filter(
         (e) => e.alive && HORDE[e.defId]!.role !== 'fodder',
       ).length;
@@ -2285,59 +2416,40 @@ describe('early specialist gates', () => {
     expect(peak).toBeLessThanOrEqual(1);
   });
 
-  it('a forced sprinter surge at 45s cannot flood specialists', () => {
+  it('a forced swarm at 45s spawns only the exclusive event flier', () => {
     const state = pressureState(6103);
     state.time = 45;
-    // Force the director straight into a sprinter surge.
+    // Force the director straight into its single authored flock.
     state.surge.phase = 'surge';
-    state.surge.kind = 'sprinters';
+    state.surge.kind = 'swarm';
+    state.surge.packRemaining = SURVIVOR.surgePackSize;
+    state.spawnAcc = SURVIVOR.surgePackSize;
     state.surge.phaseEndsAt = 1e9;
     state.surge.nextSurgeAt = 1e9;
 
     const tracker = trackSpawns(state);
-    let peak = 0;
-    for (let i = 0; i < 14 * 60; i += 1) {
+    for (let i = 0; i < 3 * 60; i += 1) {
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
       tracker.sample();
-      if (state.time >= 60) break;
-      peak = Math.max(
-        peak,
-        state.enemies.filter((e) => e.alive && HORDE[e.defId]!.role !== 'fodder').length,
-      );
     }
-    // The surge still produced pressure...
-    expect(tracker.defsSeen().length).toBeGreaterThan(0);
-    // ...but it was time-valid fodder pressure, never a specialist flood.
-    expect(peak).toBeLessThanOrEqual(1);
-    for (const defId of tracker.defsSeen()) {
-      expect(isEnemyEligibleAt(defId, 60)).toBe(true);
-    }
-    expect(tracker.defsSeen()).not.toContain('spiky');
-    expect(tracker.defsSeen()).not.toContain('flyer');
-    expect(tracker.defsSeen()).not.toContain('elite');
-    expect(tracker.defsSeen()).not.toContain('ghost');
+    expect(tracker.defsSeen()).toEqual(['surge-flier']);
+    expect(state.enemies.filter((enemy) => enemy.alive && enemy.defId === 'surge-flier').length)
+      .toBe(SURVIVOR.surgePackSize);
   });
 
-  it('every surge kind respects eligibility when forced early', () => {
-    for (const kind of ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood']) {
-      const state = pressureState(6200 + kind.length);
-      state.time = 20;
-      state.surge.phase = 'surge';
-      state.surge.kind = kind;
-      state.surge.phaseEndsAt = 1e9;
-      state.surge.nextSurgeAt = 1e9;
-      const tracker = trackSpawns(state);
-      for (let i = 0; i < 9 * 60; i += 1) {
-        stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-        tracker.sample();
-      }
-      const defs = tracker.defsSeen();
-      // Each forced surge must actually spawn something, so this cannot pass vacuously.
-      expect(defs.length).toBeGreaterThan(0);
-      for (const defId of defs) {
-        expect(HORDE[defId]!.role).toBe('fodder');
-      }
+  it('keeps surge fliers out of every ordinary composition tier', () => {
+    for (const time of [0, 45, 90, 150, 210, 270, 330, 1800]) {
+      expect(compositionAt(time).map((entry) => entry.id)).not.toContain('surge-flier');
     }
+    const ordinary = pressureState(6200);
+    ordinary.time = 700;
+    ordinary.surge.nextSurgeAt = 1e9;
+    const tracker = trackSpawns(ordinary);
+    for (let i = 0; i < 20 * 60; i += 1) {
+      stepSurvivor(ordinary, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      tracker.sample();
+    }
+    expect(tracker.defsSeen()).not.toContain('surge-flier');
   });
 
   it('nothing enters play before its own gate across a long opening', () => {
@@ -2346,7 +2458,7 @@ describe('early specialist gates', () => {
     // Record violations rather than asserting per frame — an assertion in this
     // hot loop dominates the runtime and hides the actual coverage.
     const violations: string[] = [];
-    for (let i = 0; i < 200 * 60; i += 1) {
+    for (let i = 0; i < 370 * 60; i += 1) {
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
       tracker.sample();
       for (const e of state.enemies) {
@@ -2357,19 +2469,9 @@ describe('early specialist gates', () => {
       }
     }
     expect(violations).toEqual([]);
-    const flankerAt = Math.min(
-      tracker.firstTimeOf('flyer') ?? Infinity,
-      tracker.firstTimeOf('bee') ?? Infinity,
-    );
-    // Fixed-step accumulation lands a hair under the exact gate; the eligibility
-    // epsilon (1e-6) is the documented tolerance, so allow it here too.
-    const eps = 1e-4;
-    expect(tracker.firstTimeOf('fast')!).toBeGreaterThanOrEqual(30 - eps);
-    expect(tracker.firstTimeOf('spiky')!).toBeGreaterThanOrEqual(60 - eps);
-    expect(flankerAt).toBeGreaterThanOrEqual(60 - eps);
-    expect(tracker.firstTimeOf('bruiser')!).toBeGreaterThanOrEqual(90 - eps);
-    expect(tracker.firstTimeOf('elite')!).toBeGreaterThanOrEqual(90 - eps);
-    // Drives 200 simulated seconds of the real spawn director and measures ~3.2s alone,
+    // The focused windows below prove each gate is also a floor rather than a ban. This
+    // long run's single responsibility is to prove no path enters early.
+    // Drives 370 simulated seconds of the real spawn director and measures several seconds alone,
     // which is thin against vitest's 5s default once the full suite adds worker
     // contention. Measured at 3196ms without the endless-2.8.0 ship changes and 3172ms
     // with them, so this budget is contention headroom, not cover for a slowdown. If it
@@ -2380,11 +2482,12 @@ describe('early specialist gates', () => {
   it('gates are floors, not bans — each specialist appears once unlocked', () => {
     // One focused window per specialist so the assertion cannot pass vacuously.
     const cases: Array<{ defId: string; from: number; window: number }> = [
-      { defId: 'fast', from: 31, window: 40 },
-      { defId: 'spiky', from: 61, window: 40 },
-      { defId: 'bruiser', from: 91, window: 60 },
-      { defId: 'elite', from: 91, window: 60 },
-      { defId: 'ghost', from: 121, window: 90 },
+      { defId: 'mush', from: 45, window: 45 },
+      { defId: 'fast', from: 90, window: 60 },
+      { defId: 'spiky', from: 150, window: 60 },
+      { defId: 'bee', from: 210, window: 60 },
+      { defId: 'bruiser', from: 270, window: 60 },
+      { defId: 'ghost', from: 330, window: 80 },
     ];
     for (const c of cases) {
       const state = pressureState(6300 + c.from);
@@ -2396,15 +2499,6 @@ describe('early specialist gates', () => {
       }
       expect(tracker.defsSeen()).toContain(c.defId);
     }
-    // Flankers share a gate; either one satisfies it.
-    const fl = pressureState(6399);
-    fl.time = 61;
-    const flTracker = trackSpawns(fl);
-    for (let i = 0; i < 60 * 60; i += 1) {
-      stepSurvivor(fl, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-      flTracker.sample();
-    }
-    expect(flTracker.defsSeen().some((d) => d === 'flyer' || d === 'bee')).toBe(true);
   });
 
   it('ordinary enemies stay melee-only through the whole ramp', () => {
@@ -2423,7 +2517,7 @@ describe('early specialist gates', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Pressure director — every surge kind must produce its actual signature
+// Pressure director — one exclusive airborne flock
 // ---------------------------------------------------------------------------
 
 /** Which perimeter edge a spawn point sits on. */
@@ -2437,7 +2531,6 @@ function edgeOf(x: number, z: number): number {
 }
 
 function runSurge(
-  kind: string,
   seed: number,
   atTime: number,
   seconds: number,
@@ -2447,7 +2540,12 @@ function runSurge(
   state.weapons = [];
   state.time = atTime;
   state.surge.phase = 'surge';
-  state.surge.kind = kind;
+  state.surge.kind = 'swarm';
+  state.surge.edgeA = Math.floor(seed % 4);
+  state.surge.edgeB = state.surge.edgeA ^ 1;
+  state.surge.activeEdges = [state.surge.edgeA];
+  state.surge.packRemaining = SURVIVOR.surgePackSize;
+  state.spawnAcc = SURVIVOR.surgePackSize;
   state.surge.phaseEndsAt = 1e9;
   state.surge.nextSurgeAt = 1e9;
   // Composition is measured in isolation. A live boss now ends ordinary surges by
@@ -2473,60 +2571,179 @@ function runSurge(
 }
 
 describe('pressure director surge composition', () => {
-  const fractionOf = (defs: string[], pred: (d: string) => boolean): number =>
-    defs.length === 0 ? 0 : defs.filter(pred).length / defs.length;
+  it('spawns exactly one bounded pack', () => {
+    const r = runSurge(7101, 200, 8);
+    expect(r.count).toBe(SURVIVOR.surgePackSize);
+  });
 
-  it('every surge kind actually spawns enemies (no vacuous pass)', () => {
-    for (const kind of ['sprinters', 'pincer', 'bruiser', 'encircle', 'elite', 'flood']) {
-      const r = runSurge(kind, 7100 + kind.length, 200, 8);
-      expect(r.count, `${kind} spawned nothing`).toBeGreaterThan(5);
+  it('uses only the surge-exclusive flying definition', () => {
+    const r = runSurge(7201, 200, 8);
+    expect(new Set(r.defs)).toEqual(new Set(['surge-flier']));
+    expect(HORDE['surge-flier']!.role).toBe('flanker');
+    expect(HORDE['surge-flier']!.visual.url).toContain('goleling');
+  });
+
+  it('doubles the authored movement multiplier for every flock member', () => {
+    const state = pressureState(7202);
+    state.time = 200;
+    state.surge.phase = 'surge';
+    state.surge.kind = 'swarm';
+    state.surge.packRemaining = SURVIVOR.surgePackSize;
+    state.spawnAcc = SURVIVOR.surgePackSize;
+    state.surge.phaseEndsAt = 1e9;
+    state.nextBossTime = 1e9;
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    const flock = state.enemies.filter((enemy) => enemy.alive && enemy.defId === 'surge-flier');
+    expect(flock.length).toBeGreaterThan(0);
+    const base = endlessDifficultyAt(state.time).speedMul;
+    for (const enemy of flock) {
+      expect(enemy.speedMul).toBeCloseTo(base * (1 + SURVIVOR.surgeWaveSpeedBonus), 5);
     }
   });
 
-  it('a sprinter surge is actually sprinter-heavy once sprinters are unlocked', () => {
-    const surge = runSurge('sprinters', 7201, 200, 10);
-    const baseline = runSurge('', 7202, 200, 10);
-    const isSprinter = (d: string) => HORDE[d]!.role === 'sprinter';
-    expect(fractionOf(surge.defs, isSprinter)).toBeGreaterThan(
-      fractionOf(baseline.defs, isSprinter),
-    );
-    expect(fractionOf(surge.defs, isSprinter)).toBeGreaterThan(0.35);
+  it('commits the whole flock to its one announced edge', () => {
+    const r = runSurge(7203, 200, 8);
+    expect(r.edges.size).toBe(1);
   });
 
-  it('a bruiser surge actually produces bruisers', () => {
-    const r = runSurge('bruiser', 7203, 200, 10);
-    expect(r.defs).toContain('bruiser');
-    expect(fractionOf(r.defs, (d) => d === 'bruiser')).toBeGreaterThan(0.2);
+  it('does not leave stragglers after the authored pack is exhausted', () => {
+    const r = runSurge(7204, 200, 20);
+    expect(r.count).toBe(SURVIVOR.surgePackSize);
+  });
+});
+
+describe('Cosmic Cleanup playtest tuning', () => {
+  it('uses the balanced overview and quicker astronaut baseline', () => {
+    expect(SURVIVOR.cameraHalf).toBeCloseTo(14.5, 6);
+    expect(SURVIVOR.playerSpeed).toBeCloseTo(6.75, 6);
   });
 
-  it('an elite surge actually produces elites after the elite gate', () => {
-    const r = runSurge('elite', 7204, 200, 10);
-    expect(r.defs).toContain('elite');
-    const elites = r.defs.filter((d) => d === 'elite').length;
-    // Explicit event budget: noticeable, but never the old 55%-of-wave flood.
-    expect(elites).toBeGreaterThanOrEqual(2);
-    expect(elites).toBeLessThanOrEqual(SURVIVOR.elite.surgeBonusCap + 1);
-    expect(fractionOf(r.defs, (d) => d === 'elite')).toBeLessThan(0.15);
+  it('sets a 30-second Ship recharge and lets Reinforced Airframe reach 25 seconds', () => {
+    expect(SURVIVOR.ship.cooldown).toBe(30);
+    expect(shipCooldownAtLevel(0)).toBe(30);
+    expect(shipCooldownAtLevel(3)).toBe(27);
+    expect(shipCooldownAtLevel(5)).toBe(25);
+    expect(shipCooldownAtLevel(99)).toBe(25);
+    const state = createSurvivorState('bee', null, 21001);
+    expect(shipCooldownFor(state)).toBe(30);
+    state.passives['reinforced-airframe'] = 5;
+    expect(shipCooldownFor(state)).toBe(25);
   });
 
-  it('a flood surge is fodder-heavy and denser than baseline', () => {
-    const flood = runSurge('flood', 7205, 200, 8);
-    const baseline = runSurge('', 7206, 200, 8);
-    expect(fractionOf(flood.defs, (d) => HORDE[d]!.role === 'fodder')).toBeGreaterThan(0.5);
-    expect(flood.count).toBeGreaterThan(baseline.count);
+  it('gives Mech baseline 25% damage reduction', () => {
+    const state = createSurvivorState('bee', null, 21002);
+    state.player.form = 'mech';
+    state.player.invuln = 0;
+    const before = state.player.health;
+    damagePlayer(state, 40, TEST_HORDE_SOURCE);
+    expect(before - state.player.health).toBeCloseTo(30, 6);
   });
 
-  it('a pincer surge uses exactly two facing edges', () => {
-    const r = runSurge('pincer', 7207, 200, 10);
-    // Exactly two, never one — a single-edge "pincer" would pass a >0 check vacuously.
-    expect(r.edges.size).toBe(2);
-    const [a, b] = Array.from(r.edges).sort();
-    // Edges are -Z, +Z, -X, +X: facing edges are the two halves of one axis pair.
-    expect(a! ^ 1).toBe(b!);
+  it.each([
+    ['bee', 'mech-hive'],
+    ['flamingo', 'mech-prism'],
+    ['frog', 'mech-gravity'],
+    ['red-panda', 'mech-meteor'],
+  ] as const)('%s Mech automatically fires its own special armament', (heroId, effectKind) => {
+    const state = createSurvivorState(heroId, null, 21100 + heroId.length);
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    state.spawnAcc = -1e9;
+    state.player.invuln = 1e9;
+    state.player.mechCd = 0;
+    state.weapons = [{ weaponId: 'pulse', level: 1, cooldown: 999, focusDebt: 0, prototype: false }];
+    const target = emptyEnemy();
+    target.id = state.nextId++;
+    target.alive = true;
+    target.defId = 'basic';
+    target.role = 'fodder';
+    target.x = 0;
+    target.z = 5;
+    target.radius = 0.6;
+    target.health = target.maxHealth = 1_000_000;
+    target.speedMul = 0;
+    target.contactDamage = 0;
+    state.enemies.push(target);
+    expect(tryMech(state)).toBe(true);
+
+    let sawSignatureEffect = false;
+    for (let frame = 0; frame < 4 * 60; frame += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      sawSignatureEffect ||= state.effects.some((effect) => effect.kind === effectKind);
+    }
+    expect(sawSignatureEffect).toBe(true);
+    const source = state.telemetry.bySource.get(`mech-special:${heroId}`);
+    expect(source?.damage ?? 0).toBeGreaterThan(0);
+    expect(source?.hits ?? 0).toBeGreaterThan(0);
   });
 
-  it('an encircle surge spreads across the whole perimeter', () => {
-    const r = runSurge('encircle', 7208, 200, 10);
-    expect(r.edges.size).toBeGreaterThanOrEqual(3);
+  it('speeds bosses up enough to re-enter the larger-map camera promptly', () => {
+    expect(bossDifficultyFor(1).moveMul).toBeGreaterThanOrEqual(1.3);
+    expect(bossDifficultyFor(5).moveMul).toBeGreaterThanOrEqual(1.35);
+    expect(bossDifficultyFor(5).moveMul).toBeGreaterThan(bossDifficultyFor(1).moveMul);
+  });
+
+  it('applies the requested universal Plasma Wake multiplier', () => {
+    expect(SURVIVOR.plasmaTrail.enemyDamageMul).toBe(0.5);
+    expect(SURVIVOR.plasmaTrail.bossDamageMul).toBe(0.5);
+  });
+
+  it('refreshes retraced Plasma Wake instead of stacking another live damage layer', () => {
+    const state = createSurvivorState('bee', null, 21200);
+    state.weapons = [{ weaponId: 'plasma-wake', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
+    state.player.isMoving = true;
+    state.player.facingX = 0;
+    state.player.facingZ = 1;
+    state.player.x = 0;
+    state.player.z = 0;
+    state.time = 10;
+    state.plasmaTrail.prevSet = true;
+    state.plasmaTrail.prevX = 0;
+    state.plasmaTrail.prevZ = 0;
+    state.plasmaTrail.anchorSet[0] = true;
+    state.plasmaTrail.anchorX[0] = 0;
+    state.plasmaTrail.anchorZ[0] = 0;
+    state.plasmaTrail.pathAcc[0] = SURVIVOR.plasmaTrail.segmentLength;
+    state.plasmaTrail.sx.fill(0);
+    state.plasmaTrail.sz.fill(0);
+    state.plasmaTrail.st.fill(9);
+    state.plasmaTrail.count = state.plasmaTrail.sx.length;
+    state.plasmaTrail.head = 0;
+
+    state.hazards.push({
+      id: state.nextId++,
+      kind: 'plasma-wake',
+      x: 0,
+      z: 0,
+      x1: 0,
+      z1: SURVIVOR.plasmaTrail.segmentLength,
+      capsule: true,
+      radius: 1.15 * SURVIVOR.plasmaTrail.widthMul,
+      life: 0.5,
+      maxLife: 3.6,
+      damage: 10,
+      color: WEAPONS['plasma-wake'].color,
+      active: true,
+      owner: 'player',
+      tickCd: 0,
+      armTimer: 0,
+      sourceBossId: 0,
+      scaleX: 1,
+      scaleZ: 1,
+      facingX: 0,
+      facingZ: 1,
+      bossDamageMul: SURVIVOR.plasmaTrail.bossDamageMul,
+    });
+    const original = state.hazards[0]!;
+    // The delayed trail head lands on the existing segment's end point.
+    state.plasmaTrail.sx.fill(0);
+    state.plasmaTrail.sz.fill(SURVIVOR.plasmaTrail.segmentLength);
+    state.plasmaTrail.st.fill(state.time - SURVIVOR.plasmaTrail.delay);
+    updatePlasmaTrails(state, SURVIVOR.fixedDt);
+
+    expect(state.hazards.filter((hazard) => hazard.active && hazard.kind === 'plasma-wake')).toHaveLength(1);
+    expect(state.hazards[0]).toBe(original);
+    expect(original.life).toBeGreaterThan(0.5);
   });
 });

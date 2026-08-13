@@ -1089,7 +1089,7 @@ button {
   border-left: 2px solid #71f6da;
   background: rgba(80, 225, 255, 0.07);
   color: rgba(204, 244, 255, 0.72);
-  content: 'GYST // CONTAINMENT COMMAND';
+  content: 'COSMIC CLEANUP // CONTAINMENT COMMAND';
   font: 700 0.5rem/1 'Space Mono', monospace;
   letter-spacing: 0.16em;
 }
@@ -1443,6 +1443,16 @@ button {
 .crew-lb-row.podium { border-color: color-mix(in srgb, var(--bay-accent) 38%, rgba(150, 210, 245, 0.2)); }
 .crew-lb-row.podium-1 { min-height: 4.8rem; background: linear-gradient(90deg, color-mix(in srgb, var(--bay-accent) 18%, rgba(8, 17, 32, 0.94)), rgba(8, 17, 32, 0.76)); box-shadow: inset 0 1px rgba(255, 255, 255, 0.06), 0 0 24px color-mix(in srgb, var(--bay-accent) 8%, transparent); }
 .crew-lb-row.podium-1 .crew-lb-rank { color: var(--bay-accent); font-size: 1.15rem; text-shadow: 0 0 12px var(--bay-accent); }
+.crew-lb-row.history { cursor: pointer; border-left-color: #ffd46a; pointer-events: auto; }
+.crew-lb-row.history:hover,
+.crew-lb-row.history:focus-visible { background-color: rgba(255, 212, 106, 0.07); outline: none; }
+.crew-lb-detail {
+  grid-column: 1 / -1;
+  margin-top: 0.55rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 212, 106, 0.18);
+}
+.crew-lb-detail.hidden { display: none; }
 .crew-lb-empty {
   display: grid;
   min-height: 13rem;
@@ -3082,6 +3092,31 @@ html {
   pointer-events: none;
   animation: sv-surge-in 0.35s ease-out both, sv-pressure-pulse 0.9s ease-in-out 0.35s infinite;
 }
+
+/* Cache pickup callout: readable at a glance, but calmer than a hostile surge. */
+.survivor-hud .sv-cache-banner {
+  position: absolute;
+  top: 31%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.55rem 1.05rem;
+  border: 1px solid rgba(103, 239, 255, 0.6);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(5, 25, 42, 0.82), rgba(25, 20, 53, 0.82));
+  box-shadow: 0 0 30px rgba(75, 213, 255, 0.24), inset 0 0 20px rgba(102, 99, 255, 0.12);
+  color: #a8f6ff;
+  font-size: clamp(0.88rem, 1.8vw, 1.28rem);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 14px rgba(82, 226, 255, 0.7);
+  pointer-events: none;
+  animation: sv-cache-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes sv-cache-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.9); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
 @keyframes sv-surge-in {
   from { opacity: 0; transform: translateX(-50%) scale(0.85); }
   to { opacity: 1; transform: translateX(-50%) scale(1); }
@@ -3395,6 +3430,54 @@ html {
 .survivor-hud .sv-leaderboard .sv-lb-row.podium-1 { min-height: 4.4rem; background: linear-gradient(90deg, color-mix(in srgb, var(--lb-accent) 17%, rgba(8, 17, 32, 0.96)), rgba(8, 17, 32, 0.76)); box-shadow: 0 0 22px color-mix(in srgb, var(--lb-accent) 7%, transparent); }
 .survivor-hud .sv-leaderboard .sv-lb-row.podium-1 .sv-lb-rank { color: var(--lb-accent); font-size: 1.05rem; text-shadow: 0 0 12px var(--lb-accent); }
 .survivor-hud .sv-leaderboard .sv-lb-detail { grid-column: 1 / -1; }
+
+/* Full historical telemetry shared by both leaderboard presentations. */
+.stored-run-report {
+  display: grid;
+  gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
+  color: rgba(224, 237, 249, 0.88);
+  font-family: 'Space Mono', monospace;
+  text-transform: none;
+}
+.stored-report-section {
+  display: grid;
+  gap: 0.34rem;
+  min-width: 0;
+}
+.stored-report-section h4 {
+  margin: 0;
+  color: var(--lb-accent, var(--bay-accent, #71f6da));
+  font: 700 0.58rem/1.2 'Space Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.stored-report-table {
+  display: grid;
+  min-width: max-content;
+  overflow: hidden;
+  border: 1px solid rgba(150, 200, 238, 0.12);
+  background: rgba(4, 10, 21, 0.44);
+}
+.stored-report-cell {
+  min-width: 0;
+  padding: 0.3rem 0.42rem;
+  border-bottom: 1px solid rgba(150, 200, 238, 0.08);
+  color: rgba(220, 234, 247, 0.76);
+  font-size: 0.56rem;
+  white-space: nowrap;
+}
+.stored-report-cell.head {
+  color: rgba(168, 197, 222, 0.62);
+  background: rgba(112, 177, 222, 0.06);
+  font-size: 0.49rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.stored-report-cell.sub { color: rgba(157, 210, 239, 0.6); }
+.crew-lb-detail,
+.survivor-hud .sv-lb-detail { overflow-x: auto; }
 .survivor-hud .sv-leaderboard .sv-lb-empty {
   display: grid;
   min-height: 12rem;

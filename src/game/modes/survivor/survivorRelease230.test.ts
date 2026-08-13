@@ -181,7 +181,7 @@ describe('§5 contact damage', () => {
       mush: 10,
       fast: 12,
       spiky: 13,
-      flyer: 12,
+      'surge-flier': 12,
       bee: 11,
       ghost: 14,
       bruiser: 20,
@@ -656,18 +656,13 @@ describe('§3 pressure director', () => {
     expect(phase === 'recovery' || phase === 'normal').toBe(true);
   });
 
-  it('pincer uses opposite edges and encircle uses all four', () => {
-    expect(surgeEdgesFor('pincer', 0, 1).sort()).toEqual([0, 1]);
-    expect(surgeEdgesFor('pincer', 2, 3).sort()).toEqual([2, 3]);
-    // Opposite means the sibling on the same axis (XOR 1), never a perpendicular edge.
-    const [a, b] = surgeEdgesFor('pincer', 2, 2 ^ 1);
-    expect(a! ^ 1).toBe(b!);
-    expect(surgeEdgesFor('encircle', 0, 1).sort()).toEqual([0, 1, 2, 3]);
+  it('the authored swarm commits to one announced edge', () => {
+    expect(surgeEdgesFor('swarm', 0, 1)).toEqual([0]);
+    expect(surgeEdgesFor('swarm', 3, 2)).toEqual([3]);
   });
 
   it('gives the surge wave its own speed bonus, never the standing horde', () => {
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBeGreaterThanOrEqual(0.2);
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBeLessThanOrEqual(0.25);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBe(1);
     // The global curve is untouched by any surge that has been and gone.
     const before = enemySpeedMulAt(300);
     const { state } = runDirector(36, 100);
@@ -701,9 +696,7 @@ describe('§3 pressure director', () => {
   });
 
   it('enumerates every authored surge kind', () => {
-    expect([...SURGE_KINDS].sort()).toEqual(
-      ['bruiser', 'encircle', 'elite', 'flood', 'pincer', 'sprinters'].sort(),
-    );
+    expect([...SURGE_KINDS]).toEqual(['swarm']);
   });
 });
 
@@ -1092,7 +1085,7 @@ describe('§22 Test Center metadata', () => {
    * lagged, a 2.8.0 Test Center build could not be told apart from production 2.7.0 by
    * the one check that exists to catch a mis-publish.
    */
-  it('partitions the expanded-station Test Center from production endless-2.8.0', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.9.0-test-center');
+  it('partitions the playtest polish pass from production', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.10.0-test-center');
   });
 });

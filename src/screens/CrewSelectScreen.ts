@@ -9,6 +9,8 @@ import {
   getHeroLeaderboard,
   getRunHistory,
 } from '../game/modes/survivor/survivorRecords';
+import { WEAPONS } from '../game/modes/survivor/survivorContent';
+import { renderStoredRunReport } from '../game/modes/survivor/storedRunReport';
 
 export type CrewSelectHandlers = {
   /** Launch Containment Protocol with the selected hero. */
@@ -117,7 +119,7 @@ export class CrewSelectScreen {
     this.loading.className = 'loading-screen';
     this.loading.innerHTML = `
       <div class="loading-card">
-        <div class="loading-mark">GYST</div>
+        <div class="loading-mark">CC!</div>
         <p class="eyebrow">CREW SELECTION</p>
         <h1>Loading the roster…</h1>
         <div class="loading-track"><span id="crew-loading-bar"></span></div>
@@ -175,10 +177,9 @@ export class CrewSelectScreen {
     this.hud.innerHTML = `
       <header class="selection-header">
         <div class="game-lockup">
-          <h1 class="game-title" aria-label="Get Your Ship Together">
-            <span>GET YOUR</span>
-            <em>SHIP</em>
-            <span>TOGETHER</span>
+          <h1 class="game-title" aria-label="Cosmic Cleanup">
+            <span>COSMIC</span>
+            <em>CLEANUP!</em>
           </h1>
           <strong class="select-heading">SELECT YOUR CREW</strong>
         </div>
@@ -209,7 +210,7 @@ export class CrewSelectScreen {
       <div class="corner-actions" aria-label="Screen actions">
         <div class="utility-actions">
           <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
-          <button class="select-hero-button audio-button" type="button" id="audio-button">AUDIO ON · M</button>
+          <button class="select-hero-button audio-button" type="button" id="audio-button">MUSIC ON · M</button>
         </div>
         <div class="mode-actions">
           <button id="leaderboard-button" class="select-hero-button ghost-button" type="button">LEADERBOARDS</button>
@@ -275,7 +276,7 @@ export class CrewSelectScreen {
 
   private updateAudioLabel(): void {
     const button = this.hud?.querySelector<HTMLButtonElement>('#audio-button');
-    if (button) button.textContent = `${this.audio.isMuted() ? 'AUDIO OFF' : 'AUDIO ON'} · M`;
+    if (button) button.textContent = `${this.audio.isMuted() ? 'MUSIC OFF' : 'MUSIC ON'} · M`;
   }
 
   private openLeaderboard(): void {
@@ -364,6 +365,36 @@ export class CrewSelectScreen {
             ? run.weapons.map((weapon) => `${weapon.weaponId} L${weapon.level}`).join('  ·  ')
             : 'NO WEAPON TELEMETRY';
           row.append(rank, endurance, data, meta, build);
+          if (this.leaderboardHistory) {
+            row.classList.add('history');
+            const detail = document.createElement('div');
+            detail.className = 'crew-lb-detail hidden';
+            if (run.report) {
+              detail.appendChild(
+                renderStoredRunReport(
+                  run.report,
+                  (id) => WEAPONS[id as keyof typeof WEAPONS]?.name ?? id,
+                ),
+              );
+            } else {
+              detail.textContent = 'Detailed telemetry was not stored for this older run.';
+            }
+            row.setAttribute('role', 'button');
+            row.setAttribute('tabindex', '0');
+            row.setAttribute('aria-expanded', 'false');
+            const toggle = () => {
+              const open = !detail.classList.toggle('hidden');
+              row.setAttribute('aria-expanded', String(open));
+            };
+            row.addEventListener('click', toggle);
+            row.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggle();
+              }
+            });
+            row.appendChild(detail);
+          }
           list.appendChild(row);
         });
       }

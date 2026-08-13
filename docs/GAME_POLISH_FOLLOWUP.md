@@ -49,12 +49,11 @@ in-run leaderboard uses the same visual language.
 
 ## Audio provenance and mix
 
-The game now ships 18 semantic effects and a seamless 32-second stereo command-deck
-score. Every WAV is project-owned and deterministically rendered by
+The game now ships a seamless 128-second stereo ambient score and intentionally no sound
+effects. The score is project-owned and deterministically rendered by
 `scripts/generateAudioAssets.mjs`; no third-party recording or `assets/space-packs/`
-file is used. Runtime playback is a bounded Web Audio mixer with separate music/SFX
-buses, a master compressor, 24-voice cap, per-cue throttles, positional panning, and a
-persistent M-key mute. Combat simulation never depends on the mixer.
+file is used. Runtime playback has one low-volume music voice and a persistent M-key mute.
+Combat simulation never depends on the mixer.
 
 ## Verification evidence
 

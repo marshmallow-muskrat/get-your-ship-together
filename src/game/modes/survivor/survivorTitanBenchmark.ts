@@ -1,11 +1,11 @@
 /**
  * Deterministic comparative benchmark for the three Mega (Titan) Protocols.
  *
- * Carrier Wing, Cleanup Crew and Singularity Engine are mutually exclusive five-minute
- * rewards, so the only meaningful question is *relative player value* — not whether they
- * print the same damage number. Singularity in particular contributes a large amount of
- * control (pulling and holding clusters) that never appears in a damage column, and
- * Carrier Wing converts a percentage of boss max health rather than flat damage.
+ * Carrier Wing, Cleanup Crew and Singularity Engine are permanent stackable rewards.
+ * This harness grants one at a time over the same finite observation window to isolate
+ * relative player value — not to imply that production choices are exclusive. Singularity
+ * contributes substantial control that never appears in a damage column, and Carrier Wing
+ * converts a percentage of boss max health rather than flat damage.
  *
  * Every protocol is measured against an identical scenario: same hero, same authored
  * build, same elapsed time, same seeded horde, same player policy, same window. The only
@@ -25,9 +25,8 @@ import { isCleanupCrewSource, totalOutgoing } from './survivorTelemetry';
 /**
  * How the measurement window is run.
  *
- * `sustained` holds the player alive for the whole five minutes so throughput, clearing
- * and control are measured over a complete window — this is the mode the design band of
- * 170k–220k combined direct damage refers to.
+ * `sustained` holds the player alive for the whole five-minute observation window so
+ * throughput, clearing and control are measured over a complete sample.
  *
  * `mortal` leaves the player fully damageable, so the metric that matters is how long
  * each protocol keeps them alive. Neither mode is "the" answer: a Titan is judged on
@@ -35,7 +34,7 @@ import { isCleanupCrewSource, totalOutgoing } from './survivorTelemetry';
  */
 export type TitanBenchmarkMode = 'sustained' | 'mortal';
 
-/** The three exclusive Mega Protocols, in cache-offer order. */
+/** The three unique Mega Protocols, in cache-offer order. */
 export const TITAN_PROTOCOLS: readonly ProtocolId[] = [
   'carrier-wing',
   'cleanup-crew',
@@ -155,7 +154,9 @@ function buildTitanState(seedIndex: number): SurvivorState {
 export function runTitanBenchmark(
   protocol: ProtocolId,
   seedIndex = 0,
-  windowSec = SURVIVOR.megaProtocol.titanDuration,
+  // Production armaments are permanent. The comparison still uses a finite,
+  // identical five-minute observation window so their value is measurable.
+  windowSec = 300,
   mode: TitanBenchmarkMode = 'sustained',
 ): TitanBenchmarkResult {
   const state = buildTitanState(seedIndex);

@@ -1,0 +1,859 @@
+{
+  "label": "cosmic-cleanup-baseline",
+  "balanceVersion": "endless-2.9.0-test-center",
+  "generatedAt": "2026-08-13T16:36:07.797Z",
+  "referenceRangedDamage": 15,
+  "bodyBand": [
+    1.15,
+    1.3
+  ],
+  "chargeBand": [
+    1.4,
+    1.6
+  ],
+  "scaling": [
+    {
+      "index": 1,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1,
+      "categories": {
+        "projectile": 15,
+        "beam": 16,
+        "puddle": 12,
+        "radial": 18,
+        "body": 18,
+        "charge": 22
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 1,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1,
+      "categories": {
+        "projectile": 18,
+        "beam": 19.2,
+        "puddle": 14.399999999999999,
+        "radial": 21.599999999999998,
+        "body": 21.599999999999998,
+        "charge": 26.4
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 1,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1,
+      "categories": {
+        "projectile": 21,
+        "beam": 22.4,
+        "puddle": 16.799999999999997,
+        "radial": 25.2,
+        "body": 25.2,
+        "charge": 30.799999999999997
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 2,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.12,
+      "categories": {
+        "projectile": 16.8,
+        "beam": 17.92,
+        "puddle": 13.440000000000001,
+        "radial": 20.160000000000004,
+        "body": 20.160000000000004,
+        "charge": 24.64
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 2,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.12,
+      "categories": {
+        "projectile": 20.16,
+        "beam": 21.504,
+        "puddle": 16.128,
+        "radial": 24.192,
+        "body": 24.192,
+        "charge": 29.568
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 2,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.12,
+      "categories": {
+        "projectile": 23.52,
+        "beam": 25.088,
+        "puddle": 18.816000000000003,
+        "radial": 28.224,
+        "body": 28.224,
+        "charge": 34.496
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 3,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.24,
+      "categories": {
+        "projectile": 18.6,
+        "beam": 19.84,
+        "puddle": 14.879999999999999,
+        "radial": 22.32,
+        "body": 22.32,
+        "charge": 27.28
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 3,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.24,
+      "categories": {
+        "projectile": 22.32,
+        "beam": 23.808,
+        "puddle": 17.856,
+        "radial": 26.784,
+        "body": 26.784,
+        "charge": 32.736
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 3,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.24,
+      "categories": {
+        "projectile": 26.04,
+        "beam": 27.776,
+        "puddle": 20.832,
+        "radial": 31.248,
+        "body": 31.248,
+        "charge": 38.192
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 4,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.3599999999999999,
+      "categories": {
+        "projectile": 20.4,
+        "beam": 21.759999999999998,
+        "puddle": 16.32,
+        "radial": 24.479999999999997,
+        "body": 24.479999999999997,
+        "charge": 29.919999999999998
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 4,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.3599999999999999,
+      "categories": {
+        "projectile": 24.479999999999997,
+        "beam": 26.112,
+        "puddle": 19.584,
+        "radial": 29.375999999999998,
+        "body": 29.375999999999998,
+        "charge": 35.903999999999996
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 4,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.3599999999999999,
+      "categories": {
+        "projectile": 28.559999999999995,
+        "beam": 30.463999999999995,
+        "puddle": 22.847999999999995,
+        "radial": 34.27199999999999,
+        "body": 34.27199999999999,
+        "charge": 41.88799999999999
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 5,
+      "isMega": true,
+      "phase": 1,
+      "damageMul": 1.85,
+      "categories": {
+        "projectile": 27.75,
+        "beam": 29.6,
+        "puddle": 22.200000000000003,
+        "radial": 33.300000000000004,
+        "body": 33.300000000000004,
+        "charge": 40.7
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 5,
+      "isMega": true,
+      "phase": 2,
+      "damageMul": 1.85,
+      "categories": {
+        "projectile": 33.300000000000004,
+        "beam": 35.52,
+        "puddle": 26.64,
+        "radial": 39.96,
+        "body": 39.96,
+        "charge": 48.84
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 5,
+      "isMega": true,
+      "phase": 3,
+      "damageMul": 1.85,
+      "categories": {
+        "projectile": 38.849999999999994,
+        "beam": 41.44,
+        "puddle": 31.08,
+        "radial": 46.62,
+        "body": 46.62,
+        "charge": 56.98
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 6,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.6,
+      "categories": {
+        "projectile": 24,
+        "beam": 25.6,
+        "puddle": 19.200000000000003,
+        "radial": 28.8,
+        "body": 28.8,
+        "charge": 35.2
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 6,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.6,
+      "categories": {
+        "projectile": 28.799999999999997,
+        "beam": 30.72,
+        "puddle": 23.04,
+        "radial": 34.56,
+        "body": 34.56,
+        "charge": 42.239999999999995
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 6,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.6,
+      "categories": {
+        "projectile": 33.599999999999994,
+        "beam": 35.839999999999996,
+        "puddle": 26.879999999999995,
+        "radial": 40.31999999999999,
+        "body": 40.31999999999999,
+        "charge": 49.279999999999994
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 7,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.72,
+      "categories": {
+        "projectile": 25.8,
+        "beam": 27.52,
+        "puddle": 20.64,
+        "radial": 30.96,
+        "body": 30.96,
+        "charge": 37.839999999999996
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 7,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.72,
+      "categories": {
+        "projectile": 30.96,
+        "beam": 33.024,
+        "puddle": 24.768,
+        "radial": 37.152,
+        "body": 37.152,
+        "charge": 45.408
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 7,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.72,
+      "categories": {
+        "projectile": 36.12,
+        "beam": 38.528,
+        "puddle": 28.896,
+        "radial": 43.344,
+        "body": 43.344,
+        "charge": 52.976
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 8,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.8399999999999999,
+      "categories": {
+        "projectile": 27.599999999999998,
+        "beam": 29.439999999999998,
+        "puddle": 22.08,
+        "radial": 33.12,
+        "body": 33.12,
+        "charge": 40.48
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 8,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.8399999999999999,
+      "categories": {
+        "projectile": 33.12,
+        "beam": 35.327999999999996,
+        "puddle": 26.495999999999995,
+        "radial": 39.74399999999999,
+        "body": 39.74399999999999,
+        "charge": 48.57599999999999
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 8,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.8399999999999999,
+      "categories": {
+        "projectile": 38.63999999999999,
+        "beam": 41.215999999999994,
+        "puddle": 30.911999999999995,
+        "radial": 46.367999999999995,
+        "body": 46.367999999999995,
+        "charge": 56.67199999999999
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 9,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 1.96,
+      "categories": {
+        "projectile": 29.4,
+        "beam": 31.36,
+        "puddle": 23.52,
+        "radial": 35.28,
+        "body": 35.28,
+        "charge": 43.12
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 9,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 1.96,
+      "categories": {
+        "projectile": 35.28,
+        "beam": 37.632,
+        "puddle": 28.223999999999997,
+        "radial": 42.336,
+        "body": 42.336,
+        "charge": 51.744
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 9,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 1.96,
+      "categories": {
+        "projectile": 41.16,
+        "beam": 43.903999999999996,
+        "puddle": 32.928,
+        "radial": 49.391999999999996,
+        "body": 49.391999999999996,
+        "charge": 60.367999999999995
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 10,
+      "isMega": true,
+      "phase": 1,
+      "damageMul": 2.6,
+      "categories": {
+        "projectile": 39,
+        "beam": 41.6,
+        "puddle": 31.200000000000003,
+        "radial": 46.800000000000004,
+        "body": 46.800000000000004,
+        "charge": 57.2
+      },
+      "bodyRatio": 1.2000000000000002,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 10,
+      "isMega": true,
+      "phase": 2,
+      "damageMul": 2.6,
+      "categories": {
+        "projectile": 46.800000000000004,
+        "beam": 49.92,
+        "puddle": 37.44,
+        "radial": 56.160000000000004,
+        "body": 56.160000000000004,
+        "charge": 68.64
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 10,
+      "isMega": true,
+      "phase": 3,
+      "damageMul": 2.6,
+      "categories": {
+        "projectile": 54.599999999999994,
+        "beam": 58.239999999999995,
+        "puddle": 43.67999999999999,
+        "radial": 65.52,
+        "body": 65.52,
+        "charge": 80.08
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 11,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 2.2,
+      "categories": {
+        "projectile": 33,
+        "beam": 35.2,
+        "puddle": 26.400000000000002,
+        "radial": 39.6,
+        "body": 39.6,
+        "charge": 48.400000000000006
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 11,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 2.2,
+      "categories": {
+        "projectile": 39.6,
+        "beam": 42.24,
+        "puddle": 31.68,
+        "radial": 47.52,
+        "body": 47.52,
+        "charge": 58.080000000000005
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 11,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 2.2,
+      "categories": {
+        "projectile": 46.2,
+        "beam": 49.28,
+        "puddle": 36.96,
+        "radial": 55.44,
+        "body": 55.44,
+        "charge": 67.76
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 12,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 2.32,
+      "categories": {
+        "projectile": 34.8,
+        "beam": 37.12,
+        "puddle": 27.839999999999996,
+        "radial": 41.76,
+        "body": 41.76,
+        "charge": 51.04
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 12,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 2.32,
+      "categories": {
+        "projectile": 41.76,
+        "beam": 44.544,
+        "puddle": 33.408,
+        "radial": 50.111999999999995,
+        "body": 50.111999999999995,
+        "charge": 61.248
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666668
+    },
+    {
+      "index": 12,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 2.32,
+      "categories": {
+        "projectile": 48.72,
+        "beam": 51.967999999999996,
+        "puddle": 38.976,
+        "radial": 58.464,
+        "body": 58.464,
+        "charge": 71.45599999999999
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 13,
+      "isMega": false,
+      "phase": 1,
+      "damageMul": 2.44,
+      "categories": {
+        "projectile": 36.6,
+        "beam": 39.04,
+        "puddle": 29.28,
+        "radial": 43.92,
+        "body": 43.92,
+        "charge": 53.68
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 13,
+      "isMega": false,
+      "phase": 2,
+      "damageMul": 2.44,
+      "categories": {
+        "projectile": 43.92,
+        "beam": 46.848,
+        "puddle": 35.135999999999996,
+        "radial": 52.704,
+        "body": 52.704,
+        "charge": 64.416
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    },
+    {
+      "index": 13,
+      "isMega": false,
+      "phase": 3,
+      "damageMul": 2.44,
+      "categories": {
+        "projectile": 51.24,
+        "beam": 54.656,
+        "puddle": 40.992,
+        "radial": 61.488,
+        "body": 61.488,
+        "charge": 75.152
+      },
+      "bodyRatio": 1.2,
+      "chargeRatio": 1.4666666666666666
+    }
+  ],
+  "census": [
+    {
+      "pattern": "ravage-charge",
+      "bossIndex": 1,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 4,
+      "sourceKinds": [
+        "boss-charge",
+        "boss-puddle"
+      ],
+      "maxSingleHit": 22,
+      "maxTraversalTotal": 44,
+      "worstCaseMultiple": 2
+    },
+    {
+      "pattern": "ravage-charge",
+      "bossIndex": 4,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 4,
+      "sourceKinds": [
+        "boss-charge",
+        "boss-puddle"
+      ],
+      "maxSingleHit": 29.919999999999998,
+      "maxTraversalTotal": 59.83999999999999,
+      "worstCaseMultiple": 1.9999999999999998
+    },
+    {
+      "pattern": "ravage-charge",
+      "bossIndex": 5,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 4,
+      "sourceKinds": [
+        "boss-charge",
+        "boss-puddle"
+      ],
+      "maxSingleHit": 40.7,
+      "maxTraversalTotal": 81.39999999999999,
+      "worstCaseMultiple": 1.9999999999999996
+    },
+    {
+      "pattern": "ravage-charge",
+      "bossIndex": 10,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 4,
+      "sourceKinds": [
+        "boss-charge",
+        "boss-puddle"
+      ],
+      "maxSingleHit": 57.2,
+      "maxTraversalTotal": 114.39999999999999,
+      "worstCaseMultiple": 1.9999999999999998
+    },
+    {
+      "pattern": "ravage-charge",
+      "bossIndex": 13,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 4,
+      "sourceKinds": [
+        "boss-charge",
+        "boss-puddle"
+      ],
+      "maxSingleHit": 53.68,
+      "maxTraversalTotal": 107.36,
+      "worstCaseMultiple": 2
+    },
+    {
+      "pattern": "aerial-strafe",
+      "bossIndex": 1,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 0,
+      "sourceKinds": [
+        "boss-beam"
+      ],
+      "maxSingleHit": 14,
+      "maxTraversalTotal": 14,
+      "worstCaseMultiple": 1
+    },
+    {
+      "pattern": "aerial-strafe",
+      "bossIndex": 4,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 0,
+      "sourceKinds": [
+        "boss-beam"
+      ],
+      "maxSingleHit": 19.04,
+      "maxTraversalTotal": 19.04,
+      "worstCaseMultiple": 1
+    },
+    {
+      "pattern": "aerial-strafe",
+      "bossIndex": 5,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 0,
+      "sourceKinds": [
+        "boss-beam"
+      ],
+      "maxSingleHit": 25.900000000000002,
+      "maxTraversalTotal": 25.900000000000002,
+      "worstCaseMultiple": 1
+    },
+    {
+      "pattern": "aerial-strafe",
+      "bossIndex": 10,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 0,
+      "sourceKinds": [
+        "boss-beam"
+      ],
+      "maxSingleHit": 36.4,
+      "maxTraversalTotal": 36.4,
+      "worstCaseMultiple": 1
+    },
+    {
+      "pattern": "aerial-strafe",
+      "bossIndex": 13,
+      "seeds": 6,
+      "minPrimary": 1,
+      "maxPrimary": 1,
+      "maxSecondary": 0,
+      "sourceKinds": [
+        "boss-beam"
+      ],
+      "maxSingleHit": 34.16,
+      "maxTraversalTotal": 34.16,
+      "worstCaseMultiple": 1
+    }
+  ],
+  "patternCategories": [
+    {
+      "pattern": "pulse",
+      "category": "radial",
+      "authored": 16
+    },
+    {
+      "pattern": "line",
+      "category": "beam",
+      "authored": 20
+    },
+    {
+      "pattern": "fan",
+      "category": "projectile",
+      "authored": 12
+    },
+    {
+      "pattern": "summon",
+      "category": null,
+      "authored": null
+    },
+    {
+      "pattern": "breach-orb",
+      "category": "projectile",
+      "authored": 18
+    },
+    {
+      "pattern": "contamination",
+      "category": "puddle",
+      "authored": 10
+    },
+    {
+      "pattern": "rupture-ring",
+      "category": "radial",
+      "authored": 18
+    },
+    {
+      "pattern": "cryo-lanes",
+      "category": "beam",
+      "authored": 14
+    },
+    {
+      "pattern": "ravage-charge",
+      "category": "charge",
+      "authored": 22
+    },
+    {
+      "pattern": "sweeping-beam",
+      "category": "beam",
+      "authored": 16
+    },
+    {
+      "pattern": "aerial-strafe",
+      "category": "beam",
+      "authored": 14
+    },
+    {
+      "pattern": "spore-bloom",
+      "category": "puddle",
+      "authored": 12
+    },
+    {
+      "pattern": "gravity-collapse",
+      "category": "radial",
+      "authored": 22
+    },
+    {
+      "pattern": "cataclysm",
+      "category": "radial",
+      "authored": 20
+    }
+  ]
+}

@@ -100,6 +100,8 @@ Normal level-ups are **permanent only** (weapons, Overclocks, passives). Tempora
 - Full-health players do not magnetize or consume repair orbs.
 - Ship form health magnet is at least 9.0.
 - Healing feedback shows actual integrity restored.
+- Repair potency scales from current maximum integrity at collection: ordinary 18%, miniboss 36%,
+  boss 45%, and Mega-Boss 60%, before Nanite Bleed's existing orb bonus.
 - Ordinary repair generation is kill-driven and never depends on missing health; there is no
   banked-orb cap and no late time-paced schedule. Orbs last 70s and collection still waits until
   integrity is actually missing, so an uninjured player leaves them standing as a routable field
@@ -139,11 +141,12 @@ expired after 1.8s before it could matter.
 | Property | Value |
 |---|---|
 | Trail delay behind the hero | 0.5s (replayed from a fixed 96-sample position ring) |
-| Emission | Distance-driven: 3.2 world units, 5.5 in ship form |
+| Emission | Distance-driven: 1.65 world units, 2.6 in ship form |
 | Lifetime | L1 3.6s · L2 3.8s · L3 4.0s · L4 4.2s · L5 4.5s |
 | Cross-track half-width | `radius × 1.72`, ×1.35 in ship form, ×0.72 per ribbon at Twin Wake |
 | Ember phase | Full strength for 45% of life, then linear decay to 25% |
 | Continuity | Each segment starts exactly where the previous ended |
+| Retracing | A coincident live segment refreshes instead of adding another damage layer |
 
 Because segments chain, coverage depends on lifetime and speed rather than emission frequency,
 which is why emission is now much *less* frequent while the trail is *denser*.
@@ -156,10 +159,10 @@ white. Depth testing is on, render order sits in the floor band, and additive is
 thin filament and the ignition sparks. The plasma body is a deep violet-magenta composited
 normally; the ramps run magenta -> violet -> out for the filament and ember -> near-black for the
 outer shell. Presentation cooling starts at 18% of life rather than 45%, with a brief ignition
-flash keeping the point of emission readable. The presentation pass left damage untouched; the
-later playtest follow-up reduces boss-only damage to 0.50x, and ship-authored segments by another
-0.72x, while horde damage, lifetime, cadence, capsule geometry and `hazardPotency`'s 45% ember start
-remain unchanged. The outer shell is still
+flash keeping the point of emission readable. The current pass removes the bright line treatment,
+uses a smooth broad plasma gradient, and applies the 0.50x reduction to every monster as well as
+bosses; ship-authored boss segments receive the existing additional 0.72x multiplier. Lifetime,
+capsule geometry and `hazardPotency`'s 45% ember start remain unchanged. The outer shell is still
 drawn at exactly `h.radius` — the half-width `hazardHitsPoint` tests. A per-level
 integrated-damage normalization (`SURVIVOR.plasmaTrail.damageNorm`) re-bases the weapon so L4–L5
 stay within ~3% of the 2.6.1 measured output while L1 gains; see [`WEAPON_BENCHMARK.md`](WEAPON_BENCHMARK.md).
@@ -377,7 +380,8 @@ form multiplier -> Titan multiplier -> Breach Shielding (boss sources) -> Aegis 
 | L4 | 0.30 | 70% |
 | L5 | 0.25 | 75% |
 
-Window duration is **3.25s**, raised from 2.5s. Cooldown is unchanged.
+Window duration is **3.25s**. Cooldown is **30s** at baseline; Reinforced Airframe reduces it by
+1s per level to a hard **25s** floor while retaining its damage-reduction progression.
 
 `shipDamageTakenMul` is the single place the form's mitigation is resolved; nothing reads the
 baseline constant directly. Ship is never invulnerable — the floor is a hard cap, not an asymptote.
@@ -411,15 +415,18 @@ Every 120s (≈15s before each boss window): corner beacon. Choices:
 The Cache HUD is a hunt signal: it shows the remaining lifetime but deliberately provides no arrow
 or distance. The persistent animated world beacon is the navigation target.
 
-Mega-Boss death leaves a non-expiring cache with exactly three exclusive choices:
+Mega-Boss death leaves a non-expiring cache. Unowned armaments are offered and disappear from
+future choices after selection, so all three may accumulate in one long run:
 
 | Mega Protocol | Role |
 |---|---|
-| **Carrier Wing** | Repeated fighter strafes across distributed threats for five minutes. |
-| **Cleanup Crew** | The three heroes you are not piloting arrive in their ships and fight beside you as allied Mechs for five minutes. |
-| **Singularity Engine** | Repeated anomalies pull and detonate dense horde clusters for five minutes. |
+| **Carrier Wing** | Permanent repeated fighter strafes across distributed threats. |
+| **Cleanup Crew** | The three heroes you are not piloting permanently fight beside you as allied Mechs. |
+| **Singularity Engine** | Permanent repeated anomalies pull and detonate dense horde clusters. |
 
-Titan Armaments occupy one dedicated, non-upgradable slot and expose their remaining time in Build.
+Permanent output is 60% of the former timed version (a 40% reduction). After all three are owned,
+each later Mega Cache grants a **Temporal Refit**: 10% faster recharge for Mech, Ship, Dodge and
+Repulsor, stacking to a hard 50% cooldown floor. Build exposes every owned armament and refit count.
 
 ### Cleanup Crew independent engagement (endless-2.8.0)
 
@@ -478,8 +485,7 @@ protocol its standing against Carrier Wing and Singularity Engine.
 ### Cleanup Crew (endless-2.7.0)
 
 Summons the three heroes the player is **not** piloting. They arrive in their own ships, deploy as
-allied Mechs, fight for five active simulation minutes using only their exclusive signature
-weapon, then transform back and fly out.
+allied Mechs, and fight permanently using only their exclusive signature weapon.
 
 | Player | Summons |
 |---|---|
@@ -492,7 +498,7 @@ Allies are **bounded actors, not duplicate player states**. An ally owns a posit
 formation bearing, one `SurvivorWeaponSlot` and a phase timer — no health, form, passives, Build,
 cooldown bank or pickup logic. They are invulnerable and non-colliding, never block or displace
 the player, enemies or bosses, and carry no aggro: no horde or boss code reads them. Their ships
-are arrival/departure presentation only and deal no damage. Cleanup Crew never alters the player's
+are arrival presentation only and deal no damage. Cleanup Crew never alters the player's
 Mech cooldown, form, passive levels or permanent Build.
 
 Signature identities are preserved: Boswell's directional Drone Formation, Fitzwilliam's optimised
@@ -510,7 +516,9 @@ The ordinary Rutherford weapon **Rocket Barrage** is unrelated to Protocol Cache
 ## Enemy speeds (endless-2.3.0)
 
 Base speeds at 0:00, before the global multiplier: basic 3.00, mush 2.80, fast 3.70, spiky 3.80,
-flyer 3.50, bee 3.60, ghost 3.55, bruiser 2.60, elite 3.30, miniboss 2.80. Player base speed 6.4.
+Surge Flier 3.50, bee 3.60, ghost 3.55, bruiser 2.60, elite 3.30, miniboss 2.80. Player base speed is
+6.75. Boss movement starts at 1.32x its prior authored base, increases per boss, and is capped at
+1.65x; Mega scale applies a 0.96 movement multiplier after that curve.
 
 Raw speed is deliberately **not** the primary reason a run ends. `1.24×` is a fifty-minute value,
 not a fifteen-minute one. The curve is a piecewise-linear anchor table (`ENEMY_SPEED_ANCHORS`):
@@ -614,6 +622,10 @@ readiness, not kill charge.
 
 Mech weapon output uses bounded multipliers: `1.35×` damage, `1.15×` cadence and `1.15×` area.
 It no longer adds a projectile to every weapon, which was the largest cause of boss deletion.
+Mech also takes **75% incoming damage** at baseline and automatically fires a hero-specific
+armament while active: Boswell's interceptor hive, Fitzwilliam's prism rail fan, Fortunato's
+gravitic bloom, or Rutherford's meteor cluster. These are simulation-owned attacks with distinct
+damage/control geometry and hero-accent presentation.
 
 ## Kill-driven repair economy (endless-2.8.0)
 
@@ -626,9 +638,9 @@ wall clock, and not capped at a handful of orbs on the field.
 | Credit per kill | fodder 1, elite 3, miniboss 8 |
 | Threshold | mean 40 credit, ±25% seeded variance per drop |
 | Critical drought guard | At ≤45% integrity, next kill after 12s dry emits if no repair is within 14 units |
-| Ordinary orb | 16 |
+| Ordinary orb | 18% of current maximum integrity at collection time |
 | Orb lifetime | 70s, with an 8s expiry warning |
-| Miniboss / boss | 45 / 55 (+30 Mega), guaranteed, premium, outside the ordinary economy |
+| Miniboss / boss | 36% / 45% (+15 percentage points for Mega), guaranteed, premium, outside the ordinary economy |
 
 Pricing an orb in **threat-weighted** credit is what keeps the tap width roughly constant as kill
 rate climbs. A flat per-kill roll makes flow rate equal to kill rate, which is how endless-2.2.1
@@ -681,17 +693,19 @@ being dropped, so early pressure is preserved.
 
 | Definition | Role | Gate |
 |---|---|---|
-| basic, mush | fodder | 0s |
-| fast | sprinter | 30s |
-| spiky | sprinter | 60s |
-| flyer, bee | flanker | 60s |
-| bruiser | bruiser | 90s |
-| elite | elite | 90s |
-| ghost | hunter | 120s |
+| basic | fodder | 0s |
+| mush | fodder | 45s |
+| fast | sprinter | 90s |
+| spiky | sprinter | 150s |
+| bee | flanker | 210s |
+| bruiser | bruiser | 270s |
+| ghost | hunter | 330s |
+| Surge Flier | event-only flanker | surge only |
+| elite | elite | 120s |
 | miniboss | miniboss | 120s |
 
-Before 60s at most **one** specialist may be alive at a time, and specialist-heavy surge kinds are
-rolled forward to `flood` so an early surge applies fodder pressure instead of a sprinter wave.
+Ordinary composition begins with exactly one silhouette and adds one authored family at each gate.
+The Surge Flier is absent from ordinary composition and every non-surge spawn path.
 
 ### Authoritative elite budget (endless-2.4.0)
 
@@ -707,8 +721,8 @@ timer + 55%-surge + all-elite phase-three summon paths.
 
 ## Pressure director
 
-`normal → telegraph → surge → recovery → normal`. One surge at a time. Kinds: sprinters, pincer,
-bruiser, encircle, elite, flood — all gated by enemy eligibility.
+`normal → telegraph → surge → recovery → normal`. One surge at a time. Every surge releases one
+bounded flock of 26 exclusive flying enemies from one edge as a coherent pack.
 
 | Phase | Duration |
 |---|---|
@@ -721,19 +735,15 @@ Surges never stack, and an ordinary surge never begins while a boss is alive. A 
 any running surge cleanly into recovery **without delaying the exact boss schedule** — which is also
 what stops a Mega-Boss from inheriting a director surge alongside its authored reinforcements.
 
-A surge grants **its own spawned wave** +22% movement speed. The modifier rides on those individual
-enemies; the standing horde never inherits it.
+Surge Fliers move at exactly **2x** their authored movement speed. The modifier rides on those
+individual enemies; the standing horde never inherits it.
 
 Recovery is a real breathing window: replacements are withheld until population drains toward
 `targetActive × 0.55`, then trickle back. Living enemies are never despawned to manufacture it.
 
-Presentation: `SURGE INCOMING` banner, directional arrows on the exact edges in play, illuminated
+Presentation: `SURGE INCOMING` banner, directional arrows on the exact edge in play, illuminated
 spawn edges for the full telegraph, and a HUD chip reading `NORMAL` / `INCOMING` / `SURGE` /
-`RECOVERY`. No audio in this release.
-
-Geometry surges step a perimeter cursor per spawn: `pincer` alternates between two facing edges of
-one axis pair and `encircle` walks all four. (Both previously keyed off the within-frame spawn index,
-which is almost always 0, so a pincer used one edge and an encircle never encircled.)
+`RECOVERY`. The music-only mix intentionally adds no alert sound.
 
 ## Boss schedule backlog
 
@@ -936,7 +946,6 @@ the scale (the crew-select lower HUD nudge) are expressed in px deliberately.
 | `survivor-overdrive` | Overdrive Systems at its L5 cap, Mech ready |
 | `survivor-cleanup-arrival` | Cleanup Crew ships arriving and deploying |
 | `survivor-cleanup-combat` | Cleanup Crew fighting under dense horde load |
-| `survivor-cleanup-departure` | Cleanup Crew transforming back and flying out |
 | `survivor-telemetry` | Multi-source, multi-form build for the Run Report cross-tab |
 
 Browser QA covers two harnesses. `scripts/browserQa.mjs` sweeps the viewport x UI-scale matrix

@@ -709,6 +709,7 @@ export class SurvivorRenderer {
         this.enemies.set(e.id, vis);
         this.root.add(vis.root);
         if (e.isElite) this.addElitePresentation(vis);
+        if (e.defId === 'surge-flier') this.addSurgeFlierPresentation(vis);
       }
       const scale = e.isMiniboss
         ? SURVIVOR.actorScale.miniboss
@@ -716,6 +717,14 @@ export class SurvivorRenderer {
           ? SURVIVOR.actorScale.elite
           : SURVIVOR.actorScale.enemy;
       this.place(vis, e.x, e.z, e.facingX, e.facingZ, scale);
+      if (e.defId === 'surge-flier') {
+        // The surge actor is unmistakably airborne and moves as a restless flock.
+        // Collision remains on the simulation's XZ plane; this is presentation only.
+        vis.root.position.y = 1.7 + Math.sin(state.time * 8.5 + e.id * 0.73) * 0.18;
+        vis.root.rotation.z = Math.sin(state.time * 5.2 + e.id) * 0.1;
+        const flockFx = vis.root.getObjectByName('surge-flier-presentation');
+        if (flockFx) flockFx.rotation.y = state.time * 2.8 + e.id;
+      }
       const shouldAnim = e.isElite || e.isMiniboss || this.animFrame % 2 === i % 2;
       if (vis.animator && shouldAnim) {
         if (e.specialWindup > 0) vis.animator.play('shoot', 0.05);
@@ -726,6 +735,34 @@ export class SurvivorRenderer {
       this.flash(vis, e.hitFlash, e.specialWindup > 0);
       if (e.isElite) this.updateElitePresentation(vis, e.health / Math.max(1, e.maxHealth), visibleEliteBars.has(e.id));
     }
+  }
+
+  /** Exclusive surge-flier silhouette: cold flight field plus crossed energy vanes. */
+  private addSurgeFlierPresentation(vis: ActorVis): void {
+    if (vis.root.getObjectByName('surge-flier-presentation')) return;
+    const fx = new THREE.Group();
+    fx.name = 'surge-flier-presentation';
+    const shell = new THREE.Mesh(this.eliteShellGeo, this.basic('#5adfff', 0.12, true));
+    shell.name = 'surge-flight-shell';
+    shell.position.y = 0.72;
+    shell.scale.set(1.15, 0.42, 1.15);
+    shell.userData.sharedGeometry = true;
+    shell.userData.ownsGeometry = false;
+    for (let i = 0; i < 2; i += 1) {
+      const ring = new THREE.Mesh(
+        this.eliteRingGeo,
+        this.basic(i === 0 ? '#6df4ff' : '#ad72ff', i === 0 ? 0.72 : 0.52, true),
+      );
+      ring.name = `surge-flight-vane-${i}`;
+      ring.position.y = 0.72;
+      ring.rotation.set(Math.PI / 2, i * Math.PI / 2, i === 0 ? 0.52 : -0.52);
+      ring.scale.set(1.35, 0.72, 1);
+      ring.userData.sharedGeometry = true;
+      ring.userData.ownsGeometry = false;
+      fx.add(ring);
+    }
+    fx.add(shell);
+    vis.root.add(fx);
   }
 
   private addElitePresentation(vis: ActorVis): void {
@@ -1043,7 +1080,7 @@ export class SurvivorRenderer {
   /**
    * One burning trail segment.
    *
-   * Three stacked strips (ember shell → fire body → plasma core) plus round caps at both
+   * Three stacked strips (ember shell → fire body → diffuse plasma glow) plus round caps at both
    * ends. The caps are what make consecutive segments read as one continuous ribbon:
    * because each segment starts exactly where the previous ended, a disc of the same
    * half-width at the joint closes the corner on turns.
@@ -1051,31 +1088,21 @@ export class SurvivorRenderer {
   private createPlasmaSegment(): THREE.Object3D {
     const { quad, cap } = this.plasmaGeometry();
     const g = new THREE.Group();
-    // Magnetically contained aurora: the readable outside is an inky violet sheath,
-    // inside it sits a saturated field, and two opposite-polarity filaments braid down
-    // the capsule. This replaces the previous orange/magenta "paint stripe" language.
+    // Magnetically contained aurora: an inky violet sheath surrounding a broad,
+    // saturated glow. There are deliberately no bright longitudinal rails; those read
+    // as choppy white lines when adjacent capsules turned at ship speed.
     g.add(this.plasmaLayer(quad, '#130b38', 0.62, 'pw-ember', 0.05, { order: 7 }));
     g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap0', 0.05, { order: 7 }));
     g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap1', 0.05, { order: 7 }));
     g.add(this.plasmaLayer(quad, '#5c2bc7', 0.5, 'pw-fire', 0.055, { order: 8 }));
     g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap0', 0.055, { order: 8 }));
     g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap1', 0.055, { order: 8 }));
-    for (const side of [-1, 1]) {
-      const rail = this.plasmaLayer(
-        quad,
-        side < 0 ? '#57f3ff' : '#ff67de',
-        0.56,
-        'pw-core',
-        0.062,
-        { additive: true, order: 9 },
-      );
-      rail.userData.railSide = side;
-      rail.userData.railPhase = side < 0 ? 0 : Math.PI;
-      g.add(rail);
-    }
+    g.add(this.plasmaLayer(quad, '#36bddd', 0.34, 'pw-glow', 0.062, { order: 9 }));
+    g.add(this.plasmaLayer(cap, '#36bddd', 0.34, 'pw-glow-cap0', 0.062, { order: 9 }));
+    g.add(this.plasmaLayer(cap, '#36bddd', 0.34, 'pw-glow-cap1', 0.062, { order: 9 }));
     // Three travelling charge knots sell flow along even an old, stationary segment.
     for (let i = 0; i < 3; i += 1) {
-      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#adfbff' : '#ff9bea', 0.5, 'pw-tongue', 0.068, {
+      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#42cee5' : '#d85ac5', 0.42, 'pw-tongue', 0.068, {
         additive: true,
         order: 10,
       });
@@ -1094,7 +1121,7 @@ export class SurvivorRenderer {
    * longer, and the ember shell ends at a dull ash that still reads on a dark floor.
    */
   private static readonly PLASMA_HEAT: Record<string, readonly string[]> = {
-    'pw-core': ['#d8ffff', '#7fefff', '#c261ed', '#54206f', '#1c102a'],
+    'pw-glow': ['#55d5e7', '#40bbdb', '#a34fc1', '#54206f', '#1c102a'],
     'pw-fire': ['#8754ed', '#6231c3', '#45228d', '#28164d', '#100a22'],
     'pw-ember': ['#352069', '#25164e', '#1b1039', '#110a25', '#080714'],
   };
@@ -1114,14 +1141,14 @@ export class SurvivorRenderer {
       const mat = child.material;
       if (!(mat instanceof THREE.MeshBasicMaterial)) continue;
       const name = child.name;
-      const key = name.startsWith('pw-core')
-        ? 'pw-core'
+      const key = name.startsWith('pw-glow')
+        ? 'pw-glow'
         : name.startsWith('pw-fire')
           ? 'pw-fire'
           : name.startsWith('pw-ember')
             ? 'pw-ember'
             : name === 'pw-tongue'
-              ? 'pw-core'
+              ? 'pw-glow'
               : null;
       if (!key) continue;
       SurvivorRenderer.rampAt(SurvivorRenderer.PLASMA_HEAT[key]!, age, mat.color);
@@ -1185,9 +1212,9 @@ export class SurvivorRenderer {
       let widthMul = 1;
       if (n.startsWith('pw-ember')) widthMul = 1.0;
       else if (n.startsWith('pw-fire')) widthMul = 0.78;
-      else if (n === 'pw-core') widthMul = 0.12;
+      else if (n.startsWith('pw-glow')) widthMul = 0.48;
 
-      if (n === 'pw-ember' || n === 'pw-fire' || n === 'pw-core') {
+      if (n === 'pw-ember' || n === 'pw-fire' || n === 'pw-glow') {
         /*
          * Strip: X = cross-track width, Y (pre-rotation) = along-track length.
          *
@@ -1198,11 +1225,8 @@ export class SurvivorRenderer {
          */
         const narrow = n === 'pw-ember' ? 1 : cool;
         child.scale.set(w * 2 * widthMul * narrow, Math.max(0.001, len), 1);
-        const railSide = (child.userData.railSide as number | undefined) ?? 0;
-        const railPhase = (child.userData.railPhase as number | undefined) ?? 0;
-        const flow = performance.now() * 0.0045 + h.id * 0.31 + railPhase;
-        child.position.set(railSide * w * (0.24 + Math.sin(flow) * 0.09), child.position.y, 0);
-        const heat = n === 'pw-core' ? flicker * ignite : 1;
+        child.position.set(0, child.position.y, 0);
+        const heat = n === 'pw-glow' ? flicker * ignite : 1;
         mat.opacity = Math.max(0.03, base * t * cool * heat);
       } else if (n.endsWith('cap0') || n.endsWith('cap1')) {
         const end = n.endsWith('cap0') ? -len / 2 : len / 2;
@@ -2135,6 +2159,54 @@ export class SurvivorRenderer {
       } else if (e.kind === 'boomerang-rift') {
         const arc = obj.getObjectByName('boomerang-rift-arc');
         if (arc) arc.rotation.z = t * 9;
+      } else if (e.kind === 'mech-hive') {
+        const crown = obj.getObjectByName('mech-hive-crown');
+        const core = obj.getObjectByName('mech-hive-core');
+        if (crown) crown.rotation.z = t * Math.PI * 3;
+        if (core) {
+          core.rotation.x = t * 8;
+          core.rotation.y = t * 11;
+        }
+        for (let i = 0; i < 7; i += 1) {
+          const cell = obj.getObjectByName(`mech-hive-cell-${i}`);
+          if (!cell) continue;
+          const phase = (cell.userData.phase as number) + t * Math.PI * 1.8;
+          const radius = (e.radius ?? 4.8) * (0.42 + t * 0.26);
+          cell.position.x = Math.sin(phase) * radius;
+          cell.position.z = Math.cos(phase) * radius;
+          cell.rotation.z = phase;
+        }
+      } else if (e.kind === 'mech-prism') {
+        const core = obj.getObjectByName('mech-prism-core');
+        const aperture = obj.getObjectByName('mech-prism-aperture');
+        if (core) core.rotation.z = t * 9;
+        if (aperture) aperture.rotation.z = t * 6;
+      } else if (e.kind === 'mech-gravity') {
+        for (let i = 0; i < 3; i += 1) {
+          const ring = obj.getObjectByName(`mech-gravity-ring-${i}`);
+          if (ring) ring.rotation.z = t * (3.2 + i * 1.4) * ((ring.userData.spin as number) ?? 1);
+        }
+        const core = obj.getObjectByName('mech-gravity-core');
+        if (core) {
+          const pulse = 1 + Math.sin(t * 24) * 0.1;
+          core.scale.set(pulse, 0.42, pulse);
+        }
+      } else if (e.kind === 'mech-meteor') {
+        const ignition = obj.getObjectByName('mech-meteor-ignition');
+        const core = obj.getObjectByName('mech-meteor-core');
+        if (ignition) ignition.rotation.z = -t * 7;
+        if (core) {
+          core.rotation.x = t * 10;
+          core.rotation.y = t * 13;
+          core.position.y = 1.25 + Math.sin(t * Math.PI) * 2.1;
+        }
+        for (let i = 0; i < 6; i += 1) {
+          const flare = obj.getObjectByName(`mech-meteor-flare-${i}`);
+          if (flare) {
+            flare.position.y =
+              1.15 + Math.sin(Math.min(1, t * 1.3) * Math.PI) * (1.5 + i * 0.12);
+          }
+        }
       }
       obj.traverse((c) => {
         if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial) {
@@ -2184,6 +2256,159 @@ export class SurvivorRenderer {
   private createEffect(e: SurvivorState['effects'][0]): THREE.Object3D {
     const g = new THREE.Group();
     const color = e.color;
+    if (e.kind === 'mech-hive') {
+      const r = e.radius ?? e.scale ?? 4.8;
+      const field = this.ownMesh(new THREE.Mesh(
+        new THREE.CircleGeometry(r * 0.78, 48),
+        this.effectMat('#153b52', 0.2),
+      ));
+      field.rotation.x = -Math.PI / 2;
+      field.position.y = 0.08;
+      field.name = 'mech-hive-field';
+      const crown = this.ownMesh(new THREE.Mesh(
+        new THREE.TorusGeometry(r * 0.52, 0.055, 6, 48),
+        this.effectMat(color, 0.72, true),
+      ));
+      crown.rotation.x = Math.PI / 2;
+      crown.position.y = 0.48;
+      crown.name = 'mech-hive-crown';
+      g.add(field, crown);
+      for (let i = 0; i < 7; i += 1) {
+        const a = (i / 7) * Math.PI * 2;
+        const cell = this.ownMesh(new THREE.Mesh(
+          new THREE.RingGeometry(0.34, 0.5, 6),
+          this.effectMat(i % 2 ? '#76f4ff' : color, 0.76, true),
+        ));
+        cell.rotation.x = -Math.PI / 2;
+        cell.position.set(Math.sin(a) * r * 0.55, 0.12 + (i % 2) * 0.14, Math.cos(a) * r * 0.55);
+        cell.name = `mech-hive-cell-${i}`;
+        cell.userData.phase = a;
+        g.add(cell);
+      }
+      const core = this.ownMesh(new THREE.Mesh(
+        new THREE.IcosahedronGeometry(0.64, 1),
+        this.effectMat('#55dff0', 0.74, true),
+      ));
+      core.position.y = 1.05;
+      core.name = 'mech-hive-core';
+      g.add(core);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'mech-prism') {
+      const len = e.length ?? e.scale ?? 20;
+      const width = e.width ?? 2.2;
+      const fx = e.facingX ?? 0;
+      const fz = e.facingZ ?? 1;
+      const px = -fz;
+      const pz = fx;
+      for (let i = -1; i <= 1; i += 1) {
+        const lane = this.ownMesh(new THREE.Mesh(
+          new THREE.BoxGeometry(Math.max(0.12, width * 0.13), 0.11, len),
+          this.effectMat(i === 0 ? color : '#ff6fd5', i === 0 ? 0.72 : 0.48, true),
+        ));
+        lane.position.set(fx * len * 0.5 + px * i * width * 0.38, 0.85 + Math.abs(i) * 0.18, fz * len * 0.5 + pz * i * width * 0.38);
+        lane.rotation.y = Math.atan2(fx, fz);
+        lane.name = `mech-prism-lane-${i + 1}`;
+        lane.userData.phase = i;
+        g.add(lane);
+      }
+      const prism = this.ownMesh(new THREE.Mesh(
+        new THREE.OctahedronGeometry(1.15, 0),
+        this.effectMat(color, 0.76, true),
+      ));
+      prism.position.y = 1.45;
+      prism.rotation.y = Math.atan2(fx, fz);
+      prism.scale.set(0.72, 1.35, 0.72);
+      prism.name = 'mech-prism-core';
+      const aperture = this.ownMesh(new THREE.Mesh(
+        new THREE.TorusGeometry(1.45, 0.09, 6, 32),
+        this.effectMat('#ff89dc', 0.74, true),
+      ));
+      aperture.position.set(fx * 0.55, 1.45, fz * 0.55);
+      aperture.rotation.y = Math.atan2(fx, fz);
+      aperture.name = 'mech-prism-aperture';
+      g.add(prism, aperture);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'mech-gravity') {
+      const r = e.radius ?? e.scale ?? 6.6;
+      const well = this.ownMesh(new THREE.Mesh(
+        new THREE.CircleGeometry(r, 64),
+        this.effectMat('#071827', 0.48),
+      ));
+      well.rotation.x = -Math.PI / 2;
+      well.position.y = 0.07;
+      well.name = 'mech-gravity-well';
+      g.add(well);
+      for (let i = 0; i < 3; i += 1) {
+        const ring = this.ownMesh(new THREE.Mesh(
+          new THREE.RingGeometry(r * (0.26 + i * 0.22), r * (0.29 + i * 0.22), 64),
+          this.effectMat(i === 1 ? '#73f2ff' : color, 0.5 - i * 0.08, true),
+        ));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.1 + i * 0.035;
+        ring.name = `mech-gravity-ring-${i}`;
+        ring.userData.spin = i % 2 ? -1 : 1;
+        g.add(ring);
+      }
+      for (let i = 0; i < 12; i += 1) {
+        const a = (i / 12) * Math.PI * 2;
+        const tether = this.ownMesh(new THREE.Mesh(
+          new THREE.ConeGeometry(r * 0.025, r * 0.46, 3, 1, true),
+          this.effectMat(i % 3 === 0 ? '#94f7ff' : color, 0.36, true),
+        ));
+        tether.rotation.z = Math.PI / 2;
+        tether.rotation.y = -a;
+        tether.position.set(Math.sin(a) * r * 0.58, 0.16, Math.cos(a) * r * 0.58);
+        tether.name = 'mech-gravity-tether';
+        g.add(tether);
+      }
+      const core = this.ownMesh(new THREE.Mesh(
+        new THREE.SphereGeometry(Math.max(0.5, r * 0.11), 24, 14),
+        this.effectMat('#02070d', 0.94),
+      ));
+      core.scale.y = 0.42;
+      core.position.y = 0.38;
+      core.name = 'mech-gravity-core';
+      g.add(core);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
+    if (e.kind === 'mech-meteor') {
+      const r = e.radius ?? e.scale ?? 5.4;
+      const ignition = this.ownMesh(new THREE.Mesh(
+        new THREE.RingGeometry(r * 0.28, r * 0.72, 48),
+        this.effectMat('#ff5b30', 0.34, true),
+      ));
+      ignition.rotation.x = -Math.PI / 2;
+      ignition.position.y = 0.1;
+      ignition.name = 'mech-meteor-ignition';
+      g.add(ignition);
+      for (let i = 0; i < 6; i += 1) {
+        const a = (i / 6) * Math.PI * 2;
+        const flare = this.ownMesh(new THREE.Mesh(
+          new THREE.ConeGeometry(0.18, 2.5, 6, 1, true),
+          this.effectMat(i % 2 ? '#ff9b3e' : color, 0.7, true),
+        ));
+        flare.position.set(Math.sin(a) * r * 0.4, 1.15, Math.cos(a) * r * 0.4);
+        flare.rotation.z = Math.sin(a) * 0.62;
+        flare.rotation.x = Math.cos(a) * 0.62;
+        flare.name = `mech-meteor-flare-${i}`;
+        flare.userData.phase = a;
+        g.add(flare);
+      }
+      const core = this.ownMesh(new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.78, 0),
+        this.effectMat('#ffb047', 0.78, true),
+      ));
+      core.position.y = 1.25;
+      core.name = 'mech-meteor-core';
+      g.add(core);
+      g.position.set(e.x, 0, e.z);
+      return g;
+    }
     if (e.kind === 'gravity-collapse') {
       const r = e.radius ?? e.scale ?? 3;
       const well = this.ownMesh(new THREE.Mesh(new THREE.CircleGeometry(r, 56), this.effectMat('#5f2bb8', 0.24)));

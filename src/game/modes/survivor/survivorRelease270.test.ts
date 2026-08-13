@@ -1027,11 +1027,12 @@ describe('§5 Cleanup Crew replaces Starbreaker Array', () => {
     expect(new Set(state.allies.map((a) => a.slot.weaponId)).size).toBe(3);
   });
 
-  it('lasts five active simulation minutes', () => {
+  it('persists for the rest of the run', () => {
     const state = crewState('bee');
     forceStartProtocol(state, 'cleanup-crew', 1);
-    expect(state.megaProtocol.remaining).toBeCloseTo(SURVIVOR.megaProtocol.titanDuration, 3);
-    expect(SURVIVOR.megaProtocol.titanDuration).toBe(300);
+    expect(state.megaProtocol.remaining).toBe(Infinity);
+    expect(SURVIVOR.megaProtocol.titanDuration).toBe(Infinity);
+    expect(state.megaProtocol.owned).toEqual(['cleanup-crew']);
   });
 
   it('arrives in ships, then deploys as Mechs', () => {
@@ -1070,18 +1071,17 @@ describe('§5 Cleanup Crew replaces Starbreaker Array', () => {
     }
   });
 
-  it('departs visibly instead of vanishing at expiry', () => {
+  it('does not expire at the former five-minute boundary', () => {
     const state = crewState('bee');
     forceStartProtocol(state, 'cleanup-crew', 1);
     for (let i = 0; i < 60 * 6; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 1 / 60);
+    // A stale or restored finite timer cannot tear down a permanent reward.
     state.megaProtocol.remaining = 0;
     stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 1 / 60);
-    expect(state.allies.every((a) => a.phase === 'departing')).toBe(true);
-    // Still present while the departure plays.
-    expect(state.allies.length).toBe(3);
-    for (let i = 0; i < 60 * 4; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 1 / 60);
-    expect(state.allies).toHaveLength(0);
-    expect(state.megaProtocol.id).toBeNull();
+    expect(state.megaProtocol.remaining).toBe(Infinity);
+    expect(state.allies.every((a) => a.phase !== 'departing')).toBe(true);
+    expect(state.allies).toHaveLength(3);
+    expect(state.megaProtocol.owned).toContain('cleanup-crew');
   });
 
   it('deals damage under per-ally telemetry that rolls up to one Cleanup Crew total', () => {
@@ -1173,24 +1173,23 @@ describe('§5 Cleanup Crew replaces Starbreaker Array', () => {
     expect(state.player.mechCd).toBeCloseTo(21 - 5, 1);
   });
 
-  it('is torn down completely when another Titan replaces it', () => {
+  it('stacks with another Mega armament without tearing either one down', () => {
     const state = crewState('bee', 2754);
     forceStartProtocol(state, 'cleanup-crew', 1);
     expect(state.allies).toHaveLength(3);
     forceStartProtocol(state, 'carrier-wing', 1);
-    expect(state.allies).toHaveLength(0);
+    expect(state.allies).toHaveLength(3);
     expect(state.megaProtocol.id).toBe('carrier-wing');
+    expect(state.megaProtocol.owned).toEqual(['cleanup-crew', 'carrier-wing']);
   });
 
-  it('survives repeated activation and teardown without accumulating actors', () => {
+  it('makes duplicate activation idempotent without accumulating actors', () => {
     const state = crewState('bee', 2755);
     for (let cycle = 0; cycle < 6; cycle += 1) {
       forceStartProtocol(state, 'cleanup-crew', 1);
       expect(state.allies.length).toBe(3);
       for (let i = 0; i < 60 * 3; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 1 / 60);
-      state.megaProtocol.remaining = 0;
-      for (let i = 0; i < 60 * 4; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, 1 / 60);
-      expect(state.allies.length).toBe(0);
+      expect(state.megaProtocol.owned.filter((id) => id === 'cleanup-crew')).toHaveLength(1);
     }
   });
 });

@@ -49,8 +49,8 @@ absolute prediction of human survival.
 
 ## Comparative Titan Protocol benchmark
 
-The three Mega Protocols are mutually exclusive five-minute rewards, so the meaningful question is
-relative player value, not identical damage. `survivorTitanBenchmark.ts` runs each protocol through
+The three Mega Protocols are permanent and stackable in production. To isolate their individual
+value, `survivorTitanBenchmark.ts` runs each protocol alone through
 an identical scenario — same hero, authored build, elapsed time, seeded horde, movement path and
 window — with the granted protocol as the only difference. It reports direct damage, boss damage,
 protocol kills, total kills, elite/miniboss pressure, mean and peak living enemies, integrity lost
@@ -58,8 +58,8 @@ and survival time.
 
 Two modes, because neither answers the whole question:
 
-- `sustained` holds the player alive for the full five minutes, so throughput, clearing and control
-  are measured over a complete window.
+- `sustained` holds the player alive for a finite five-minute observation window, so throughput,
+  clearing and control are measured over the same sample despite permanent production duration.
 - `mortal` leaves the player fully damageable, so the signal is how long each protocol keeps them
   alive.
 

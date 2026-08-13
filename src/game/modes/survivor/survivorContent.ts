@@ -28,7 +28,7 @@ import {
  * policy are unchanged — but their stamp records the partition that was live when they
  * were taken rather than the release they belong to.
  */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.9.0-test-center';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.10.0-test-center';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
@@ -89,7 +89,8 @@ export const SURVIVOR = {
   combatSpawnHalf: 32,
   /** Stable boss entry distance, independent of the expanded global platform. */
   bossSpawnRadius: 14,
-  cameraHalf: 12,
+  /** Balanced overview for the doubled station without reducing the hero to a speck. */
+  cameraHalf: 14.5,
   actorScale: {
     player: 1.5,
     enemy: 1.5,
@@ -100,7 +101,8 @@ export const SURVIVOR = {
     ship: 1.35,
   },
   playerMaxHealth: 100,
-  playerSpeed: 6.4,
+  /** Slightly quicker baseline traversal for the doubled station. */
+  playerSpeed: 6.75,
   playerRadius: 0.55,
   playerInvuln: 0.38,
   xpMagnetBase: 3.2,
@@ -138,7 +140,10 @@ export const SURVIVOR = {
   surgeDuration: 10,
   surgeRecovery: 13.5,
   /** Surge-spawned enemies only — never the standing horde. */
-  surgeWaveSpeedBonus: 0.22,
+  /** The surge-only flier arrives at exactly twice its authored movement speed. */
+  surgeWaveSpeedBonus: 1,
+  /** One bounded flock, released together as the telegraph resolves. */
+  surgePackSize: 26,
   /** Recovery holds replacements until population falls to this fraction of target. */
   surgeRecoveryPopulationFactor: 0.55,
   /** Elite specialist earliest appearance (seconds). */
@@ -183,7 +188,7 @@ export const SURVIVOR = {
    */
   megaVisualMul: 1.5,
   megaColliderMul: 1.32,
-  megaMoveMul: 0.85,
+  megaMoveMul: 0.96,
   fixedDt: 1 / 60,
   /**
    * Bounded repair economy.
@@ -254,12 +259,22 @@ export const SURVIVOR = {
      * one smaller preserves the route-planning choices the redesign exists to
      * create, where thinning supply would remove them again.
      */
-    value: 16,
+    /** Ordinary healing is resolved against current max integrity at collection time. */
+    fraction: 0.18,
+    /** @deprecated Flat 100-integrity fixture equivalent; production uses `fraction`. */
+    value: 18,
     /** Miniboss guaranteed reward. */
-    minibossValue: 45,
+    minibossFraction: 0.36,
+    /** @deprecated Flat 100-integrity fixture equivalent. */
+    minibossValue: 36,
     /** Boss guaranteed reward. */
-    bossValue: 55,
-    megaBonus: 30,
+    bossFraction: 0.45,
+    /** @deprecated Flat 100-integrity fixture equivalent. */
+    bossValue: 45,
+    /** Added to the boss fraction for a Mega-Boss reward. */
+    megaBonusFraction: 0.15,
+    /** @deprecated Flat 100-integrity fixture equivalent. */
+    megaBonus: 15,
   },
   gunship: {
     /** Warning lane duration before damage begins. */
@@ -301,10 +316,18 @@ export const SURVIVOR = {
     cooldown: 30,
     /** The run opens with Mech unavailable; first readiness is one full cooldown in. */
     initialCooldown: 30,
-    damageTakenMul: 0.65,
+    /** Baseline 25% damage reduction in Mech form. */
+    damageTakenMul: 0.75,
     weaponDamageMul: 1.35,
     weaponCadenceMul: 1.15,
     weaponAreaMul: 1.15,
+    /** Hero-specific automatic armaments, active only while transformed. */
+    specials: {
+      bee: { cadence: 1.55, damage: 24, count: 7, range: 18, radius: 0.8 },
+      flamingo: { cadence: 2.15, damage: 62, count: 3, range: 21, radius: 1.15 },
+      frog: { cadence: 2.45, damage: 42, count: 1, range: 8.5, radius: 6.6 },
+      'red-panda': { cadence: 2.1, damage: 48, count: 6, range: 19, radius: 2.15 },
+    } as Record<HeroId, { cadence: number; damage: number; count: number; range: number; radius: number }>,
   },
   /**
    * Elites are rare, unmistakable and durable.
@@ -349,8 +372,12 @@ export const SURVIVOR = {
     pulseMinibossPushMul: 0.2,
   },
   megaProtocol: {
-    /** Mega-Cache armaments persist for five minutes of active simulation time. */
-    titanDuration: 5 * 60,
+    /** Mega-Cache armaments are permanent and can coexist. */
+    titanDuration: Number.POSITIVE_INFINITY,
+    /** Permanent armaments are intentionally 40% weaker than their timed versions. */
+    permanentPowerMul: 0.6,
+    /** Repeated post-collection refits cannot reduce active cooldowns below half. */
+    abilityCooldownFloor: 0.5,
     titanDamageMul: 1.35,
     titanAreaMul: 1.35,
     titanDamageTakenMul: 0.72,
@@ -377,8 +404,7 @@ export const SURVIVOR = {
      * armament.
      *
      * The three heroes the player is *not* using arrive in their own ships, deploy as
-     * allied Mechs, fight with only their exclusive signature weapon for five minutes,
-     * and then leave the way they came.
+     * allied Mechs, and fight permanently with only their exclusive signature weapon.
      *
      * Allies are bounded actors, not duplicate players: they are invulnerable,
      * non-colliding, never displace anything, and hold no passives, forms or Build.
@@ -388,12 +414,12 @@ export const SURVIVOR = {
       arriveDuration: 1.9,
       /** Stagger between the three arrivals, for a readable sequence. */
       arriveStagger: 0.42,
-      /** Seconds of departure choreography at expiry. */
+      /** Legacy fixture choreography; permanent rewards never depart in production. */
       departDuration: 1.7,
       /**
        * Distance the transport ships fly in from.
        *
-       * Kept just inside the isometric camera's reach (`cameraHalf` 12) so the arrival
+       * Kept just inside the isometric camera's reach so the arrival
        * is actually *watched* rather than happening off-screen: at 26 the ships spent
        * almost the whole sequence outside the view and the player only ever saw the
        * landing flash.
@@ -473,11 +499,11 @@ export const SURVIVOR = {
     /** Seconds the burning trail lags behind the hero. */
     delay: 0.5,
     /** Emission spacing along the travelled path (world units), by form. */
-    segmentLength: 3.2,
-    shipSegmentLength: 5.5,
+    segmentLength: 1.65,
+    shipSegmentLength: 2.6,
     /** Never emit slivers, and never emit more often than this. */
     minSegmentLength: 0.9,
-    minInterval: 0.1,
+    minInterval: 0.055,
     /** Cross-track half-width = weapon radius x this (preserves the wide/thin identity). */
     widthMul: 1.72,
     /** Ship trails are wider and brighter. */
@@ -521,6 +547,8 @@ export const SURVIVOR = {
      * 3.0-4.2 bounds how far L1 can rise while L5 stays at baseline.
      */
     damageNorm: [0.88, 0.92, 0.96, 1.02, 1.194] as readonly number[],
+    /** The playtest's boss-only reduction now applies to every monster. */
+    enemyDamageMul: 0.5,
     /** Bosses do not take full horde-clearing trail damage from every swept segment. */
     bossDamageMul: 0.5,
     /** Ship's long, wide wake gets an additional boss-only reduction. */
@@ -672,7 +700,7 @@ export const SURVIVOR = {
      * absorb, so the two do not confound each other in the A/B.
      */
     duration: 3.25,
-    cooldown: 16,
+    cooldown: 30,
     speedMul: 2.6,
     /**
      * Baseline: ship takes 50% of incoming damage (endless-2.8.0, was 0.20).
@@ -1216,7 +1244,7 @@ export const PASSIVES: PassiveDef[] = [
     id: 'reinforced-airframe',
     name: 'Reinforced Airframe',
     description:
-      'Afterburner takes 5% less damage per level, rising from 50% baseline mitigation to 75% at L5.',
+      'Afterburner takes 5% less damage and recharges 1s faster per level (30s → 25s).',
     maxLevel: 5,
     perLevel: 0.05,
   },
@@ -1238,6 +1266,12 @@ export const PASSIVES: PassiveDef[] = [
 export function shipDamageTakenMul(reinforcedAirframeLevel: number): number {
   const lv = Math.max(0, Math.min(5, Math.floor(reinforcedAirframeLevel)));
   return Math.max(SHIP_MITIGATION_FLOOR, SURVIVOR.ship.damageTakenMul - lv * 0.05);
+}
+
+/** Reinforced Airframe trims Afterburner's recharge by one second per level. */
+export function shipCooldownAtLevel(reinforcedAirframeLevel: number): number {
+  const lv = Math.max(0, Math.min(5, Math.floor(reinforcedAirframeLevel)));
+  return Math.max(25, SURVIVOR.ship.cooldown - lv);
 }
 
 /** Hard floor on ship damage taken: 75% mitigation, never invulnerability. */
@@ -1690,7 +1724,7 @@ export interface HordeEnemyDef {
  * only thing that scales it over a run, and that curve is now deliberately shallow.
  * `contactDamage` is likewise the 0:00 value, scaled by `contactDamageMulAt`.
  *
- * Player speed is 6.4, so every opening speed leaves real kiting headroom — the
+ * Player speed is 6.75, so every opening speed leaves real kiting headroom — the
  * endless-2.2.1 opening (3.3–4.35) closed that gap far too early.
  */
 export const HORDE: Record<string, HordeEnemyDef> = {
@@ -1731,8 +1765,9 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     healthScale: 0.8,
   },
   // Former ranged models → melee pressure archetypes
-  flyer: {
-    id: 'flyer',
+  /** Exclusive Surge silhouette. Generic composition never references this definition. */
+  'surge-flier': {
+    id: 'surge-flier',
     role: 'flanker',
     visual: RANGED_GOLELING,
     xp: 6,
@@ -1816,18 +1851,16 @@ export function eliteHealthRatio(): number {
  */
 export const ENEMY_GATE_TIME: Readonly<Record<string, number>> = {
   basic: 0,
-  mush: 0,
-  // Sprinters
-  fast: 30,
-  spiky: 60,
-  // Flankers
-  flyer: 60,
-  bee: 60,
-  // Heavies
-  bruiser: 90,
-  elite: 90,
-  // Hunters
-  ghost: 120,
+  /** A single readable new silhouette enters roughly every 45–60 seconds. */
+  mush: 45,
+  fast: 90,
+  spiky: 150,
+  bee: 210,
+  bruiser: 270,
+  ghost: 330,
+  /** Event-only definitions have their own spawn chokepoints. */
+  'surge-flier': 0,
+  elite: 120,
   miniboss: 120,
 };
 
@@ -2174,7 +2207,7 @@ export function bossDifficultyFor(index: number): BossDifficulty {
     healthMul,
     damageMul: Math.min(mega ? 4.5 : 3.2, damageMul),
     recoveryMul: Math.max(0.5, Math.pow(0.95, n - 1)),
-    moveMul: Math.min(1.25, 1 + 0.03 * (n - 1)) * (mega ? SURVIVOR.megaMoveMul : 1),
+    moveMul: Math.min(1.65, 1.32 + 0.035 * (n - 1)) * (mega ? SURVIVOR.megaMoveMul : 1),
     fanAdd: Math.min(6, Math.floor((n - 1) * 0.55)),
     summonAdd: Math.min(6, Math.floor((n - 1) * 0.4)),
   };
@@ -2187,62 +2220,54 @@ export function bossTimeForIndex(index: number): number {
 
 /**
  * Gradual opening composition (melee only).
- * 0–30s fodder only; sprinters ~8–10% after 30s; hunters after 2m; elites after eliteGateTime.
+ * One silhouette at run start, then a deliberate reveal cadence. Surge Fliers are
+ * absent by construction; only the pressure director may spawn them.
  */
 export function compositionAt(t: number): Array<{ id: string; weight: number }> {
-  if (t < 30) return [{ id: 'basic', weight: 8 }, { id: 'mush', weight: 3 }];
-  if (t < 60)
+  if (t < 45) return [{ id: 'basic', weight: 1 }];
+  if (t < 90)
     return [
       { id: 'basic', weight: 8 },
       { id: 'mush', weight: 3 },
+    ];
+  if (t < 150)
+    return [
+      { id: 'basic', weight: 7 },
+      { id: 'mush', weight: 3 },
       { id: 'fast', weight: 1 },
     ];
-  if (t < 90)
+  if (t < 210)
     return [
       { id: 'basic', weight: 6 },
-      { id: 'mush', weight: 2 },
+      { id: 'mush', weight: 3 },
       { id: 'fast', weight: 2 },
       { id: 'spiky', weight: 1 },
-      { id: 'flyer', weight: 1 },
     ];
-  if (t < 120)
+  if (t < 270)
     return [
       { id: 'basic', weight: 5 },
-      { id: 'mush', weight: 2 },
+      { id: 'mush', weight: 3 },
       { id: 'fast', weight: 2 },
-      { id: 'spiky', weight: 1 },
-      { id: 'flyer', weight: 1 },
+      { id: 'spiky', weight: 2 },
       { id: 'bee', weight: 1 },
-      { id: 'bruiser', weight: 1 },
     ];
-  if (t < 180)
+  if (t < 330)
     return [
       { id: 'basic', weight: 4 },
       { id: 'mush', weight: 2 },
-      { id: 'fast', weight: 2 },
-      { id: 'spiky', weight: 2 },
-      { id: 'flyer', weight: 2 },
-      { id: 'ghost', weight: 1 },
-      { id: 'bruiser', weight: 2 },
-    ];
-  if (t < 480)
-    return [
-      { id: 'basic', weight: 2 },
       { id: 'fast', weight: 3 },
       { id: 'spiky', weight: 2 },
-      { id: 'flyer', weight: 2 },
-      { id: 'ghost', weight: 2 },
       { id: 'bee', weight: 2 },
-      { id: 'bruiser', weight: 3 },
+      { id: 'bruiser', weight: 1 },
     ];
   return [
-    { id: 'basic', weight: 1 },
+    { id: 'basic', weight: 2 },
+    { id: 'mush', weight: 1 },
     { id: 'fast', weight: 3 },
     { id: 'spiky', weight: 3 },
-    { id: 'flyer', weight: 3 },
-    { id: 'ghost', weight: 3 },
     { id: 'bee', weight: 2 },
     { id: 'bruiser', weight: 3 },
+    { id: 'ghost', weight: 2 },
   ];
 }
 
@@ -2311,7 +2336,8 @@ export type ProtocolId =
   | 'gravitic-recall'
   | 'carrier-wing'
   | 'cleanup-crew'
-  | 'singularity-engine';
+  | 'singularity-engine'
+  | 'mega-cooldown-refit';
 
 export interface ProtocolDef {
   id: ProtocolId;
@@ -2346,20 +2372,20 @@ export const MEGA_PROTOCOLS: ProtocolDef[] = [
   {
     id: 'carrier-wing',
     title: 'Carrier Wing',
-    body: 'A fighter squadron strafes distributed threats for five minutes.',
-    duration: 5 * 60,
+    body: 'A permanent fighter squadron strafes distributed threats.',
+    duration: Number.POSITIVE_INFINITY,
   },
   {
     id: 'cleanup-crew',
     title: 'Cleanup Crew',
-    body: 'The rest of the crew arrive in their ships and deploy as allied Mechs for five minutes.',
-    duration: 5 * 60,
+    body: 'The rest of the crew permanently deploy as allied Mechs.',
+    duration: Number.POSITIVE_INFINITY,
   },
   {
     id: 'singularity-engine',
     title: 'Singularity Engine',
-    body: 'Repeated anomalies pull and detonate the horde for five minutes.',
-    duration: 5 * 60,
+    body: 'Permanent anomalies repeatedly pull and detonate the horde.',
+    duration: Number.POSITIVE_INFINITY,
   },
 ];
 
@@ -2438,7 +2464,6 @@ export type SurvivorFixture =
   | 'survivor-overdrive'
   | 'survivor-cleanup-arrival'
   | 'survivor-cleanup-combat'
-  | 'survivor-cleanup-departure'
   | 'survivor-telemetry'
   | 'survivor-stress'
   | null;
@@ -2475,7 +2500,6 @@ export const ALL_SURVIVOR_FIXTURES: Exclude<SurvivorFixture, null>[] = [
   'survivor-overdrive',
   'survivor-cleanup-arrival',
   'survivor-cleanup-combat',
-  'survivor-cleanup-departure',
   'survivor-telemetry',
   'survivor-stress',
 ];

@@ -396,14 +396,12 @@ export class SurvivorMode {
       state.player.mechCd = 0;
     } else if (
       this.fixture === 'survivor-cleanup-arrival' ||
-      this.fixture === 'survivor-cleanup-combat' ||
-      this.fixture === 'survivor-cleanup-departure'
+      this.fixture === 'survivor-cleanup-combat'
     ) {
       /*
        * Activate through the real protocol path so the fixture shows the production
-       * lifecycle, not a hand-assembled squad. Combat and departure fast-forward past
-       * the arrival choreography; departure additionally drives the timer to zero so
-       * the fly-out plays immediately.
+       * lifecycle, not a hand-assembled squad. Combat fast-forwards past the arrival
+       * choreography; the permanent squad then remains active for the rest of the run.
        */
       forceStartProtocol(state, 'cleanup-crew', 1);
       if (this.fixture !== 'survivor-cleanup-arrival') {
@@ -412,7 +410,6 @@ export class SurvivorMode {
         const steps = Math.round(settle / SURVIVOR.fixedDt);
         for (let i = 0; i < steps; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
       }
-      if (this.fixture === 'survivor-cleanup-departure') state.megaProtocol.remaining = 0;
     } else if (this.fixture === 'survivor-orbital') {
       /*
        * Advance to just past a detonation so the two-zone strike — core impact,

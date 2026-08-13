@@ -1,162 +1,225 @@
 /**
- * Deterministic, project-owned audio render.
+ * Deterministic, project-owned ambient score render.
  *
- * These are pre-rendered PCM assets, not a live browser synth. Running this script with
- * Node reproduces every file in public/audio byte-for-byte. No third-party samples or
- * imported asset-pack files are used.
+ * The game deliberately ships no UI, weapon, spell, hit, pickup, or boss sounds. This
+ * script renders one long-form stereo master: a restrained sci-fi lofi bed designed to
+ * sit behind a dense survival run without adding fatigue. No samples, asset-pack files,
+ * or third-party recordings are used.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OUT = fileURLToPath(new URL('../public/audio/', import.meta.url));
-const SR = 32_000;
+const SR = 44_100;
+const DURATION = 128;
+const FRAMES = SR * DURATION;
 const TAU = Math.PI * 2;
+const CHORD_SECONDS = 8;
 mkdirSync(OUT, { recursive: true });
 
+const clamp = (value, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, value));
+const smooth = (value) => {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+const midiHz = (midi) => 440 * 2 ** ((midi - 69) / 12);
+
 function rng(seed) {
-  let s = seed >>> 0;
+  let state = seed >>> 0;
   return () => {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    return (s >>> 0) / 0x1_0000_0000;
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
   };
 }
 
-const clamp = (x, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, x));
-const smooth = (x) => {
-  const k = clamp(x, 0, 1);
-  return k * k * (3 - 2 * k);
-};
-const attackRelease = (t, d, a = 0.02, r = 0.2) => smooth(t / a) * smooth((d - t) / r);
-const chirp = (t, f0, f1, d, phase = 0) => Math.sin(TAU * (f0 * t + ((f1 - f0) * t * t) / (2 * d)) + phase);
-const osc = (t, f, phase = 0) => Math.sin(TAU * f * t + phase);
+// Sixteen harmonically related eight-second scenes. The second half reharmonises the
+// first instead of repeating it verbatim, then resolves to Cm9 for a seamless return.
+const CHORDS = [
+  [48, 51, 55, 58, 62], // Cm9
+  [44, 48, 51, 55, 58], // Abmaj9
+  [51, 55, 58, 62, 65], // Ebmaj9
+  [46, 50, 53, 55, 60], // Bb6/9
+  [53, 56, 60, 63, 67], // Fm9
+  [43, 48, 51, 58, 62], // Cm9/G
+  [44, 48, 51, 55, 60], // Abmaj7/9
+  [43, 50, 53, 56, 60], // G7sus(b9)
+  [48, 55, 58, 62, 63], // Cm11
+  [41, 48, 53, 55, 60], // Fm9/C
+  [44, 51, 55, 58, 60], // Abmaj13
+  [46, 53, 55, 60, 62], // Bb13sus
+  [39, 46, 51, 53, 58], // Ebmaj9/Bb
+  [41, 48, 53, 56, 60], // Fm11
+  [43, 50, 53, 56, 62], // G7sus(b9/13)
+  [48, 51, 55, 58, 62], // Cm9 resolution
+];
 
-function reverberate(samples, amount = 0.18) {
-  const delays = [0.047, 0.083, 0.137, 0.211].map((s) => Math.round(s * SR));
-  const gains = [0.42, 0.31, 0.22, 0.15];
-  const out = Float64Array.from(samples);
-  for (let n = 0; n < samples.length; n += 1) {
-    for (let i = 0; i < delays.length; i += 1) {
-      const from = n - delays[i];
-      if (from >= 0) out[n] += samples[from] * gains[i] * amount;
+// A sparse, non-loop-obvious electric-piano line. It moves every four seconds and is
+// derived from the current harmony, so there is no short repeating arpeggiator motif.
+const MELODY_VOICE = [
+  4, 2, 3, 1, 4, 0, 2, 3, 1, 4, 2, 0, 3, 1, 4, 2,
+  2, 4, 1, 3, 0, 4, 2, 1, 3, 2, 4, 0, 2, 3, 1, 4,
+];
+const MELODY_OCTAVE = [
+  12, 12, 24, 12, 12, 24, 12, 12, 24, 12, 12, 24, 12, 12, 24, 12,
+  24, 12, 12, 24, 12, 12, 24, 12, 12, 24, 12, 12, 24, 12, 12, 24,
+];
+
+function eventEnvelope(relative, duration, attack, release) {
+  if (relative < 0 || relative >= duration) return 0;
+  return smooth(relative / attack) * smooth((duration - relative) / release);
+}
+
+function wrappedEvent(index, count) {
+  return ((index % count) + count) % count;
+}
+
+function padVoice(relative, midi, phase, detuneCents, driftPhase) {
+  const hz = midiHz(midi) * 2 ** (detuneCents / 1200);
+  const drift = Math.sin(TAU * relative * 0.071 + driftPhase) * 0.025;
+  const angle = TAU * hz * relative + phase + drift;
+  return Math.sin(angle) + Math.sin(angle * 2 + 0.37) * 0.18 + Math.sin(angle * 0.5 + 1.1) * 0.1;
+}
+
+function addPadScene(left, right, sceneIndex, relative) {
+  const scene = wrappedEvent(sceneIndex, CHORDS.length);
+  const chord = CHORDS[scene];
+  const env = eventEnvelope(relative, CHORD_SECONDS + 3.2, 2.8, 3.2);
+  if (env <= 0) return;
+  const breath = 0.86 + Math.sin(TAU * relative / 9.6 + scene * 0.91) * 0.14;
+  for (let note = 0; note < chord.length; note += 1) {
+    const phase = scene * 1.731 + note * 0.937;
+    const pan = (note / (chord.length - 1) - 0.5) * 0.54;
+    const level = (note === 0 ? 0.034 : 0.026) * env * breath;
+    left.value += padVoice(relative, chord[note], phase, -3.5 - note * 0.2, phase) * level * (1 - pan);
+    right.value += padVoice(relative, chord[note], phase + 0.23, 3.2 + note * 0.25, phase + 1.2) * level * (1 + pan);
+  }
+  // A soft sub fundamental anchors the harmony without behaving like a kick drum.
+  const sub = Math.sin(TAU * midiHz(chord[0] - 12) * relative + scene * 0.41);
+  left.value += sub * 0.038 * env;
+  right.value += sub * 0.037 * env;
+}
+
+function addRhodesEvent(left, right, eventIndex, relative) {
+  const event = wrappedEvent(eventIndex, MELODY_VOICE.length);
+  if (relative < 0 || relative >= 7.2) return;
+  const scene = Math.floor(event / 2);
+  const midi = CHORDS[scene][MELODY_VOICE[event]] + MELODY_OCTAVE[event];
+  const hz = midiHz(midi);
+  const attack = smooth(relative / 0.045);
+  const body = Math.exp(-relative * 0.58) * attack;
+  const phase = event * 1.177;
+  const fundamental = Math.sin(TAU * hz * relative + phase);
+  const tine = Math.sin(TAU * hz * 2.002 * relative + phase * 0.7) * Math.exp(-relative * 1.65);
+  const glass = Math.sin(TAU * hz * 3.995 * relative + 0.8) * Math.exp(-relative * 2.9);
+  const tremoloL = 0.82 + Math.sin(TAU * 0.31 * relative + phase) * 0.18;
+  const tremoloR = 0.82 + Math.sin(TAU * 0.31 * relative + phase + Math.PI * 0.72) * 0.18;
+  const note = fundamental * 0.055 + tine * 0.028 + glass * 0.012;
+  left.value += note * body * tremoloL;
+  right.value += note * body * tremoloR;
+}
+
+function periodicAir(seed) {
+  const random = rng(seed);
+  const white = new Float64Array(FRAMES);
+  for (let i = 0; i < FRAMES; i += 1) white[i] = random() * 2 - 1;
+  let state = 0;
+  // Repeated circular passes converge the filter state at the loop boundary.
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (let i = 0; i < FRAMES; i += 1) state += (white[i] - state) * 0.012;
+  }
+  const air = new Float64Array(FRAMES);
+  for (let i = 0; i < FRAMES; i += 1) {
+    state += (white[i] - state) * 0.012;
+    air[i] = state;
+  }
+  return air;
+}
+
+function circularReverb(dry, side) {
+  const out = Float64Array.from(dry);
+  const delays = [0.173, 0.317, 0.521, 0.887, 1.313, 2.071];
+  const gains = [0.2, 0.15, 0.12, 0.095, 0.07, 0.05];
+  for (let tap = 0; tap < delays.length; tap += 1) {
+    const delay = Math.round((delays[tap] + side * (tap % 2 ? 0.011 : -0.007)) * SR);
+    for (let i = 0; i < FRAMES; i += 1) {
+      out[i] += dry[(i - delay + FRAMES) % FRAMES] * gains[tap];
     }
   }
   return out;
 }
 
-function polish(samples, peak = 0.88) {
-  let max = 1e-9;
-  for (let i = 0; i < samples.length; i += 1) {
-    samples[i] = Math.tanh(samples[i] * 1.24);
-    max = Math.max(max, Math.abs(samples[i]));
+function master(left, right) {
+  let peak = 1e-9;
+  for (let i = 0; i < FRAMES; i += 1) {
+    // Gentle tape saturation rounds Rhodes transients without pumping the pad.
+    left[i] = Math.tanh(left[i] * 1.16);
+    right[i] = Math.tanh(right[i] * 1.16);
+    peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]));
   }
-  const gain = peak / max;
-  for (let i = 0; i < samples.length; i += 1) samples[i] *= gain;
-  return samples;
+  const gain = 0.56 / peak;
+  for (let i = 0; i < FRAMES; i += 1) {
+    left[i] *= gain;
+    right[i] *= gain;
+  }
 }
 
-function renderMono(duration, seed, voice, reverb = 0.16) {
-  const count = Math.round(duration * SR);
-  const out = new Float64Array(count);
-  const random = rng(seed);
-  let low = 0;
-  let band = 0;
-  for (let n = 0; n < count; n += 1) {
-    const t = n / SR;
-    const white = random() * 2 - 1;
-    low += (white - low) * 0.035;
-    band += (white - band) * 0.18;
-    out[n] = voice(t, duration, white, low, band);
-  }
-  return polish(reverberate(out, reverb));
-}
-
-function wavBuffer(channels, sampleRate = SR) {
-  const frames = channels[0].length;
-  const channelCount = channels.length;
-  const bytes = frames * channelCount * 2;
-  const b = Buffer.alloc(44 + bytes);
-  b.write('RIFF', 0);
-  b.writeUInt32LE(36 + bytes, 4);
-  b.write('WAVEfmt ', 8);
-  b.writeUInt32LE(16, 16);
-  b.writeUInt16LE(1, 20);
-  b.writeUInt16LE(channelCount, 22);
-  b.writeUInt32LE(sampleRate, 24);
-  b.writeUInt32LE(sampleRate * channelCount * 2, 28);
-  b.writeUInt16LE(channelCount * 2, 32);
-  b.writeUInt16LE(16, 34);
-  b.write('data', 36);
-  b.writeUInt32LE(bytes, 40);
+function wavBuffer(channels) {
+  const bytes = FRAMES * channels.length * 2;
+  const buffer = Buffer.alloc(44 + bytes);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + bytes, 4);
+  buffer.write('WAVEfmt ', 8);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(channels.length, 22);
+  buffer.writeUInt32LE(SR, 24);
+  buffer.writeUInt32LE(SR * channels.length * 2, 28);
+  buffer.writeUInt16LE(channels.length * 2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(bytes, 40);
   let at = 44;
-  for (let i = 0; i < frames; i += 1) {
+  for (let i = 0; i < FRAMES; i += 1) {
     for (const channel of channels) {
-      b.writeInt16LE(Math.round(clamp(channel[i]) * 32767), at);
+      buffer.writeInt16LE(Math.round(clamp(channel[i]) * 32767), at);
       at += 2;
     }
   }
-  return b;
+  return buffer;
 }
 
-function save(name, samples) {
-  writeFileSync(join(OUT, `${name}.wav`), wavBuffer(Array.isArray(samples) ? samples : [samples]));
+const airLeft = periodicAir(0x47595354);
+const airRight = periodicAir(0x434f534d);
+const dryLeft = new Float64Array(FRAMES);
+const dryRight = new Float64Array(FRAMES);
+for (let frame = 0; frame < FRAMES; frame += 1) {
+  const time = frame / SR;
+  const sceneIndex = Math.floor(time / CHORD_SECONDS);
+  const sceneRelative = time - sceneIndex * CHORD_SECONDS;
+  const left = { value: 0 };
+  const right = { value: 0 };
+  addPadScene(left, right, sceneIndex, sceneRelative);
+  addPadScene(left, right, sceneIndex - 1, sceneRelative + CHORD_SECONDS);
+
+  const melodyIndex = Math.floor(time / 4);
+  const melodyRelative = time - melodyIndex * 4;
+  addRhodesEvent(left, right, melodyIndex, melodyRelative);
+  addRhodesEvent(left, right, melodyIndex - 1, melodyRelative + 4);
+
+  // Quiet filtered cabin air and two ultra-slow, loop-periodic synth harmonics provide
+  // motion between notes without a beat or a conspicuous short cycle.
+  const horizon =
+    Math.sin(TAU * 119 * time / DURATION + 0.4) * 0.009 +
+    Math.sin(TAU * 173 * time / DURATION + 2.1) * 0.006;
+  dryLeft[frame] = left.value + horizon + airLeft[frame] * 0.018;
+  dryRight[frame] = right.value + horizon * 0.92 + airRight[frame] * 0.018;
 }
 
-const voices = {
-  'ui-move': [0.13, 0x101, (t, d) => attackRelease(t, d, 0.006, 0.07) * (osc(t, 760 + t * 1500) * 0.62 + osc(t, 1520 + t * 900) * 0.2), 0.04],
-  'ui-confirm': [0.48, 0x102, (t, d) => attackRelease(t, d, 0.008, 0.22) * (osc(t, 392) * 0.42 + osc(t, 588, 0.3) * 0.34 + osc(t, 784, 0.8) * 0.2), 0.3],
-  'weapon-fire': [0.18, 0x103, (t, d, w, l) => attackRelease(t, d, 0.002, 0.1) * (chirp(t, 1700, 340, d) * 0.6 + l * 0.55), 0.08],
-  'plasma-wake': [0.72, 0x104, (t, d, w, l, b) => attackRelease(t, d, 0.035, 0.3) * (chirp(t, 180, 880, d) * 0.32 + osc(t, 73, Math.sin(t * 14)) * 0.24 + b * 0.42), 0.32],
-  'gravity-collapse': [1.05, 0x105, (t, d, w, l) => attackRelease(t, d, 0.015, 0.4) * (chirp(t, 360, 42, d) * 0.38 + osc(t, 46) * 0.5 + l * (0.25 + t * 0.35)), 0.45],
-  'boomerang': [0.82, 0x106, (t, d, w, l) => attackRelease(t, d, 0.012, 0.25) * (osc(t, 430 + Math.sin(t * 18) * 180, Math.sin(t * 31) * 1.8) * 0.45 + chirp(t, 1200, 260, d) * 0.3 + l * 0.18), 0.28],
-  'pulsar': [1.2, 0x107, (t, d, w, l) => attackRelease(t, d, 0.004, 0.55) * (osc(t, 43) * 0.62 + chirp(t, 2100, 280, d) * 0.28 + osc(t, 860, t * 8) * 0.18 + l * 0.25), 0.48],
-  'gunship-cannon': [0.42, 0x108, (t, d, w, l) => attackRelease(t, d, 0.001, 0.28) * (osc(t, 52) * 0.68 + chirp(t, 220, 48, d) * 0.36 + l * 0.62), 0.42],
-  'singularity-open': [1.45, 0x109, (t, d, w, l) => attackRelease(t, d, 0.08, 0.5) * (chirp(t, 780, 36, d) * 0.32 + osc(t, 38 + Math.sin(t * 4) * 4) * 0.56 + l * (0.18 + t * 0.32)), 0.62],
-  'singularity-collapse': [1.55, 0x10a, (t, d, w, l, b) => {
-    const pre = t < 0.42 ? smooth(t / 0.42) * chirp(t, 260, 1900, 0.42) * 0.28 : 0;
-    const u = Math.max(0, t - 0.42);
-    const boom = u > 0 ? Math.exp(-u * 3.3) * (osc(u, 37) * 0.75 + chirp(u, 420, 52, d - 0.42) * 0.35 + l * 0.62) : 0;
-    return pre + boom + b * Math.exp(-u * 7) * 0.18;
-  }, 0.68],
-  pickup: [0.3, 0x10b, (t, d) => attackRelease(t, d, 0.004, 0.16) * (chirp(t, 620, 1680, d) * 0.46 + osc(t, 1240) * 0.22), 0.22],
-  repair: [0.78, 0x10c, (t, d) => attackRelease(t, d, 0.015, 0.35) * (osc(t, 330) * 0.3 + osc(t, 495, 0.2) * 0.28 + osc(t, 660, 0.6) * 0.22 + chirp(t, 460, 980, d) * 0.2), 0.48],
-  dodge: [0.36, 0x10d, (t, d, w, l, b) => attackRelease(t, d, 0.004, 0.15) * (chirp(t, 120, 1500, d) * 0.2 + b * 0.7 + l * 0.25), 0.14],
-  repulsor: [0.9, 0x10e, (t, d, w, l) => attackRelease(t, d, 0.002, 0.42) * (chirp(t, 1800, 70, d) * 0.32 + osc(t, 49) * 0.64 + l * 0.38), 0.52],
-  transform: [1.15, 0x10f, (t, d, w, l) => attackRelease(t, d, 0.025, 0.3) * (chirp(t, 90, 1450, d) * 0.38 + osc(t, 220 + t * 400, t * 6) * 0.3 + l * 0.32), 0.5],
-  'boss-warning': [1.4, 0x110, (t, d, w, l) => attackRelease(t, d, 0.025, 0.48) * ((osc(t, 73) + osc(t, 109.5, 0.4) + osc(t, 146, 0.8)) * 0.28 + l * 0.2), 0.58],
-  'boss-death': [1.9, 0x111, (t, d, w, l) => attackRelease(t, d, 0.002, 0.8) * (chirp(t, 820, 32, d) * 0.3 + osc(t, 41) * 0.56 + l * 0.52), 0.7],
-  hit: [0.16, 0x112, (t, d, w, l) => attackRelease(t, d, 0.001, 0.1) * (chirp(t, 520, 90, d) * 0.35 + l * 0.75), 0.06],
-};
-
-for (const [name, [duration, seed, voice, reverb]] of Object.entries(voices)) {
-  save(name, renderMono(duration, seed, voice, reverb));
-}
-
-// Seamless 32-second command-deck score: low propulsion bed, glass harmonics and a
-// restrained four-second pulse. All modulations are periodic across the loop boundary.
-const musicDuration = 32;
-const frames = musicDuration * SR;
-const left = new Float64Array(frames);
-const right = new Float64Array(frames);
-const random = rng(0x47595354);
-let airL = 0;
-let airR = 0;
-for (let n = 0; n < frames; n += 1) {
-  const t = n / SR;
-  const loop = TAU * t / musicDuration;
-  airL += ((random() * 2 - 1) - airL) * 0.003;
-  airR += ((random() * 2 - 1) - airR) * 0.0034;
-  const drone = osc(t, 55) * 0.18 + osc(t, 82.5, 0.4) * 0.11 + osc(t, 110, 1.1) * 0.07;
-  const choir = osc(t, 220, Math.sin(loop * 2) * 0.8) * 0.055 + osc(t, 330, Math.cos(loop * 3) * 0.6) * 0.04;
-  const pulsePhase = (t % 4) / 4;
-  const pulse = Math.exp(-pulsePhase * 8) * (osc(t, 55) * 0.13 + osc(t, 880, 0.3) * 0.025);
-  const glassL = osc(t, 440, Math.sin(loop * 5) * 2.2) * (0.025 + 0.018 * Math.sin(loop * 4));
-  const glassR = osc(t, 440, Math.cos(loop * 5) * 2.2 + 0.7) * (0.025 + 0.018 * Math.cos(loop * 4));
-  left[n] = drone + choir + pulse + glassL + airL * 0.09;
-  right[n] = drone * 0.96 + choir * 1.04 + pulse + glassR + airR * 0.09;
-}
-save('command-deck', [polish(reverberate(left, 0.42), 0.72), polish(reverberate(right, 0.46), 0.72)]);
-
-console.log(`Generated ${Object.keys(voices).length + 1} project-owned audio assets in ${OUT}`);
+const left = circularReverb(dryLeft, -1);
+const right = circularReverb(dryRight, 1);
+master(left, right);
+writeFileSync(join(OUT, 'command-deck.wav'), wavBuffer([left, right]));
+console.log(`Generated one ${DURATION}s project-owned ambient score at ${SR}Hz in ${OUT}`);

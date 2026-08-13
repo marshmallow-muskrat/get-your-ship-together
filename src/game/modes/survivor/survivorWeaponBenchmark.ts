@@ -51,6 +51,15 @@ export const ALL_SCENARIOS: BenchmarkScenario[] = [
 ];
 
 /**
+ * Calibrated movement speed for the isolated weapon fixture.
+ *
+ * The production astronaut speed may change for traversal feel, but that must not
+ * silently rewrite every weapon's L1-L5 curve by changing the fixture's kite path.
+ * Full-run survival benchmarks continue to use the live production speed.
+ */
+export const WEAPON_BENCH_KITE_SPEED = 6.4;
+
+/**
  * The scenario each weapon is authored to be good at.
  * Progression is judged here, so a weapon is never rewarded for scaling in a
  * situation it was not designed for.
@@ -141,6 +150,8 @@ function setupScenario(state: SurvivorState, scenario: BenchmarkScenario): void 
   state.player.facingZ = 1;
   state.player.invuln = 1e9;
   state.player.health = state.player.maxHealth;
+  state.player.slowTimer = 1e9;
+  state.player.slowMul = WEAPON_BENCH_KITE_SPEED / SURVIVOR.playerSpeed;
   state.phase = 'playing';
   // Freeze every schedule so only the weapon under test changes the outcome.
   state.nextBossTime = 1e9;
