@@ -85,6 +85,23 @@ describe('endless-2.3.0 completed Protocol presentation contracts', () => {
     expect(state.megaProtocol.remaining).toBe(Infinity);
   });
 
+  it('does not spend a one-card Mega Cache when a missing number key is pressed', () => {
+    const state = quietState();
+    forceStartProtocol(state, 'carrier-wing');
+    forceStartProtocol(state, 'cleanup-crew');
+    state.phase = 'playing';
+    state.cache = { active: true, x: 0, z: 0, life: 999, maxLife: 999, mega: true, potency: 1.5 };
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.protocolChoices.map((choice) => choice.protocolId)).toEqual(['singularity-engine']);
+    applyProtocolChoice(state, 1);
+    expect(state.phase).toBe('protocol');
+    expect(state.protocolChoices).toHaveLength(1);
+    expect(state.megaProtocol.owned).not.toContain('singularity-engine');
+    applyProtocolChoice(state, 0);
+    expect(state.megaProtocol.owned).toContain('singularity-engine');
+    expect(state.phase).toBe('playing');
+  });
+
   it('offers only Temporal Refit after all armaments and stacks 10% cooldown cuts to a 50% floor', () => {
     const state = quietState();
     forceStartProtocol(state, 'carrier-wing');

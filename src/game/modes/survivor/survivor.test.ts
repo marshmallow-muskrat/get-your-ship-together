@@ -79,6 +79,7 @@ import {
   moveSpeedBonus,
   formatOverclockLabel,
   heroStarterWeapon,
+  signatureLevelMul,
   hullPlatingGainAtLevel,
   overclockLevel,
   playerPowerScale,
@@ -103,6 +104,7 @@ import {
   assignKeybind,
   clampUiScale,
   formatKeyCode,
+  isMoveCode,
   normalizeKeybinds,
   resetKeybinds,
 } from './survivorKeybinds';
@@ -493,6 +495,10 @@ describe('keybinds and ui scale', () => {
     expect(normalizeKeybinds({ repulsor: 'KeyF' }).dodge).toBe('Space');
     expect(resetKeybinds().dodge).toBe('Space');
     expect(assignKeybind(DEFAULT_KEYBINDS, 'dodge', 'KeyZ').dodge).toBe('KeyZ');
+    expect(isMoveCode(DEFAULT_KEYBINDS, 'moveUp', 'KeyW')).toBe(true);
+    expect(isMoveCode(DEFAULT_KEYBINDS, 'moveUp', 'ArrowUp')).toBe(true);
+    expect(isMoveCode(DEFAULT_KEYBINDS, 'moveLeft', 'ArrowLeft')).toBe(true);
+    expect(isMoveCode(DEFAULT_KEYBINDS, 'moveDown', 'KeyS')).toBe(true);
   });
 });
 
@@ -1818,7 +1824,7 @@ describe('melee horde and endless-2.3.0 balance', () => {
     for (const [id, speed] of Object.entries(expected)) {
       expect(HORDE[id]!.baseSpeed, `${id} opening speed`).toBeCloseTo(speed, 5);
     }
-    expect(SURVIVOR.playerSpeed).toBeCloseTo(6.75, 5);
+    expect(SURVIVOR.playerSpeed).toBeCloseTo(9.79, 5);
     // Every opening speed leaves real kiting headroom against the player.
     for (const def of Object.values(HORDE)) {
       expect(def.baseSpeed).toBeLessThan(SURVIVOR.playerSpeed * 0.62);
@@ -2679,7 +2685,7 @@ describe('pressure director surge composition', () => {
 describe('Cosmic Cleanup playtest tuning', () => {
   it('uses the balanced overview and quicker astronaut baseline', () => {
     expect(SURVIVOR.cameraHalf).toBeCloseTo(21, 6);
-    expect(SURVIVOR.playerSpeed).toBeCloseTo(6.75, 6);
+    expect(SURVIVOR.playerSpeed).toBeCloseTo(9.79, 6);
   });
 
   it('sets a 30-second Ship recharge and lets Reinforced Airframe reach 25 seconds', () => {
@@ -2701,6 +2707,28 @@ describe('Cosmic Cleanup playtest tuning', () => {
     const before = state.player.health;
     damagePlayer(state, 40, TEST_HORDE_SOURCE);
     expect(before - state.player.health).toBeCloseTo(30, 6);
+  });
+
+  it('never offers the hero signature as a card and grows it gently with level', () => {
+    const l1 = signatureLevelMul(1);
+    const l10 = signatureLevelMul(10);
+    const l20 = signatureLevelMul(20);
+    expect(l1.damage).toBeCloseTo(1, 6);
+    expect(l10.damage).toBeGreaterThan(1.3);
+    expect(l10.damage).toBeLessThan(1.7);
+    expect(l20.damage).toBeGreaterThan(1.6);
+    expect(l20.damage).toBeLessThan(2.2);
+    expect(l20.damage).toBeLessThan(l10.damage * 2);
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const state = createSurvivorState('bee', null, 22000 + seed);
+      state.weapons = [
+        { weaponId: 'microdrone', level: 3, cooldown: 0, focusDebt: 0, prototype: false },
+        { weaponId: 'pulse', level: 2, cooldown: 0, focusDebt: 0, prototype: false },
+      ];
+      for (const choice of generateChoices(state)) {
+        expect(choice.weaponId, `seed ${seed} offered signature`).not.toBe('microdrone');
+      }
+    }
   });
 
   it('Mech doubles signature size and damage and adds splash', () => {

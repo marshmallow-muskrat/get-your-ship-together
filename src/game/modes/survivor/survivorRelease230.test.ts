@@ -309,8 +309,9 @@ describe('endless-2.6.1 identity and late repair contracts', () => {
       const state = createSurvivorState('bee', null, seed);
       const choices = generateChoices(state);
       for (const choice of choices) {
-        if (choice.kind !== 'new-weapon' || !choice.weaponId) continue;
+        if (!choice.weaponId) continue;
         seen.add(choice.weaponId);
+        expect(choice.weaponId, `offered own signature`).not.toBe('microdrone');
         expect(signatures.has(choice.weaponId), `offered signature ${choice.weaponId}`).toBe(false);
       }
     }

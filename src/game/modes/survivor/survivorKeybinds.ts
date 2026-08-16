@@ -246,6 +246,25 @@ export function formatKeyCode(code: string): string {
   return code;
 }
 
+/** WASD and arrows both move, in addition to whatever is bound. */
+export const MOVE_ALTERNATES: Record<
+  'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight',
+  readonly string[]
+> = {
+  moveUp: ['KeyW', 'ArrowUp'],
+  moveDown: ['KeyS', 'ArrowDown'],
+  moveLeft: ['KeyA', 'ArrowLeft'],
+  moveRight: ['KeyD', 'ArrowRight'],
+};
+
+export function isMoveCode(
+  map: KeybindMap,
+  action: keyof typeof MOVE_ALTERNATES,
+  code: string,
+): boolean {
+  return map[action] === code || MOVE_ALTERNATES[action].includes(code);
+}
+
 export function findActionForCode(map: KeybindMap, code: string): ActionId | null {
   for (const a of ALL_ACTIONS) {
     if (map[a] === code) return a;

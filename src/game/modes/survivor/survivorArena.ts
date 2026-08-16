@@ -81,7 +81,7 @@ export class SurvivorArena {
   private addFloor(): void {
     const h = SURVIVOR.arenaHalf;
     const geo = new THREE.BoxGeometry(h * 2 + 4, 0.12, h * 2 + 4);
-    const mat = new THREE.MeshStandardMaterial({ color: '#03050a', roughness: 0.95, metalness: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({ color: '#080d15', roughness: 0.95, metalness: 0.05 });
     this.ground = this.generatedMesh(new THREE.Mesh(geo, mat));
     this.ground.position.set(0, -0.2, 0);
     this.ground.receiveShadow = true;
@@ -131,16 +131,7 @@ export class SurvivorArena {
 
     for (const [piece, placements] of batches) {
       const batch = this.lib.placeModularInstances(piece, placements);
-      if (!batch) continue;
-      // Imported floor tiles write depth by default and clip Plasma Wake / puddles
-      // wherever a tile ridge sits above the hazard plane. Markings already stay out
-      // of the depth buffer; the floor tiles that hide those signals must too.
-      batch.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) material.depthWrite = false;
-      });
-      this.root.add(batch);
+      if (batch) this.root.add(batch);
     }
   }
 

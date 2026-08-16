@@ -101,8 +101,8 @@ export const SURVIVOR = {
     ship: 1.35,
   },
   playerMaxHealth: 100,
-  /** Slightly quicker baseline traversal for the doubled station. */
-  playerSpeed: 6.75,
+  /** Screen-space travel after the 14.5 → 21 zoom; horde opening speeds scale with it. */
+  playerSpeed: 9.79,
   playerRadius: 0.55,
   playerInvuln: 0.38,
   xpMagnetBase: 5.8,
@@ -1618,6 +1618,21 @@ export function isSignatureWeapon(id: WeaponId): boolean {
   return SIGNATURE_WEAPONS.includes(id);
 }
 
+/**
+ * Automatic signature growth with player level.
+ *
+ * The signature is no longer a card: every level-up adds a modest bump so Mech's
+ * 2× overcharge always has something to double. This is deliberately far below a
+ * chosen authored tier — L20 is about +88% damage, not a free L5.
+ */
+export function signatureLevelMul(playerLevel: number): { damage: number; area: number } {
+  const n = Math.max(0, Math.floor(playerLevel) - 1);
+  return {
+    damage: 1 + (0.055 * n) / (1 + 0.01 * n),
+    area: 1 + (0.02 * n) / (1 + 0.015 * n),
+  };
+}
+
 /** Authored L1–L5 only (clamped). Prefer weaponStatsAtLevel for combat. */
 export function weaponLevelDef(weaponId: WeaponId, level: number): WeaponLevelDef {
   const fam = WEAPONS[weaponId];
@@ -1729,8 +1744,9 @@ export interface HordeEnemyDef {
  * only thing that scales it over a run, and that curve is now deliberately shallow.
  * `contactDamage` is likewise the 0:00 value, scaled by `contactDamageMulAt`.
  *
- * Player speed is 6.75, so every opening speed leaves real kiting headroom — the
- * endless-2.2.1 opening (3.3–4.35) closed that gap far too early.
+ * Player speed is 9.79. Horde opening speeds stay on the published table so
+ * weapon-coverage benches keep the same closing rate; catch-up and player speed
+ * handle the zoomed station.
  */
 export const HORDE: Record<string, HordeEnemyDef> = {
   basic: {

@@ -23,6 +23,7 @@ import {
   clampUiScale,
   findActionForCode,
   formatKeyCode,
+  MOVE_ALTERNATES,
   loadSettings,
   UPGRADE_NUMBERS_DEFAULT,
   resetKeybinds,
@@ -171,6 +172,10 @@ export class SurvivorMode {
       code === this.keybinds.moveDown ||
       code === this.keybinds.moveLeft ||
       code === this.keybinds.moveRight ||
+      MOVE_ALTERNATES.moveUp.includes(code) ||
+      MOVE_ALTERNATES.moveDown.includes(code) ||
+      MOVE_ALTERNATES.moveLeft.includes(code) ||
+      MOVE_ALTERNATES.moveRight.includes(code) ||
       code === this.keybinds.pause ||
       code === 'Space'
     ) {
@@ -592,10 +597,14 @@ export class SurvivorMode {
 
     let sx = 0;
     let sy = 0;
-    if (this.codesDown.has(this.keybinds.moveLeft)) sx -= 1;
-    if (this.codesDown.has(this.keybinds.moveRight)) sx += 1;
-    if (this.codesDown.has(this.keybinds.moveUp)) sy += 1;
-    if (this.codesDown.has(this.keybinds.moveDown)) sy -= 1;
+    const down = (action: 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight'): boolean => {
+      if (this.codesDown.has(this.keybinds[action])) return true;
+      return MOVE_ALTERNATES[action].some((code) => this.codesDown.has(code));
+    };
+    if (down('moveLeft')) sx -= 1;
+    if (down('moveRight')) sx += 1;
+    if (down('moveUp')) sy += 1;
+    if (down('moveDown')) sy -= 1;
 
     const frame: SurvivorInput = {
       ...EMPTY_SURVIVOR_INPUT,
@@ -609,6 +618,13 @@ export class SurvivorMode {
       mutePressed: this.edge.mute,
       choiceIndex: this.choiceIndex,
     };
+    if (
+      frame.choiceIndex != null &&
+      this.state?.phase === 'protocol' &&
+      frame.choiceIndex >= this.state.protocolChoices.length
+    ) {
+      frame.choiceIndex = null;
+    }
     this.edge.mech = false;
     this.edge.ship = false;
     this.edge.repulsor = false;

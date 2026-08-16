@@ -342,7 +342,7 @@ export class SurvivorHud {
         </div>
       </div>
       <div id="sv-help" class="sv-help">
-        <span id="sv-help-move">WASD move · auto fire</span>
+        <span id="sv-help-move">WASD / arrows move</span>
         <span id="sv-help-pause">Esc pause</span>
       </div>
     `;
@@ -559,7 +559,7 @@ export class SurvivorHud {
     set('sv-key-mech', formatKeyCode(binds.mech));
     const helpMove = this.root.querySelector('#sv-help-move');
     if (helpMove) {
-      helpMove.innerHTML = `<kbd>${formatKeyCode(binds.moveUp)}</kbd><kbd>${formatKeyCode(binds.moveLeft)}</kbd><kbd>${formatKeyCode(binds.moveDown)}</kbd><kbd>${formatKeyCode(binds.moveRight)}</kbd> move`;
+      helpMove.innerHTML = `<kbd>WASD</kbd> / <kbd>↑←↓→</kbd> move`;
     }
     const helpPause = this.root.querySelector('#sv-help-pause');
     if (helpPause) {

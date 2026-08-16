@@ -36,6 +36,7 @@ import {
   regenPerSecondAtLevel,
   weaponDamagePreview,
   weaponStatsAtLevel,
+  signatureLevelMul,
   xpForLevel,
   isMegaBossIndex,
   breachShieldingReduction,
@@ -375,6 +376,23 @@ function mechSignatureScale(
     damage: SURVIVOR.mech.weaponDamageMul,
     area: SURVIVOR.mech.weaponAreaMul,
     cadence: SURVIVOR.mech.weaponCadenceMul,
+  };
+}
+
+function weaponCombatScale(
+  state: SurvivorState,
+  weaponId: WeaponId,
+): { damage: number; area: number; cadence: number; mech: boolean } {
+  const mech = mechSignatureScale(state, weaponId);
+  const growth =
+    weaponId === heroStarterWeapon(state.heroId)
+      ? signatureLevelMul(state.level)
+      : { damage: 1, area: 1 };
+  return {
+    damage: mech.damage * growth.damage,
+    area: mech.area * growth.area,
+    cadence: mech.cadence,
+    mech: state.player.form === 'mech' && weaponId === heroStarterWeapon(state.heroId),
   };
 }
 
@@ -1686,8 +1704,8 @@ function fireWeapons(state: SurvivorState, dt: number): void {
     if (slot.weaponId === 'plasma-wake') continue;
     slot.cooldown = Math.max(0, slot.cooldown - dt);
     if (slot.cooldown > 0) continue;
-    const over = mechSignatureScale(state, slot.weaponId);
-    const mech = over.damage > 1;
+    const over = weaponCombatScale(state, slot.weaponId);
+    const mech = over.mech;
     const def = wdef(slot.weaponId, slot.level);
     const cadence = def.cadence / haste / over.cadence;
     slot.cooldown = cadence;
@@ -1712,7 +1730,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         if (!proj) break;
         const spd = def.speed ?? 26;
         resetProj(proj, state, 'bolt', 'pulse', p.x, p.z, Math.sin(a) * spd, Math.cos(a) * spd, {
-          damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+          damage: def.damage * over.damage * p.damageMul,
           radius: (def.radius ?? 0.2) * area,
           life: def.life ?? 1,
           pierce: (def.pierce ?? 0) + (mech ? 1 : 0),
@@ -1749,7 +1767,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           fx * spd,
           fz * spd,
           {
-            damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+            damage: def.damage * over.damage * p.damageMul,
             radius: (def.radius ?? 0.18) * area,
             life: (def.life ?? 1.4) * (mech ? 1.15 : 1),
             homing: false,
@@ -1781,7 +1799,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           length,
           width,
         });
-        const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+        const dmg = def.damage * over.damage * p.damageMul;
         const railSrc = weaponSrc('rail');
         for (const e of state.enemies) {
           if (!e.alive) continue;
@@ -1833,7 +1851,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       for (let i = 0; i < count; i += 1) {
         const { x: cx, z: cz } = destinations[i]!;
         pushEffect(state, 'gravity-collapse', cx, cz, 0.44, WEAPONS.gravity.color, radius, { radius });
-        const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+        const dmg = def.damage * over.damage * p.damageMul;
         for (const e of state.enemies) {
           if (!e.alive) continue;
           const dx = e.x - cx;
@@ -1876,7 +1894,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const dist = Math.hypot(dx, dz) || 1;
         const spd = dist / travel;
         resetProj(proj, state, 'rocket', 'rocket', p.x, p.z, (dx / dist) * spd, (dz / dist) * spd, {
-          damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+          damage: def.damage * over.damage * p.damageMul,
           radius: 0.25,
           life: travel + 0.08,
           color: state.accent,
@@ -1895,16 +1913,16 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       if (pos) {
         for (let i = 0; i < count; i += 1) {
           const a = Math.atan2(pos.x - p.x, pos.z - p.z) + (i - (count - 1) / 2) * 0.1;
-          fireBioGlob(state, def, area, mech, a, p.x, p.z);
+          fireBioGlob(state, def, area, over.damage, a, p.x, p.z);
         }
       } else {
         const targets = collectNearestEnemies(state, p.x, p.z, 16, Math.max(1, count));
         if (targets.length === 0) {
-          fireBioGlob(state, def, area, mech, Math.atan2(p.facingX, p.facingZ), p.x, p.z);
+          fireBioGlob(state, def, area, over.damage, Math.atan2(p.facingX, p.facingZ), p.x, p.z);
         } else {
           for (let i = 0; i < count; i += 1) {
             const t = targets[i % targets.length]!;
-            fireBioGlob(state, def, area, mech, Math.atan2(t.x - p.x, t.z - p.z), p.x, p.z);
+            fireBioGlob(state, def, area, over.damage, Math.atan2(t.x - p.x, t.z - p.z), p.x, p.z);
           }
         }
       }
@@ -1921,7 +1939,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 20);
       const pos = targetPosition(aim);
       const base = pos ? Math.atan2(pos.x - p.x, pos.z - p.z) : Math.atan2(p.facingX, p.facingZ);
-      const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+      const dmg = def.damage * over.damage * p.damageMul;
       const spd = def.speed ?? 15;
       const cfgB = SURVIVOR.boomerang;
       for (let i = 0; i < count; i += 1) {
@@ -1967,7 +1985,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const sx = p.x - Math.cos(a) * barrel;
         const sz = p.z + Math.sin(a) * barrel;
         resetProj(proj, state, 'rotary-round', 'rotary', sx, sz, Math.sin(a + spread) * spd, Math.cos(a + spread) * spd, {
-          damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul,
+          damage: def.damage * over.damage * p.damageMul,
           radius: (def.radius ?? 0.17) * area,
           life: def.life ?? 1.1,
           pierce: def.pierce ?? 0,
@@ -1978,7 +1996,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
     } else if (slot.weaponId === 'pulsar') {
       const radius = (def.radius ?? 4) * area;
       for (let pulse = 0; pulse < count; pulse += 1) {
-        const pulseDamage = def.damage * (pulse === 0 ? 1 : 0.45) * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+        const pulseDamage = def.damage * (pulse === 0 ? 1 : 0.45) * over.damage * p.damageMul;
         const pulseRadius = radius * (pulse === 0 ? 1 : 0.82);
         pushEffect(state, 'pulsar', p.x, p.z, 0.7 + pulse * 0.14, WEAPONS.pulsar.color, pulseRadius, { radius: pulseRadius });
         for (const e of state.enemies) {
@@ -1992,9 +2010,9 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         }
       }
     } else if (slot.weaponId === 'arc') {
-      fireArcConductor(state, slot, def, area, mech);
+      fireArcConductor(state, slot, def, area, over.damage);
     } else if (slot.weaponId === 'orbital') {
-      fireOrbitalLance(state, slot, def, area, mech);
+      fireOrbitalLance(state, slot, def, area, over.damage);
     }
   }
 }
@@ -2380,7 +2398,7 @@ function fireArcConductor(
   slot: SurvivorWeaponSlot,
   def: ReturnType<typeof wdef>,
   area: number,
-  mech: boolean,
+  dmgMul: number,
 ): void {
   const p = state.player;
   const cfg = SURVIVOR.arc;
@@ -2425,7 +2443,7 @@ function fireArcConductor(
   const chains = 1 + (def.pierce ?? 2) - (split ? cfg.branchChainReduction : 0);
   const dmg =
     def.damage *
-    (mech ? SURVIVOR.mech.weaponDamageMul : 1) *
+    dmgMul *
     p.damageMul *
     (split ? cfg.damageMul : 1);
 
@@ -2448,11 +2466,11 @@ function fireOrbitalLance(
   _slot: SurvivorWeaponSlot,
   def: ReturnType<typeof wdef>,
   area: number,
-  mech: boolean,
+  dmgMul: number,
 ): void {
   const p = state.player;
   const strikes = def.count;
-  const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+  const dmg = def.damage * dmgMul * p.damageMul;
   for (let i = 0; i < strikes; i += 1) {
     // Explicit tactical hierarchy: bosses, then elite/miniboss bodies, then the densest
     // ordinary pack. Damage resolves now; the beam is impact feedback, not a warning.
@@ -2567,7 +2585,7 @@ function fireBioGlob(
   state: SurvivorState,
   def: ReturnType<typeof wdef>,
   area: number,
-  mech: boolean,
+  dmgMul: number,
   angle: number,
   x: number,
   z: number,
@@ -2576,14 +2594,14 @@ function fireBioGlob(
   if (!proj) return;
   const spd = def.speed ?? 16;
   resetProj(proj, state, 'bioplasma', 'bioplasma', x, z, Math.sin(angle) * spd, Math.cos(angle) * spd, {
-    damage: def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * state.player.damageMul,
+    damage: def.damage * dmgMul * state.player.damageMul,
     radius: (def.radius ?? 0.28) * area,
     life: def.life ?? 1.4,
     color: WEAPONS.bioplasma.color,
     splash: (def.splash ?? 1.3) * area,
     puddleRadius: (def.puddleRadius ?? 1.1) * area,
     puddleLife: def.puddleLife ?? 1.6,
-    puddleDamage: (def.puddleDamage ?? 8) * (mech ? SURVIVOR.mech.weaponDamageMul : 1),
+    puddleDamage: (def.puddleDamage ?? 8) * dmgMul,
     bounceLeft: def.bounce ?? 0,
     splitOnHit: def.split ?? 0,
   });
@@ -3984,6 +4002,8 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
   }
 
   for (const w of state.weapons) {
+    // Signature grows automatically with player level and is never a card.
+    if (w.weaponId === heroStarterWeapon(state.heroId)) continue;
     const fam = WEAPONS[w.weaponId];
     const nextLv = w.level + 1;
     const card = weaponUpgradeCard(w.weaponId, w.level);
@@ -4209,12 +4229,12 @@ function grantNewWeaponFromChoice(state: SurvivorState, weaponId: WeaponId): boo
 export function applyChoice(state: SurvivorState, index: number): void {
   // Consume the choice set immediately so high-refresh double-input cannot apply twice.
   const choice = state.choices[index];
-  const choices = state.choices;
-  state.choices = [];
   if (!choice || state.phase !== 'levelup') {
-    state.phase = 'playing';
+    // Invalid index (or already closed) must not burn the offer.
     return;
   }
+  const choices = state.choices;
+  state.choices = [];
   // Re-validate index against the captured set only.
   if (choices[index] !== choice) {
     state.phase = 'playing';
@@ -4251,9 +4271,11 @@ export function applyProtocolChoice(state: SurvivorState, index: number): void {
   // Consume once — high-refresh cannot re-select the same protocol frame.
   if (state.phase !== 'protocol') return;
   const choice = state.protocolChoices[index];
+  // A missing slot (pressing 2/3 when only one Titan remains) must not dismiss the
+  // cache. That is how a Mega-Boss kill could spend the last offer on nothing.
+  if (!choice?.protocolId) return;
   state.protocolChoices = [];
   state.phase = 'playing';
-  if (!choice?.protocolId) return;
   applyProtocol(state, choice.protocolId, state.cache.potency);
 }
 
