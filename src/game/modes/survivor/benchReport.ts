@@ -106,10 +106,12 @@ export function formatMarkdown(balanceVersion: string): string {
   L.push('- Deterministic fixed-step simulation, seeded from `(weapon, level, scenario)`.');
   L.push(`- Measurement window: ${BENCH_WINDOW}s per level.`);
   L.push('- Targets are **not** static dummies. They run their normal pursuit AI at their');
-  L.push('  real role speeds while the player kites a circle, so homing, prediction and');
-  L.push('  off-axis tracking are credited for what they actually do in a run.');
-  L.push('- The kite completes a whole number of laps inside the window, removing');
-  L.push('  partial-lap bias.');
+  L.push('  real role speeds. Most scenarios kite the player in a circle so homing,');
+  L.push('  prediction and off-axis tracking are credited for what they actually do in a');
+  L.push('  run. `surrounded` is the exception: the player stands still inside a closing');
+  L.push('  ring with no safe bearing.');
+  L.push('- Where the player kites, the path completes a whole number of laps inside the');
+  L.push('  window, removing partial-lap bias.');
   L.push('- Target HP is set high enough that nothing dies inside the window, so the');
   L.push('  measurement is raw effective output rather than a kill-rate cap.');
   L.push('- Ground truth is summed HP delta, which cannot double-count splash.');
@@ -127,6 +129,7 @@ export function formatMarkdown(balanceVersion: string): string {
     'mobile-offaxis': 'targets beside and behind the player facing',
     'lined-up': 'a marching column of ten',
     clustered: 'one tight blob of twelve',
+    surrounded: 'a closing ring with no safe bearing; the player does not kite',
   };
   for (const s of ALL_SCENARIOS) {
     L.push(`| \`${s}\` | ${SHAPE[s]} | ${SCENARIO_WEIGHTS[s]} |`);

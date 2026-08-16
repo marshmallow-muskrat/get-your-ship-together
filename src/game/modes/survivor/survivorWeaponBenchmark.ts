@@ -38,7 +38,9 @@ export type BenchmarkScenario =
   /** A marching column: penetration value. */
   | 'lined-up'
   /** A tight blob: splash value. */
-  | 'clustered';
+  | 'clustered'
+  /** A closing ring with no safe bearing. The player does not kite. */
+  | 'surrounded';
 
 export const ALL_SCENARIOS: BenchmarkScenario[] = [
   'single-boss',
@@ -48,6 +50,7 @@ export const ALL_SCENARIOS: BenchmarkScenario[] = [
   'mobile-offaxis',
   'lined-up',
   'clustered',
+  'surrounded',
 ];
 
 /**
@@ -195,6 +198,24 @@ function setupScenario(state: SurvivorState, scenario: BenchmarkScenario): void 
     for (let i = 0; i < 10; i += 1) {
       placeEnemy(state, 'basic', 0, 7 + i * 1.5, { hp: 400_000 });
     }
+  } else if (scenario === 'surrounded') {
+    // Two complete rings that close but do not pile inside the 12s starter window.
+    // A stack after contact would flatter pierce and splash and hide the thing this
+    // scenario exists to measure: coverage when every bearing is occupied.
+    for (let i = 0; i < 24; i += 1) {
+      const a = (i / 24) * Math.PI * 2;
+      placeEnemy(state, 'basic', Math.cos(a) * 8.5, Math.sin(a) * 8.5, {
+        hp: 400_000,
+        speedMul: 0.12,
+      });
+    }
+    for (let i = 0; i < 20; i += 1) {
+      const a = (i / 20) * Math.PI * 2 + Math.PI / 20;
+      placeEnemy(state, 'fast', Math.cos(a) * 12, Math.sin(a) * 12, {
+        hp: 400_000,
+        speedMul: 0.14,
+      });
+    }
   } else {
     // clustered: one tight blob that closes together.
     for (let i = 0; i < 12; i += 1) {
@@ -203,6 +224,24 @@ function setupScenario(state: SurvivorState, scenario: BenchmarkScenario): void 
       placeEnemy(state, 'basic', 9 + Math.cos(a) * r, 9 + Math.sin(a) * r, { hp: 400_000 });
     }
   }
+}
+
+/** Whether the player kites during this scenario. Surrounded must stay put. */
+export function scenarioUsesKite(scenario: BenchmarkScenario): boolean {
+  return scenario !== 'surrounded';
+}
+
+/** Spawn layout used by the surrounded-contract test and the reporter. */
+export function inspectBenchmarkScenario(scenario: BenchmarkScenario): {
+  kite: boolean;
+  positions: { x: number; z: number }[];
+} {
+  const state = createSurvivorState('bee', null, 1);
+  setupScenario(state, scenario);
+  return {
+    kite: scenarioUsesKite(scenario),
+    positions: state.enemies.filter((e) => e.alive).map((e) => ({ x: e.x, z: e.z })),
+  };
 }
 
 /** Player hero whose kit does not distort the weapon under test. */
@@ -260,9 +299,14 @@ export function runWeaponBenchmark(
     // unmeasured targets that steal aim from the seeded scenario.
     state.spawnAcc = -1e9;
     state.eliteTimer = 1e9;
-    const ang = i * SURVIVOR.fixedDt * KITE_RATE;
-    input.moveX = Math.cos(ang);
-    input.moveY = Math.sin(ang);
+    if (scenarioUsesKite(scenario)) {
+      const ang = i * SURVIVOR.fixedDt * KITE_RATE;
+      input.moveX = Math.cos(ang);
+      input.moveY = Math.sin(ang);
+    } else {
+      input.moveX = 0;
+      input.moveY = 0;
+    }
     stepSurvivor(state, input, SURVIVOR.fixedDt);
     if (firstHitAt < 0) {
       for (const e of state.enemies) {
@@ -338,13 +382,14 @@ export interface StarterScore {
  * show up on single targets, and a single-target weapon still has to handle a crowd.
  */
 export const SCENARIO_WEIGHTS: Record<BenchmarkScenario, number> = {
-  'single-boss': 0.18,
-  sparse: 0.16,
-  dense: 0.14,
-  'mixed-elite': 0.16,
-  'mobile-offaxis': 0.16,
-  'lined-up': 0.10,
-  clustered: 0.10,
+  'single-boss': 0.15,
+  sparse: 0.12,
+  dense: 0.12,
+  'mixed-elite': 0.13,
+  'mobile-offaxis': 0.13,
+  'lined-up': 0.09,
+  clustered: 0.09,
+  surrounded: 0.17,
 };
 
 /** Weighted starter output across scenarios (L1, 12s windows). */

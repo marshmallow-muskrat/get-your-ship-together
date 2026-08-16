@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ALL_SCENARIOS,
   BREAKPOINT_LEVEL,
   INTENDED_SCENARIO,
   PROGRESSION_BOUNDS,
+  SCENARIO_WEIGHTS,
   STARTER_BAND,
   allBenchmarkedWeapons,
   benchmarkHeroStarters,
+  inspectBenchmarkScenario,
   levelGains,
   levelProgressionRatio,
   runWeaponBenchmark,
@@ -194,6 +197,36 @@ describe('weapon combat benchmark', () => {
     const rocketDense = runWeaponBenchmark('rocket', 3, 'dense', 10).damageDealt;
     const rocketSparse = runWeaponBenchmark('rocket', 3, 'sparse', 10).damageDealt;
     expect(rocketDense).toBeGreaterThan(rocketSparse * 0.85);
+  });
+
+  it('includes a surrounded scenario with real starter-parity weight', () => {
+    expect(ALL_SCENARIOS).toContain('surrounded');
+    expect(SCENARIO_WEIGHTS.surrounded, 'surrounded is a token weight').toBeGreaterThanOrEqual(
+      0.14,
+    );
+    const weightSum = ALL_SCENARIOS.reduce((sum, id) => sum + SCENARIO_WEIGHTS[id], 0);
+    expect(weightSum).toBeCloseTo(1, 8);
+  });
+
+  it('surrounds the player on every bearing and does not kite them out', () => {
+    const { positions, kite } = inspectBenchmarkScenario('surrounded');
+    expect(kite, 'surrounded still kites the player into a safe bearing').toBe(false);
+    expect(positions.length, 'the ring is too thin to enclose').toBeGreaterThanOrEqual(24);
+
+    const quadrants = [false, false, false, false];
+    for (const p of positions) {
+      const q = (p.x >= 0 ? 1 : 0) + (p.z >= 0 ? 2 : 0);
+      quadrants[q] = true;
+    }
+    expect(quadrants.every(Boolean), 'a quadrant has no bodies').toBe(true);
+
+    const angles = positions.map((p) => Math.atan2(p.z, p.x)).sort((a, b) => a - b);
+    let maxGap = 0;
+    for (let i = 0; i < angles.length; i += 1) {
+      const next = i + 1 < angles.length ? angles[i + 1]! : angles[0]! + Math.PI * 2;
+      maxGap = Math.max(maxGap, next - angles[i]!);
+    }
+    expect(maxGap, 'there is a safe angular gap').toBeLessThan(Math.PI / 4);
   });
 });
 
