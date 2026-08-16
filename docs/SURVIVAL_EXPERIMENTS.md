@@ -29,6 +29,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | game-polish-followup-candidate | competent | 24 | 6:19 | 8:46 | 29:00 | 37:46 | 3.3 | 16.5% | — |
 | cosmic-cleanup-baseline | competent | 24 | 6:19 | 8:46 | 29:00 | 37:46 | 3.3 | 16.5% | — |
 | cosmic-cleanup-post | competent | 24 | 12:25 | 6:11 | 26:14 | 32:25 | 3.1 | 17.3% | — |
+| endless-2.11.0-cadence-baseline | competent | 24 | 12:42 | 6:32 | 27:04 | 33:36 | 3.3 | 17.3% | — |
 
 ## Per-hero medians
 
@@ -58,6 +59,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | game-polish-followup-candidate (competent) | 6:19 | 13:38 | 9:23 | 5:14 |
 | cosmic-cleanup-baseline (competent) | 6:19 | 13:38 | 9:23 | 5:14 |
 | cosmic-cleanup-post (competent) | 14:15 | 12:16 | 11:25 | 11:49 |
+| endless-2.11.0-cadence-baseline (competent) | 13:46 | 12:33 | 11:39 | 13:16 |
 
 ## Cosmic Cleanup playtest pass — matched A/B
 
@@ -91,6 +93,42 @@ Conclusion: the candidate fixes the two obvious outliers from the human run—Pl
 share and weak fixed-value repairs—while landing the simulated median near target. Keep
 the remaining distribution width and permanent-Mega contribution under Test Center
 observation; do not tune them further until another real run supplies calibration.
+
+## endless-2.11.0 cadence experiment — discarded
+
+`endless-2.11.0-cadence-baseline` is a local 24-run competent snapshot (six seeds per
+hero, 30-minute censor) taken on this machine before any production combat change.
+It is not comparable to inherited `cosmic-cleanup-post` numbers.
+
+Local baseline: median **12:42**, SD **6:32**, mean+2σ **27:04**. Deaths:
+
+| Hero | Median | Horde-contact deaths |
+| --- | ---: | ---: |
+| Boswell | 13:46 | 1/6 |
+| Fitzwilliam | 12:33 | 5/6 |
+| Fortunato | 11:39 | 2/6 |
+| Rutherford | 13:16 | 3/6 |
+
+The split is real on this machine: high-cadence heroes die to boss mechanics,
+Fitzwilliam still dies to the horde touching him.
+
+A `surrounded` weapon-benchmark scenario (closing ring, no kite, 17% starter weight)
+was added as the missing instrument. At L1 it scores Rail 1600, Microdrone 2142,
+Rocket 3266, Bio-Plasma 3273 — Rail is the weakest starter when every bearing is
+occupied, which is the opposite of the old mix.
+
+Two coverage candidates were implemented and discarded. Neither was promoted:
+
+1. **Cadence at constant authored DPS** (Rail/Rocket L1 1.885s/1.65s → 0.84s, 0.90s,
+   or 1.20s, damage scaled with interval). Rail intended L5/L1 fell to 2.70–2.94
+   against the 3.0 floor. Rocket's L5 gain rose to 61–68% against the 52% breakpoint
+   ceiling. Kite-phase sampling is cadence-sensitive; same DPS is not the same curve.
+2. **Keep-away on the volley**, including a contact-only variant (force 1.1, range 1.7).
+   Rail L3 gain hit 42.5% (typical cap 40%). Rocket L5/L1 fell to 2.84.
+
+Widening those bands is forbidden. Production damage, cadence, geometry and knockback
+stay at the 2.10 tables. BAL-002 (SD 6:32 vs 3:30–4:00) is still open; do not chase
+it by retuning unrelated systems.
 
 ## Interpretation guardrail
 
