@@ -1,7 +1,7 @@
 {
-  "label": "cosmic-cleanup-post",
-  "balanceVersion": "endless-2.10.0-test-center",
-  "generatedAt": "2026-08-13T18:26:28.231Z",
+  "label": "current",
+  "balanceVersion": "endless-2.11.0",
+  "generatedAt": "2026-08-16T02:24:10.902Z",
   "referenceRangedDamage": 15,
   "bodyBand": [
     1.15,

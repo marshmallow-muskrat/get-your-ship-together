@@ -1,6 +1,6 @@
 # Weapon Benchmark
 
-Balance version: `endless-2.10.0-test-center`
+Balance version: `endless-2.11.0`
 
 **This file is generated.** Every number below is produced by
 `src/game/modes/survivor/survivorWeaponBenchmark.ts` and printed by
@@ -12,10 +12,12 @@ Do not hand-edit the tables.
 - Deterministic fixed-step simulation, seeded from `(weapon, level, scenario)`.
 - Measurement window: 48s per level.
 - Targets are **not** static dummies. They run their normal pursuit AI at their
-  real role speeds while the player kites a circle, so homing, prediction and
-  off-axis tracking are credited for what they actually do in a run.
-- The kite completes a whole number of laps inside the window, removing
-  partial-lap bias.
+  real role speeds. Most scenarios kite the player in a circle so homing,
+  prediction and off-axis tracking are credited for what they actually do in a
+  run. `surrounded` is the exception: the player stands still inside a closing
+  ring with no safe bearing.
+- Where the player kites, the path completes a whole number of laps inside the
+  window, removing partial-lap bias.
 - Target HP is set high enough that nothing dies inside the window, so the
   measurement is raw effective output rather than a kill-rate cap.
 - Ground truth is summed HP delta, which cannot double-count splash.
@@ -25,13 +27,14 @@ Do not hand-edit the tables.
 
 | Scenario | Shape | Starter weight |
 | --- | --- | --- |
-| `single-boss` | one durable boss-sized target | 0.18 |
-| `sparse` | six mobile enemies spread around the player | 0.16 |
-| `dense` | a closing ring of forty fodder | 0.14 |
-| `mixed-elite` | sixteen sprinters plus an elite and a bruiser | 0.16 |
-| `mobile-offaxis` | targets beside and behind the player facing | 0.16 |
-| `lined-up` | a marching column of ten | 0.1 |
-| `clustered` | one tight blob of twelve | 0.1 |
+| `single-boss` | one durable boss-sized target | 0.15 |
+| `sparse` | six mobile enemies spread around the player | 0.12 |
+| `dense` | a closing ring of forty fodder | 0.12 |
+| `mixed-elite` | sixteen sprinters plus an elite and a bruiser | 0.13 |
+| `mobile-offaxis` | targets beside and behind the player facing | 0.13 |
+| `lined-up` | a marching column of ten | 0.09 |
+| `clustered` | one tight blob of twelve | 0.09 |
+| `surrounded` | a closing ring with no safe bearing; the player does not kite | 0.17 |
 
 ## Acceptance bounds
 
@@ -46,7 +49,7 @@ Do not hand-edit the tables.
 
 | Weapon | Intended scenario | L1 | L2 | L3 | L4 | L5 | L5/L1 | L2 | L3 | L4 | L5 | Breakpoint |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Pulse Blaster | `general` | 1917 | 2574 | 3280 | 4558 | 6320 | 3.30 | 34% | 27% | 39% | 39% | L5 |
+| Pulse Blaster | `general` | 1930 | 2594 | 3304 | 4590 | 6371 | 3.30 | 34% | 27% | 39% | 39% | L5 |
 | Microdrone Swarm | `mobile-offaxis` | 6552 | 8400 | 9720 | 13510 | 19694 | 3.01 | 28% | 16% | 39% | 46% | L5 |
 | Rail Lance | `lined-up` | 9000 | 11845 | 16520 | 20880 | 30450 | 3.38 | 32% | 39% | 26% | 46% | L5 |
 | Gravity Pulse | `dense` | 13552 | 18624 | 24786 | 31320 | 41026 | 3.03 | 37% | 33% | 26% | 31% | L5 |
@@ -63,12 +66,12 @@ Do not hand-edit the tables.
 
 | Hero | Starter | Weighted output | vs mean |
 | --- | --- | ---: | ---: |
-| bee | microdrone | 1751 | 93.9% |
-| flamingo | rail | 2138 | 114.7% |
-| frog | bioplasma | 1656 | 88.8% |
-| red-panda | rocket | 1913 | 102.6% |
+| bee | microdrone | 1817 | 91.3% |
+| flamingo | rail | 2058 | 103.4% |
+| frog | bioplasma | 1928 | 96.9% |
+| red-panda | rocket | 2158 | 108.4% |
 
-Mean weighted output: 1864.
+Mean weighted output: 1990.
 
 ## Starter firing geometry (L1)
 
@@ -84,20 +87,20 @@ Bio-Plasma chains splash/corrosion, and rockets distribute area explosions.
 
 ## Per-scenario output (L1 → L5)
 
-| Weapon | single-boss | sparse | dense | mixed-elite | mobile-offaxis | lined-up | clustered |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Pulse Blaster | 294 → 968 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 378 → 1188 | 336 → 1056 |
-| Microdrone Swarm | 1722 → 2752 | 2058 → 5332 | 2310 → 8342 | 2184 → 6708 | 2016 → 5590 | 1932 → 5676 | 2058 → 6880 |
-| Rail Lance | 500 → 1392 | 1800 → 5220 | 5800 → 18966 | 4000 → 10614 | 1900 → 6264 | 2300 → 8178 | 2400 → 6960 |
-| Gravity Pulse | 176 → 438 | 660 → 2628 | 3036 → 8468 | 1760 → 4891 | 880 → 2263 | 1276 → 2993 | 1496 → 4015 |
-| Cosmic Boomerang | 170 → 392 | 952 → 2744 | 2346 → 9653 | 1258 → 6321 | 1054 → 3234 | 1020 → 2352 | 748 → 2499 |
-| Rocket Barrage | 1288 → 3168 | 2024 → 5544 | 2990 → 11448 | 2208 → 8424 | 2070 → 6696 | 2208 → 9216 | 3450 → 8136 |
-| Bio-Plasma Glob | 1029 → 4140 | 2076 → 7919 | 3143 → 11386 | 2518 → 9635 | 2092 → 8158 | 1890 → 7430 | 1804 → 7295 |
-| Rotary Cannon | 693 → 2080 | 913 → 2760 | 924 → 2800 | 924 → 2800 | 913 → 2800 | 913 → 2620 | 924 → 2640 |
-| Plasma Wake | 53 → 659 | 605 → 2720 | 5739 → 22284 | 2947 → 10962 | 1093 → 3573 | 1789 → 5528 | 1794 → 5461 |
-| Pulsar Core | 42 → 157 | 210 → 637 | 1764 → 5605 | 378 → 1118 | 126 → 373 | 336 → 1010 | 378 → 1215 |
-| Arc Conductor | 400 → 800 | 1400 → 4018 | 2113 → 6739 | 1963 → 6739 | 1775 → 4190 | 1625 → 4518 | 1463 → 4374 |
-| Orbital Lance | 420 → 1740 | 1698 → 5728 | 8890 → 37265 | 2643 → 9208 | 1698 → 5293 | 3063 → 11455 | 4568 → 16675 |
+| Weapon | single-boss | sparse | dense | mixed-elite | mobile-offaxis | lined-up | clustered | surrounded |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pulse Blaster | 294 → 968 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 588 → 1936 | 378 → 1188 | 336 → 1056 | 588 → 1936 |
+| Microdrone Swarm | 1722 → 2752 | 2058 → 5332 | 2310 → 8342 | 2184 → 6708 | 2016 → 5590 | 1932 → 5676 | 2058 → 6880 | 2394 → 8600 |
+| Rail Lance | 500 → 1392 | 1800 → 5220 | 5800 → 18966 | 4000 → 10614 | 1900 → 6264 | 2300 → 8178 | 2400 → 6960 | 2100 → 5394 |
+| Gravity Pulse | 176 → 438 | 660 → 2628 | 3036 → 8468 | 1760 → 4891 | 880 → 2263 | 1276 → 2993 | 1496 → 4015 | 2112 → 6643 |
+| Cosmic Boomerang | 170 → 392 | 952 → 2744 | 2346 → 9653 | 1258 → 6321 | 1054 → 3234 | 1020 → 2352 | 748 → 2499 | 952 → 5488 |
+| Rocket Barrage | 1288 → 3168 | 2024 → 5544 | 2990 → 11448 | 2208 → 8424 | 2070 → 6696 | 2208 → 9216 | 3450 → 8136 | 3726 → 10080 |
+| Bio-Plasma Glob | 1029 → 4140 | 2076 → 7919 | 3143 → 11386 | 2518 → 9635 | 2092 → 8158 | 1890 → 7430 | 1804 → 7295 | 4008 → 14236 |
+| Rotary Cannon | 693 → 2080 | 913 → 2760 | 924 → 2800 | 924 → 2800 | 913 → 2800 | 913 → 2620 | 924 → 2640 | 924 → 2800 |
+| Plasma Wake | 53 → 659 | 605 → 2720 | 5739 → 22284 | 2947 → 10962 | 1093 → 3573 | 1789 → 5528 | 1794 → 5461 | 0 → 0 |
+| Pulsar Core | 42 → 157 | 210 → 637 | 1764 → 5605 | 378 → 1118 | 126 → 373 | 336 → 1010 | 378 → 1215 | 6720 → 21751 |
+| Arc Conductor | 400 → 800 | 1400 → 4018 | 2113 → 6739 | 1963 → 6739 | 1775 → 4190 | 1625 → 4518 | 1463 → 4374 | 2113 → 6739 |
+| Orbital Lance | 420 → 1740 | 1698 → 5728 | 8890 → 37265 | 2643 → 9208 | 1698 → 5293 | 3063 → 11455 | 4568 → 16675 | 4918 → 20590 |
 
 ## Endless progression beyond L5
 

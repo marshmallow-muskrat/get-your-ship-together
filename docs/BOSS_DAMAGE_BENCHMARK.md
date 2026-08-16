@@ -1,7 +1,7 @@
 # Boss Damage Benchmark
 
-Balance version: `endless-2.10.0-test-center`
-Experiment: `cosmic-cleanup-post`
+Balance version: `endless-2.11.0`
+Experiment: `current`
 
 **This file is generated.** Regenerate it with `npm run bench:bossdamage`.
 
@@ -90,4 +90,4 @@ leaves behind — the charge's fissures — which is a separate, escapable mecha
 - **Worst-case total** assumes the player never moves. It is an upper bound on a
   mistake, not the expected cost.
 
-Generated: 2026-08-13T18:26:28.231Z
+Generated: 2026-08-16T02:24:10.902Z

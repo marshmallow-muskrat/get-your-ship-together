@@ -30,6 +30,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | cosmic-cleanup-baseline | competent | 24 | 6:19 | 8:46 | 29:00 | 37:46 | 3.3 | 16.5% | — |
 | cosmic-cleanup-post | competent | 24 | 12:25 | 6:11 | 26:14 | 32:25 | 3.1 | 17.3% | — |
 | endless-2.11.0-cadence-baseline | competent | 24 | 12:42 | 6:32 | 27:04 | 33:36 | 3.3 | 17.3% | — |
+| endless-2.11.0 | competent | 24 | 12:42 | 6:32 | 27:04 | 33:36 | 3.3 | 17.3% | — |
 
 ## Per-hero medians
 
@@ -60,6 +61,7 @@ experiments remain here as evidence even when their implementation is discarded.
 | cosmic-cleanup-baseline (competent) | 6:19 | 13:38 | 9:23 | 5:14 |
 | cosmic-cleanup-post (competent) | 14:15 | 12:16 | 11:25 | 11:49 |
 | endless-2.11.0-cadence-baseline (competent) | 13:46 | 12:33 | 11:39 | 13:16 |
+| endless-2.11.0 (competent) | 13:46 | 12:33 | 11:39 | 13:16 |
 
 ## Cosmic Cleanup playtest pass — matched A/B
 

@@ -1,7 +1,7 @@
 # Survival Benchmark
 
-Balance version: `endless-2.10.0-test-center`
-Experiment: `endless-2.11.0-cadence-baseline`
+Balance version: `endless-2.11.0`
+Experiment: `endless-2.11.0`
 Policy: `competent`
 Sample: 6 seeded runs per hero; 24 total runs; 30-minute censor limit.
 
@@ -60,4 +60,4 @@ are calibrated against human playtests. It is a decision aid, not an automatic t
 - The competent policy kites local threats, pursues reachable objectives, and uses abilities reactively with a bounded reaction interval.
 - Human playtesting remains authoritative for readability, satisfaction, fairness and fun.
 
-Generated: 2026-08-16T02:14:47.775Z
+Generated: 2026-08-16T02:24:54.513Z
