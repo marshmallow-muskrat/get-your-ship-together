@@ -1153,11 +1153,18 @@ function updateActive(
  * authored so in-fight timing and Titan comparisons do not drift; kiting across
  * the station is what felt like the boss had given up.
  */
-function bossCatchupMul(dist: number, isMega: boolean): number {
-  const start = 12;
-  if (dist <= start) return 1;
-  const extra = (dist - start) / 14;
-  return Math.min(isMega ? 2.4 : 2.15, 1 + extra);
+function bossCatchupMul(state: SurvivorState, dist: number, isMega: boolean): number {
+  if (state.isolateLiveTravel) {
+    const start = 12;
+    if (dist <= start) return 1;
+    const extra = (dist - start) / 14;
+    return Math.min(isMega ? 2.4 : 2.15, 1 + extra);
+  }
+  const travel = SURVIVOR.bossTravelMul;
+  const start = 14;
+  if (dist <= start) return travel;
+  const extra = (dist - start) / 8;
+  return Math.min(isMega ? 4.2 : 3.6, travel + extra);
 }
 
 /** Recovery movement when far and no locked telegraph. */
@@ -1167,7 +1174,8 @@ function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, ap
   const dz = p.z - b.z;
   const dist = Math.hypot(dx, dz) || 1;
   if (dist > 8) {
-    const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * 0.45 * bossCatchupMul(dist, b.isMega);
+    const recoverMul = state.isolateLiveTravel ? 0.45 : 0.72;
+    const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * recoverMul * bossCatchupMul(state, dist, b.isMega);
     b.x += (dx / dist) * spd * dt;
     b.z += (dz / dist) * spd * dt;
     const c = api.clampArena(b.x, b.z, b.colliderRadius);
@@ -1242,7 +1250,7 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
         SURVIVOR_BOSS.moveSpeed *
         b.moveMul *
         (1 + (phase - 1) * 0.08) *
-        bossCatchupMul(dist, b.isMega);
+        bossCatchupMul(state, dist, b.isMega);
       b.x += b.facingX * spd * dt;
       b.z += b.facingZ * spd * dt;
       const c = api.clampArena(b.x, b.z, b.colliderRadius);

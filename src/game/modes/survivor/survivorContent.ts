@@ -101,8 +101,15 @@ export const SURVIVOR = {
     ship: 1.35,
   },
   playerMaxHealth: 100,
-  /** Screen-space travel after the 14.5 → 21 zoom; horde opening speeds scale with it. */
+  /** Screen-space travel after the 14.5 → 21 zoom; horde/boss chase scale with it. */
   playerSpeed: 9.79,
+  /**
+   * Live horde closing rate vs the published opening table.
+   * Weapon benches and Titan comparisons divide this back out so published close-rates stay put.
+   */
+  hordeTravelMul: 1.38,
+  /** Live close-range boss chase vs authored moveSpeed (2.6). ~8 u/s on the first boss. */
+  bossTravelMul: 2.35,
   playerRadius: 0.55,
   playerInvuln: 0.38,
   xpMagnetBase: 5.8,
@@ -140,10 +147,10 @@ export const SURVIVOR = {
   surgeDuration: 10,
   surgeRecovery: 13.5,
   /** Surge-spawned enemies only — never the standing horde. */
-  /** The surge-only flier arrives at exactly twice its authored movement speed. */
-  surgeWaveSpeedBonus: 1,
-  /** One bounded flock, released together as the telegraph resolves. */
-  surgePackSize: 26,
+  /** Surge-only: stacked on authored speed so the flock outruns a kiting astronaut. */
+  surgeWaveSpeedBonus: 1.3,
+  /** Opening flock size; later minutes add more via surgePackSizeAt. */
+  surgePackSize: 32,
   /** Recovery holds replacements until population falls to this fraction of target. */
   surgeRecoveryPopulationFactor: 0.55,
   /** Elite specialist earliest appearance (seconds). */
@@ -321,10 +328,12 @@ export const SURVIVOR = {
     /** Signature only: doubled damage while Mech is up. Other weapons stay baseline. */
     weaponDamageMul: 2,
     weaponCadenceMul: 1.15,
-    /** Signature only: doubled projectile / beam / blast size. */
+    /** Signature only: doubled collision size. Visual size is `weaponVisualAreaMul`. */
     weaponAreaMul: 2,
+    /** Signature only: 4× drawn size so Overdrive reads even when collision stays at 2×. */
+    weaponVisualAreaMul: 4,
     /** Extra burst around each signature impact. Does not apply to trails or puddles. */
-    signatureSplashRadius: 2.2,
+    signatureSplashRadius: 3.4,
     signatureSplashMul: 0.35,
     /** Hero-specific automatic armaments, active only while transformed. */
     specials: {
@@ -1633,6 +1642,12 @@ export function signatureLevelMul(playerLevel: number): { damage: number; area: 
   };
 }
 
+/** Surge flock grows with the run so late waves stay a real event. */
+export function surgePackSizeAt(timeSec: number): number {
+  const minutes = Math.max(0, timeSec / 60);
+  return Math.min(68, SURVIVOR.surgePackSize + Math.floor(minutes * 3.4));
+}
+
 /** Authored L1–L5 only (clamped). Prefer weaponStatsAtLevel for combat. */
 export function weaponLevelDef(weaponId: WeaponId, level: number): WeaponLevelDef {
   const fam = WEAPONS[weaponId];
@@ -1794,7 +1809,7 @@ export const HORDE: Record<string, HordeEnemyDef> = {
     xp: 6,
     baseSpeed: 3.5,
     contactDamage: 12,
-    healthScale: 1.0,
+    healthScale: 3.2,
   },
   ghost: {
     id: 'ghost',

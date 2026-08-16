@@ -192,6 +192,8 @@ describe('§2 ordinary repair supply is earned by killing', () => {
     const enemy = spawnEnemyForTest(state, 'basic', 1.5, 0)!;
     enemy.health = 1;
     enemy.maxHealth = 1;
+    // Pin the victim so live chase speed cannot walk the drop into the magnet.
+    enemy.speedMul = 0;
     for (let i = 0; i < 30 && enemy.alive; i += 1) {
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
     }
@@ -398,6 +400,8 @@ describe('§6 Cleanup Crew allies fight independently', () => {
     state.phase = 'playing';
     state.time = 600;
     state.player.invuln = 1e9;
+    // Ally engagement, not live chase — keep the published close-rate.
+    state.isolateLiveTravel = true;
     forceStartProtocol(state, 'cleanup-crew');
     surroundPlayer(state, enemies, 9);
     // Run past arrival stagger + choreography so every ally is fighting.

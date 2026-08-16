@@ -80,6 +80,7 @@ import {
   formatOverclockLabel,
   heroStarterWeapon,
   signatureLevelMul,
+  surgePackSizeAt,
   hullPlatingGainAtLevel,
   overclockLevel,
   playerPowerScale,
@@ -2614,8 +2615,9 @@ function runSurge(
   state.surge.edgeA = Math.floor(seed % 4);
   state.surge.edgeB = state.surge.edgeA ^ 1;
   state.surge.activeEdges = [state.surge.edgeA];
-  state.surge.packRemaining = SURVIVOR.surgePackSize;
-  state.spawnAcc = SURVIVOR.surgePackSize;
+  const pack = surgePackSizeAt(atTime);
+  state.surge.packRemaining = pack;
+  state.spawnAcc = pack;
   state.surge.phaseEndsAt = 1e9;
   state.surge.nextSurgeAt = 1e9;
   // Composition is measured in isolation. A live boss now ends ordinary surges by
@@ -2643,7 +2645,7 @@ function runSurge(
 describe('pressure director surge composition', () => {
   it('spawns exactly one bounded pack', () => {
     const r = runSurge(7101, 200, 8);
-    expect(r.count).toBe(SURVIVOR.surgePackSize);
+    expect(r.count).toBe(surgePackSizeAt(200));
   });
 
   it('uses only the surge-exclusive flying definition', () => {
@@ -2678,7 +2680,7 @@ describe('pressure director surge composition', () => {
 
   it('does not leave stragglers after the authored pack is exhausted', () => {
     const r = runSurge(7204, 200, 20);
-    expect(r.count).toBe(SURVIVOR.surgePackSize);
+    expect(r.count).toBe(surgePackSizeAt(200));
   });
 });
 
@@ -2686,6 +2688,8 @@ describe('Cosmic Cleanup playtest tuning', () => {
   it('uses the balanced overview and quicker astronaut baseline', () => {
     expect(SURVIVOR.cameraHalf).toBeCloseTo(21, 6);
     expect(SURVIVOR.playerSpeed).toBeCloseTo(9.79, 6);
+    expect(SURVIVOR.hordeTravelMul).toBeCloseTo(1.38, 6);
+    expect(SURVIVOR.bossTravelMul).toBeCloseTo(2.35, 6);
   });
 
   it('sets a 30-second Ship recharge and lets Reinforced Airframe reach 25 seconds', () => {
@@ -2734,6 +2738,7 @@ describe('Cosmic Cleanup playtest tuning', () => {
   it('Mech doubles signature size and damage and adds splash', () => {
     expect(SURVIVOR.mech.weaponDamageMul).toBe(2);
     expect(SURVIVOR.mech.weaponAreaMul).toBe(2);
+    expect(SURVIVOR.mech.weaponVisualAreaMul).toBe(4);
     expect(SURVIVOR.mech.signatureSplashRadius).toBeGreaterThan(1);
     const state = createSurvivorState('flamingo', null, 21110);
     state.nextBossTime = 1e9;
@@ -2770,6 +2775,48 @@ describe('Cosmic Cleanup playtest tuning', () => {
     for (let i = 0; i < 8; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
     expect(victim.health).toBeLessThan(victim.maxHealth);
     expect(neighbour.health).toBeLessThan(neighbour.maxHealth);
+  });
+
+  it('draws Mech signature shots 4× larger than the astronaut version', () => {
+    const fireDrone = (form: 'astronaut' | 'mech') => {
+      const state = createSurvivorState('bee', null, 21121);
+      state.nextBossTime = 1e9;
+      state.nextCacheTime = 1e9;
+      state.surge.nextSurgeAt = 1e9;
+      state.spawnAcc = -1e9;
+      state.player.invuln = 1e9;
+      state.player.form = form;
+      state.player.mechDuration = form === 'mech' ? 6 : 0;
+      state.weapons = [{ weaponId: 'microdrone', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
+      const dummy = emptyEnemy();
+      dummy.id = state.nextId++;
+      dummy.alive = true;
+      dummy.defId = 'basic';
+      dummy.role = 'fodder';
+      dummy.x = 0;
+      dummy.z = 6;
+      dummy.radius = 0.5;
+      dummy.health = dummy.maxHealth = 50_000;
+      dummy.speedMul = 0;
+      dummy.contactDamage = 0;
+      state.enemies.push(dummy);
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      const shot = state.projectiles.find((p) => p.active && p.kind === 'drone');
+      expect(shot, `${form} drone`).toBeTruthy();
+      return shot!;
+    };
+    const astro = fireDrone('astronaut');
+    const mech = fireDrone('mech');
+    expect(mech.radius / astro.radius).toBeCloseTo(SURVIVOR.mech.weaponAreaMul, 5);
+    expect(mech.visualRadius / astro.visualRadius).toBeCloseTo(SURVIVOR.mech.weaponVisualAreaMul, 5);
+    expect(mech.visualRadius).toBeGreaterThan(mech.radius * 1.5);
+  });
+
+  it('grows surge flocks later in the run', () => {
+    expect(surgePackSizeAt(0)).toBe(SURVIVOR.surgePackSize);
+    expect(surgePackSizeAt(6 * 60)).toBeGreaterThan(surgePackSizeAt(0) + 15);
+    expect(surgePackSizeAt(12 * 60)).toBeGreaterThan(surgePackSizeAt(6 * 60));
+    expect(surgePackSizeAt(30 * 60)).toBe(68);
   });
 
   it('speeds bosses up enough to re-enter the larger-map camera promptly', () => {

@@ -809,7 +809,7 @@ export interface SurvivorState {
    * both the renderer and collision read — see survivorAttacks.ts.
    */
   attacks: import('./survivorAttacks').SurvivorAttack[];
-  rails: Array<{ x0: number; z0: number; x1: number; z1: number; life: number; color: string }>;
+  rails: Array<{ x0: number; z0: number; x1: number; z1: number; life: number; color: string; width?: number }>;
   /** Concurrent bosses (cap SURVIVOR.maxSimultaneousBosses). */
   bosses: SurvivorBoss[];
   nextBossIndex: number;
@@ -845,6 +845,11 @@ export interface SurvivorState {
   nextId: number;
   enemyCap: number;
   muted: boolean;
+  /**
+   * Weapon benches and Titan comparisons keep the published close-rate.
+   * Live play applies hordeTravelMul / bossTravelMul.
+   */
+  isolateLiveTravel: boolean;
   /** Set once when defeat is recorded to local high scores. */
   runRecorded: boolean;
   inboundBanner: number;
@@ -1213,6 +1218,7 @@ export function createSurvivorState(
     nextId: 1,
     enemyCap: SURVIVOR.enemyCap,
     muted: false,
+    isolateLiveTravel: false,
     runRecorded: false,
     inboundBanner: 0,
     metrics: {

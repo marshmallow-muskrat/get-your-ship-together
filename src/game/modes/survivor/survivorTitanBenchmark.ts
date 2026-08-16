@@ -142,6 +142,8 @@ function buildTitanState(seedIndex: number): SurvivorState {
   state.nextCacheTime = 1e9;
   state.unlocks.arcOffered = true;
   state.unlocks.orbitalOffered = true;
+  // Protocol value, not live chase speed — keep the published close-rate.
+  state.isolateLiveTravel = true;
   return state;
 }
 

@@ -37,6 +37,7 @@ import {
   weaponDamagePreview,
   weaponStatsAtLevel,
   signatureLevelMul,
+  surgePackSizeAt,
   xpForLevel,
   isMegaBossIndex,
   breachShieldingReduction,
@@ -368,13 +369,14 @@ function areaMul(state: SurvivorState): number {
 function mechSignatureScale(
   state: SurvivorState,
   weaponId: WeaponId,
-): { damage: number; area: number; cadence: number } {
+): { damage: number; area: number; visualArea: number; cadence: number } {
   if (state.player.form !== 'mech' || weaponId !== heroStarterWeapon(state.heroId)) {
-    return { damage: 1, area: 1, cadence: 1 };
+    return { damage: 1, area: 1, visualArea: 1, cadence: 1 };
   }
   return {
     damage: SURVIVOR.mech.weaponDamageMul,
     area: SURVIVOR.mech.weaponAreaMul,
+    visualArea: SURVIVOR.mech.weaponVisualAreaMul,
     cadence: SURVIVOR.mech.weaponCadenceMul,
   };
 }
@@ -382,7 +384,7 @@ function mechSignatureScale(
 function weaponCombatScale(
   state: SurvivorState,
   weaponId: WeaponId,
-): { damage: number; area: number; cadence: number; mech: boolean } {
+): { damage: number; area: number; visualArea: number; cadence: number; mech: boolean } {
   const mech = mechSignatureScale(state, weaponId);
   const growth =
     weaponId === heroStarterWeapon(state.heroId)
@@ -391,6 +393,7 @@ function weaponCombatScale(
   return {
     damage: mech.damage * growth.damage,
     area: mech.area * growth.area,
+    visualArea: mech.visualArea * growth.area,
     cadence: mech.cadence,
     mech: state.player.form === 'mech' && weaponId === heroStarterWeapon(state.heroId),
   };
@@ -1458,7 +1461,7 @@ function rocketClusterTargets(
   const cellSize = 4.2;
   for (const e of state.enemies) {
     if (!e.alive || (e.x - originX) ** 2 + (e.z - originZ) ** 2 > 24 ** 2) continue;
-    const speed = enemyBaseSpeed(e);
+    const speed = enemyBaseSpeed(state, e);
     const fl = Math.hypot(e.facingX, e.facingZ) || 1;
     const x = e.x + (e.facingX / fl) * speed * lead;
     const z = e.z + (e.facingZ / fl) * speed * lead;
@@ -1711,8 +1714,10 @@ function fireWeapons(state: SurvivorState, dt: number): void {
     slot.cooldown = cadence;
     const count = def.count;
     const area = areaMul(state) * over.area;
+    const visualArea = areaMul(state) * over.visualArea;
     if (mech) {
-      pushEffect(state, 'pulse', p.x, p.z, 0.16, state.accent, 1.7, { radius: 1.7 });
+      pushEffect(state, 'pulse', p.x, p.z, 0.32, state.accent, 4.2, { radius: 4.2 });
+      pushEffect(state, 'impact', p.x, p.z, 0.2, '#fff4c8', 2.6, { radius: 2.6 });
     }
 
     if (slot.weaponId === 'pulse') {
@@ -1769,6 +1774,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           {
             damage: def.damage * over.damage * p.damageMul,
             radius: (def.radius ?? 0.18) * area,
+            visualRadius: (def.radius ?? 0.18) * visualArea,
             life: (def.life ?? 1.4) * (mech ? 1.15 : 1),
             homing: false,
             color: state.accent,
@@ -1779,6 +1785,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       for (let i = 0; i < count; i += 1) {
         const length = (def.length ?? 14) * (mech ? 1.15 : 1);
         const width = (def.width ?? 0.5) * area;
+        const visualWidth = (def.width ?? 0.5) * visualArea;
         const { fx, fz } = bestRailDirection(state, slot, p.x, p.z, length, width);
         const off = (i - (count - 1) / 2) * 0.35;
         const ox = -fz * off;
@@ -1792,12 +1799,13 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           z1,
           life: 0.22,
           color: state.accent,
+          width: visualWidth,
         });
         pushEffect(state, 'rail', p.x + ox, p.z + oz, 0.25, state.accent, length, {
           facingX: fx,
           facingZ: fz,
           length,
-          width,
+          width: visualWidth,
         });
         const dmg = def.damage * over.damage * p.damageMul;
         const railSrc = weaponSrc('rail');
@@ -1895,7 +1903,8 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const spd = dist / travel;
         resetProj(proj, state, 'rocket', 'rocket', p.x, p.z, (dx / dist) * spd, (dz / dist) * spd, {
           damage: def.damage * over.damage * p.damageMul,
-          radius: 0.25,
+          radius: 0.25 * over.area,
+          visualRadius: 0.25 * over.visualArea,
           life: travel + 0.08,
           color: state.accent,
           armTimer: travel,
@@ -1913,16 +1922,16 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       if (pos) {
         for (let i = 0; i < count; i += 1) {
           const a = Math.atan2(pos.x - p.x, pos.z - p.z) + (i - (count - 1) / 2) * 0.1;
-          fireBioGlob(state, def, area, over.damage, a, p.x, p.z);
+          fireBioGlob(state, def, area, visualArea, over.damage, a, p.x, p.z);
         }
       } else {
         const targets = collectNearestEnemies(state, p.x, p.z, 16, Math.max(1, count));
         if (targets.length === 0) {
-          fireBioGlob(state, def, area, over.damage, Math.atan2(p.facingX, p.facingZ), p.x, p.z);
+          fireBioGlob(state, def, area, visualArea, over.damage, Math.atan2(p.facingX, p.facingZ), p.x, p.z);
         } else {
           for (let i = 0; i < count; i += 1) {
             const t = targets[i % targets.length]!;
-            fireBioGlob(state, def, area, over.damage, Math.atan2(t.x - p.x, t.z - p.z), p.x, p.z);
+            fireBioGlob(state, def, area, visualArea, over.damage, Math.atan2(t.x - p.x, t.z - p.z), p.x, p.z);
           }
         }
       }
@@ -2585,6 +2594,7 @@ function fireBioGlob(
   state: SurvivorState,
   def: ReturnType<typeof wdef>,
   area: number,
+  visualArea: number,
   dmgMul: number,
   angle: number,
   x: number,
@@ -2596,6 +2606,7 @@ function fireBioGlob(
   resetProj(proj, state, 'bioplasma', 'bioplasma', x, z, Math.sin(angle) * spd, Math.cos(angle) * spd, {
     damage: def.damage * dmgMul * state.player.damageMul,
     radius: (def.radius ?? 0.28) * area,
+    visualRadius: (def.radius ?? 0.28) * visualArea,
     life: def.life ?? 1.4,
     color: WEAPONS.bioplasma.color,
     splash: (def.splash ?? 1.3) * area,
@@ -3427,9 +3438,10 @@ function contactDamageOf(e: SurvivorEnemy): number {
   return Math.max(4, e.contactDamage * e.damageMul);
 }
 
-function enemyBaseSpeed(e: SurvivorEnemy): number {
+function enemyBaseSpeed(state: SurvivorState, e: SurvivorEnemy): number {
   const def = HORDE[e.defId];
-  return (def?.baseSpeed ?? 4) * e.speedMul;
+  const travel = state.isolateLiveTravel ? 1 : SURVIVOR.hordeTravelMul;
+  return (def?.baseSpeed ?? 4) * e.speedMul * travel;
 }
 
 /**
@@ -3574,7 +3586,7 @@ function updateEnemies(state: SurvivorState, dt: number): void {
         ndz = mz / ml;
       }
     }
-    const speed = enemyBaseSpeed(e) * advance * e.slowMul;
+    const speed = enemyBaseSpeed(state, e) * advance * e.slowMul;
 
     // Elite/hunter: windup (no move) → locked dash → recovery
     if ((role === 'elite' || role === 'hunter') && e.windup > 0) {
@@ -5498,8 +5510,9 @@ function updatePressureDirector(state: SurvivorState, dt: number): void {
     if (t >= s.phaseEndsAt) {
       s.phase = 'surge';
       s.phaseEndsAt = t + SURVIVOR.surgeDuration;
-      s.packRemaining = SURVIVOR.surgePackSize;
-      state.spawnAcc = Math.max(state.spawnAcc, SURVIVOR.surgePackSize);
+      const pack = surgePackSizeAt(t);
+      s.packRemaining = pack;
+      state.spawnAcc = Math.max(state.spawnAcc, pack);
     }
     return;
   }
@@ -5626,7 +5639,7 @@ function updateSpawns(state: SurvivorState, dt: number): void {
   }
   // Director phase multipliers. The flock is a single pack, not a ten-second faucet.
   if (s.phase === 'surge') {
-    rate = s.packRemaining > 0 ? Math.max(rate, SURVIVOR.surgePackSize / 0.7) : 0;
+    rate = s.packRemaining > 0 ? Math.max(rate, surgePackSizeAt(state.time) / 0.7) : 0;
   } else if (s.phase === 'recovery') {
     /*
      * Recovery is a real breathing window, not a slightly slower stream.

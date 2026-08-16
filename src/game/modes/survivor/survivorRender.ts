@@ -719,8 +719,9 @@ export class SurvivorRenderer {
       if (e.defId === 'surge-flier') {
         // The surge actor is unmistakably airborne and moves as a restless flock.
         // Collision remains on the simulation's XZ plane; this is presentation only.
-        vis.root.position.y = 1.7 + Math.sin(state.time * 8.5 + e.id * 0.73) * 0.18;
-        vis.root.rotation.z = Math.sin(state.time * 5.2 + e.id) * 0.1;
+        vis.root.position.y = 2.05 + Math.sin(state.time * 8.5 + e.id * 0.73) * 0.22;
+        vis.root.rotation.z = Math.sin(state.time * 5.2 + e.id) * 0.12;
+        vis.root.scale.setScalar(scale * 1.55);
       }
       const shouldAnim = e.isElite || e.isMiniboss || this.animFrame % 2 === i % 2;
       if (vis.animator && shouldAnim) {
@@ -940,9 +941,9 @@ export class SurvivorRenderer {
       }
       const s =
         p.kind === 'drone'
-          ? 1
+          ? Math.max(1.15, (p.visualRadius || p.radius) / 0.18)
           : p.kind === 'rocket'
-            ? 1
+            ? Math.max(1.2, (p.visualRadius || p.radius) / 0.25)
             : p.kind === 'bioplasma'
               ? 1.45
               : p.kind === 'boss-orb'
@@ -955,6 +956,8 @@ export class SurvivorRenderer {
                       ? Math.max(0.8, (p.visualRadius || p.radius) / 0.2)
                       : 1;
       if (!(mesh instanceof THREE.Group)) {
+        mesh.scale.setScalar(s);
+      } else if (p.kind === 'drone' || p.kind === 'rocket') {
         mesh.scale.setScalar(s);
       } else if (p.kind === 'bioplasma' || p.kind === 'boss-orb' || p.kind === 'boss-fan') {
         mesh.scale.setScalar(Math.max(0.12, p.visualRadius || p.radius));
@@ -2957,7 +2960,8 @@ export class SurvivorRenderer {
       mesh.visible = true;
       mesh.position.set((r.x0 + r.x1) / 2, 1.1, (r.z0 + r.z1) / 2);
       mesh.rotation.y = Math.atan2(dx, dz);
-      mesh.scale.set(1, 1, len);
+      const beam = Math.max(1, (r.width ?? 0.3) / 0.3);
+      mesh.scale.set(beam, Math.min(2.4, 0.85 + beam * 0.18), len);
       const mat = mesh.material as THREE.MeshBasicMaterial;
       mat.color.set(r.color);
       mat.opacity = Math.min(1, r.life * 5);

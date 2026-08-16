@@ -138,7 +138,7 @@ function placeEnemy(
   e.health = e.maxHealth;
   e.contactDamage = def.contactDamage;
   // Live-like movement: enemies close on the player at their real role speed.
-  e.speedMul = opts?.speedMul ?? 1;
+  e.speedMul = opts?.speedMul ?? 1 / SURVIVOR.hordeTravelMul;
   e.damageMul = 1;
   e.isElite = !!opts?.elite;
   e.xp = 1;
