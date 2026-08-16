@@ -496,6 +496,8 @@ describe('keybinds and ui scale', () => {
     expect(normalizeKeybinds({ repulsor: 'KeyF' }).dodge).toBe('Space');
     expect(resetKeybinds().dodge).toBe('Space');
     expect(assignKeybind(DEFAULT_KEYBINDS, 'dodge', 'KeyZ').dodge).toBe('KeyZ');
+    expect(DEFAULT_KEYBINDS.zoomIn).toBe('Equal');
+    expect(DEFAULT_KEYBINDS.zoomOut).toBe('Minus');
     expect(isMoveCode(DEFAULT_KEYBINDS, 'moveUp', 'KeyW')).toBe(true);
     expect(isMoveCode(DEFAULT_KEYBINDS, 'moveUp', 'ArrowUp')).toBe(true);
     expect(isMoveCode(DEFAULT_KEYBINDS, 'moveLeft', 'ArrowLeft')).toBe(true);
@@ -2687,6 +2689,7 @@ describe('pressure director surge composition', () => {
 describe('Cosmic Cleanup playtest tuning', () => {
   it('uses the balanced overview and quicker astronaut baseline', () => {
     expect(SURVIVOR.cameraHalf).toBeCloseTo(21, 6);
+    expect(SURVIVOR.cameraHalfMin).toBeCloseTo(12, 6);
     expect(SURVIVOR.playerSpeed).toBeCloseTo(9.79, 6);
     expect(SURVIVOR.hordeTravelMul).toBeCloseTo(1.38, 6);
     expect(SURVIVOR.bossTravelMul).toBeCloseTo(2.35, 6);
@@ -2702,6 +2705,88 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(shipCooldownFor(state)).toBe(30);
     state.passives['reinforced-airframe'] = 5;
     expect(shipCooldownFor(state)).toBe(25);
+  });
+
+  it('starts the gunship on the player side and flies away', () => {
+    const state = createSurvivorState('bee', null, 7041);
+    state.player.x = 0;
+    state.player.z = 18;
+    state.player.facingX = 0;
+    state.player.facingZ = 1;
+    state.weapons = [];
+    state.spawnAcc = -1e9;
+    forceStartProtocol(state, 'gunship-flyby', 1);
+    const d0 = Math.hypot(state.gunship.x0 - state.player.x, state.gunship.z0 - state.player.z);
+    const d1 = Math.hypot(state.gunship.x1 - state.player.x, state.gunship.z1 - state.player.z);
+    expect(d0).toBeLessThan(d1);
+    expect(SURVIVOR.gunship.laneHalfWidth).toBeCloseTo(12.4, 6);
+    expect(SURVIVOR.gunship.impactRadius).toBeCloseTo(7.6, 6);
+  });
+
+  it('doubles Pulsar Core radius at L1 and grows it through L5', () => {
+    expect(WEAPONS.pulsar.levels[0]!.radius).toBeCloseTo(16, 6);
+    expect(WEAPONS.pulsar.levels[4]!.radius).toBeCloseTo(20.8, 6);
+    for (let i = 1; i < 5; i += 1) {
+      expect(WEAPONS.pulsar.levels[i]!.radius!).toBeGreaterThan(WEAPONS.pulsar.levels[i - 1]!.radius!);
+    }
+  });
+
+  it('guarantees a double-size double-heal repair orb from elites', () => {
+    const state = createSurvivorState('bee', null, 7042);
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    const elite = emptyEnemy();
+    elite.id = state.nextId++;
+    elite.alive = true;
+    elite.isElite = true;
+    elite.defId = 'elite';
+    elite.x = 2;
+    elite.z = 0;
+    elite.health = 1;
+    elite.maxHealth = 1;
+    elite.xp = 1;
+    elite.speedMul = 0;
+    state.enemies.push(elite);
+    state.weapons = [{ weaponId: 'pulse', level: 5, cooldown: 0, focusDebt: 0, prototype: false }];
+    for (let i = 0; i < 20 && elite.alive; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    }
+    expect(elite.alive).toBe(false);
+    const eliteOrb = state.pickups.find((p) => p.active && p.kind === 'repair' && p.premium);
+    expect(eliteOrb).toBeTruthy();
+    expect(eliteOrb!.healFraction).toBeCloseTo(SURVIVOR.repair.eliteFraction, 6);
+    expect(eliteOrb!.visualScale).toBe(SURVIVOR.repair.notableVisualScale);
+    expect(SURVIVOR.repair.bossFraction).toBeCloseTo(0.9, 6);
+  });
+
+  it('Pulse Blaster is twice as large and speeds up through authored levels', () => {
+    expect(WEAPONS.pulse.levels[0]!.radius).toBeCloseTo(0.4, 6);
+    expect(WEAPONS.pulse.levels[1]!.cadence).toBeLessThan(WEAPONS.pulse.levels[0]!.cadence);
+    expect(WEAPONS.pulse.levels[2]!.cadence).toBeLessThan(WEAPONS.pulse.levels[1]!.cadence);
+    expect(weaponStatsAtLevel('pulse', 12).cadence).toBe(WEAPONS.pulse.levels[4]!.cadence);
+  });
+
+  it('Cosmic Boomerang is twice as large and does not return until it hits', () => {
+    expect(SURVIVOR.boomerang.visualRadiusMul).toBeCloseTo(3.1, 6);
+    expect(WEAPONS.boomerang.levels[0]!.radius).toBeCloseTo(0.5, 6);
+    const state = createSurvivorState('bee', null, 7043);
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.nextCacheTime = 1e9;
+    state.surge.nextSurgeAt = 1e9;
+    state.weapons = [{ weaponId: 'boomerang', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
+    let sawReturn = false;
+    let sawDisc = false;
+    for (let i = 0; i < 400; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+      for (const p of state.projectiles) {
+        if (!p.active || p.kind !== 'boomerang') continue;
+        sawDisc = true;
+        if (p.returning || p.homeStraight) sawReturn = true;
+      }
+    }
+    expect(sawDisc).toBe(true);
+    expect(sawReturn).toBe(false);
   });
 
   it('gives Mech baseline 25% damage reduction', () => {

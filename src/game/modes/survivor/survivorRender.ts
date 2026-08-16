@@ -1307,7 +1307,7 @@ export class SurvivorRenderer {
 
     const mech = this.makeFromUrl(hero.mech.url, hero.mech.anim, 'mech');
     if (mech) {
-      mech.root.scale.setScalar(1.0);
+      mech.root.scale.setScalar(SURVIVOR.actorScale.player);
       root.add(mech.root);
       mech.animator?.play('idle');
     }
@@ -1331,7 +1331,7 @@ export class SurvivorRenderer {
 
     // Allied ground marker so the player can always tell friend from horde.
     const glow = new THREE.Mesh(
-      new THREE.RingGeometry(1.05, 1.5, 32),
+      new THREE.RingGeometry(1.05 * SURVIVOR.actorScale.player, 1.5 * SURVIVOR.actorScale.player, 32),
       this.effectMat(hero.accent, 0.4, true),
     );
     glow.userData.ownsGeometry = true;
@@ -1721,7 +1721,7 @@ export class SurvivorRenderer {
             c.material.opacity = base * (full ? 0.32 : pulse);
           }
         });
-        const baseScale = 1.18;
+        const baseScale = 1.18 * (p.visualScale ?? 1);
         obj.scale.setScalar(
           full ? baseScale * 0.72 : expiring ? baseScale * (0.95 + Math.sin(performance.now() * 0.03) * 0.12) : baseScale,
         );
@@ -2018,7 +2018,7 @@ export class SurvivorRenderer {
     // The cache flyby is air support, not a boss collider. Keep it clearly larger than
     // the player's ship while leaving the firing lane, cannon beams and ground threats
     // visible beneath it.
-    root.scale.setScalar(SURVIVOR.actorScale.ship * 0.78);
+    root.scale.setScalar(SURVIVOR.actorScale.ship * SURVIVOR.gunship.visualScale);
     const thr = root.getObjectByName('gunship-thrusters');
     if (thr) {
       const flicker = 0.85 + Math.sin(performance.now() * 0.05) * 0.2;

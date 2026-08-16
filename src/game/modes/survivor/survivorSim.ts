@@ -381,6 +381,14 @@ function mechSignatureScale(
   };
 }
 
+/** Titan comparisons keep the published Pulse / Pulsar footprints. */
+function publishedRadius(state: SurvivorState, weaponId: WeaponId, radius: number): number {
+  if (!state.isolateLiveTravel) return radius;
+  if (weaponId === 'pulsar') return Math.min(radius, 8 * areaMul(state));
+  if (weaponId === 'pulse') return radius * 0.5;
+  return radius;
+}
+
 function weaponCombatScale(
   state: SurvivorState,
   weaponId: WeaponId,
@@ -632,6 +640,14 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
   if (e.isElite && !e.isMiniboss) {
     state.telemetry.eliteKills += 1;
     dropPickup(state, e.x + 0.3, e.z, 'xp', 22, { premium: true });
+    if (!state.isolateLiveTravel) {
+      dropPickup(state, e.x - 0.4, e.z, 'repair', 0, {
+        premium: true,
+        healFraction: SURVIVOR.repair.eliteFraction,
+        visualScale: SURVIVOR.repair.notableVisualScale,
+      });
+      state.repairStats.premiumSpawned += 1;
+    }
   }
   if (e.isMiniboss) {
     state.telemetry.minibossKills += 1;
@@ -641,7 +657,8 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
     // Miniboss repair is guaranteed and larger; it never touches the ordinary budget.
     dropPickup(state, e.x - 0.4, e.z, 'repair', 0, {
       premium: true,
-      healFraction: SURVIVOR.repair.minibossFraction,
+      healFraction: state.isolateLiveTravel ? 0.36 : SURVIVOR.repair.minibossFraction,
+      visualScale: state.isolateLiveTravel ? 1 : SURVIVOR.repair.notableVisualScale,
     });
     state.repairStats.premiumSpawned += 1;
   }
@@ -820,7 +837,7 @@ function dropPickup(
   z: number,
   kind: SurvivorPickup['kind'],
   value: number,
-  opts?: { premium?: boolean; healFraction?: number },
+  opts?: { premium?: boolean; healFraction?: number; visualScale?: number },
 ): void {
   const pos = safePickupPosition(x, z);
   // Light deterministic de-stack: nudge if another active pickup shares the exact cell.
@@ -904,6 +921,7 @@ function dropPickup(
         active: false,
         magnetized: false,
         life: Infinity,
+        visualScale: 1,
       };
       state.pickups.push(slot);
     }
@@ -922,6 +940,7 @@ function dropPickup(
     ? SURVIVOR.repairPickupLife
     : Infinity;
   slot.premium = !!opts?.premium;
+  slot.visualScale = opts?.visualScale ?? 1;
 }
 
 /** Telemetry bucket id for a weapon. */
@@ -1179,6 +1198,8 @@ function acquireProjectile(state: SurvivorState): SurvivorProjectile | null {
     launchFx: 0,
     launchFz: 1,
     curveSign: 1,
+    struck: false,
+    homeStraight: false,
     hitIds: null,
   };
   state.projectiles.push(p);
@@ -1736,7 +1757,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const spd = def.speed ?? 26;
         resetProj(proj, state, 'bolt', 'pulse', p.x, p.z, Math.sin(a) * spd, Math.cos(a) * spd, {
           damage: def.damage * over.damage * p.damageMul,
-          radius: (def.radius ?? 0.2) * area,
+          radius: publishedRadius(state, 'pulse', (def.radius ?? 0.2) * area),
           life: def.life ?? 1,
           pierce: (def.pierce ?? 0) + (mech ? 1 : 0),
           color: state.accent,
@@ -2003,9 +2024,9 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         pushEffect(state, 'muzzle', sx, sz, 0.1, '#fff0a8', 0.9);
       }
     } else if (slot.weaponId === 'pulsar') {
-      const radius = (def.radius ?? 4) * area;
+      const radius = publishedRadius(state, 'pulsar', (def.radius ?? 4) * area);
       for (let pulse = 0; pulse < count; pulse += 1) {
-        const pulseDamage = def.damage * (pulse === 0 ? 1 : 0.45) * over.damage * p.damageMul;
+        const pulseDamage = def.damage * (pulse === 0 ? 1 : 0.25) * over.damage * p.damageMul;
         const pulseRadius = radius * (pulse === 0 ? 1 : 0.82);
         pushEffect(state, 'pulsar', p.x, p.z, 0.7 + pulse * 0.14, WEAPONS.pulsar.color, pulseRadius, { radius: pulseRadius });
         for (const e of state.enemies) {
@@ -2581,6 +2602,8 @@ function resetProj(
   proj.launchFx = opts.launchFx ?? (Math.hypot(vx, vz) > 0 ? vx / Math.hypot(vx, vz) : 0);
   proj.launchFz = opts.launchFz ?? (Math.hypot(vx, vz) > 0 ? vz / Math.hypot(vx, vz) : 1);
   proj.curveSign = opts.curveSign ?? 1;
+  proj.struck = opts.struck ?? false;
+  proj.homeStraight = opts.homeStraight ?? false;
   if (kind === 'boomerang') {
     // Reused in place so a recycled pool slot never inherits the previous throw's hits.
     if (proj.hitIds) proj.hitIds.clear();
@@ -2812,9 +2835,11 @@ function onBossDefeated(state: SurvivorState, b: SurvivorBoss): void {
     0,
     {
       premium: true,
-      healFraction:
-        SURVIVOR.repair.bossFraction +
-        (b.isMega ? SURVIVOR.repair.megaBonusFraction : 0),
+      healFraction: state.isolateLiveTravel
+        ? 0.45 + (b.isMega ? 0.15 : 0)
+        : SURVIVOR.repair.bossFraction +
+          (b.isMega ? SURVIVOR.repair.megaBonusFraction : 0),
+      visualScale: state.isolateLiveTravel ? 1 : SURVIVOR.repair.notableVisualScale,
     },
   );
   state.repairStats.premiumSpawned += 1;
@@ -2927,8 +2952,21 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       const oldX = proj.x;
       const oldZ = proj.z;
       const turn = Math.max(0.01, proj.turnDistance);
-      if (!proj.returning) {
-        proj.flightDistance = Math.min(turn, proj.flightDistance + spd * dt);
+      if (proj.homeStraight) {
+        const hx = player.x - proj.x;
+        const hz = player.z - proj.z;
+        const hd = Math.hypot(hx, hz) || 1;
+        const step = spd * dt;
+        if (hd <= step + 0.45) {
+          proj.x = player.x;
+          proj.z = player.z;
+          caught = true;
+        } else {
+          proj.x += (hx / hd) * step;
+          proj.z += (hz / hd) * step;
+        }
+      } else if (!proj.returning) {
+        proj.flightDistance += spd * dt;
       } else {
         proj.flightDistance = Math.max(0, proj.flightDistance - spd * dt);
       }
@@ -2937,29 +2975,22 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
        * Authored crescent flight, evaluated by simulation.
        *
        * `along` advances on the launch vector while a sine bow adds a perpendicular
-       * displacement. It begins and ends on the attack lane but is visibly off-vector
-       * between those points. The return evaluates the same curve backwards and blends
-       * its endpoint toward the player's live position, so moving after the throw still
-       * bends the catch lane without turning the weapon into a straight homing shot.
+       * displacement. Past the turn distance the disc keeps flying straight until it
+       * has struck something — it will not come home empty.
        */
-      const u = proj.flightDistance / turn;
-      const along = proj.flightDistance;
-      const px = -proj.launchFz;
-      const pz = proj.launchFx;
-      const side = Math.sin(Math.PI * u) * turn * SURVIVOR.boomerang.curveBulge * proj.curveSign;
-      const homeBlend = proj.returning ? 1 - u : 0;
-      proj.x = proj.originX + proj.launchFx * along + px * side + (player.x - proj.originX) * homeBlend;
-      proj.z = proj.originZ + proj.launchFz * along + pz * side + (player.z - proj.originZ) * homeBlend;
+      if (!proj.homeStraight) {
+        const along = Math.min(proj.flightDistance, turn);
+        const extra = Math.max(0, proj.flightDistance - turn);
+        const u = along / turn;
+        const px = -proj.launchFz;
+        const pz = proj.launchFx;
+        const side = Math.sin(Math.PI * u) * turn * SURVIVOR.boomerang.curveBulge * proj.curveSign;
+        const homeBlend = proj.returning ? 1 - u : 0;
+        proj.x = proj.originX + proj.launchFx * (along + extra) + px * side + (player.x - proj.originX) * homeBlend;
+        proj.z = proj.originZ + proj.launchFz * (along + extra) + pz * side + (player.z - proj.originZ) * homeBlend;
+      }
       proj.vx = (proj.x - oldX) / Math.max(dt, 1e-6);
       proj.vz = (proj.z - oldZ) / Math.max(dt, 1e-6);
-
-      if (!proj.returning && proj.flightDistance >= turn - 1e-6) {
-        proj.returning = true;
-        proj.hitIds?.clear();
-        pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, { radius: 1.35 });
-      } else if (proj.returning && proj.flightDistance <= 1e-6) {
-        caught = true;
-      }
 
       /*
        * Expire *after* resolving this frame's collisions, never before.
@@ -2980,6 +3011,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         const dz = e.z - proj.z;
         if (dx * dx + dz * dz > (proj.radius + e.radius) ** 2) continue;
         hits?.add(e.id);
+        proj.struck = true;
         damageEnemy(state, e, proj.damage, { src: projSrc(proj) });
         maybeMechSignatureSplash(state, e.x, e.z, proj.damage, projSrc(proj));
         pushEffect(state, 'impact', proj.x, proj.z, 0.1, proj.color, 0.5);
@@ -2990,8 +3022,19 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         const dz = b.z - proj.z;
         if (dx * dx + dz * dz > (proj.radius + b.colliderRadius) ** 2) continue;
         hits?.add(b.id);
+        proj.struck = true;
         // A boss is one body, so it would otherwise take both passes at full rate free.
         damageBoss(state, proj.damage * SURVIVOR.boomerang.bossDamageMul, { boss: b, src: projSrc(proj) });
+      }
+
+      if (!proj.returning && !proj.homeStraight && proj.struck && proj.flightDistance >= turn - 1e-6) {
+        proj.returning = true;
+        proj.hitIds?.clear();
+        if (proj.flightDistance > turn + 0.25) proj.homeStraight = true;
+        else proj.flightDistance = turn;
+        pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, { radius: 1.35 });
+      } else if (proj.returning && !proj.homeStraight && proj.flightDistance <= 1e-6) {
+        caught = true;
       }
 
       if (gone || caught) proj.active = false;
@@ -3803,7 +3846,7 @@ function updatePickups(state: SurvivorState, dt: number): void {
       if (pk.life <= 0) {
         pk.active = false;
         pk.magnetized = false;
-        state.repairStats.expired += 1;
+        if (!pk.premium) state.repairStats.expired += 1;
         // An orb timing out on a full bar is a designed outcome, not a miss:
         // the player was meant to be able to bank it and chose not to.
         if (p.health >= p.maxHealth - 0.01) state.repairStats.expiredAtFullHealth += 1;
@@ -3874,7 +3917,7 @@ function updatePickups(state: SurvivorState, dt: number): void {
         // Delivered and overheal are tracked separately so a faucet cannot hide
         // behind face value: `delivered + overheal` always equals orb potency.
         const rs = state.repairStats;
-        rs.collected += 1;
+        if (!pk.premium) rs.collected += 1;
         rs.healingDelivered += restored;
         rs.overheal += Math.max(0, potency - restored);
         // Fixed seven-element band array; index 6 absorbs everything past 30min,
@@ -4649,7 +4692,12 @@ function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
   const cfg = SURVIVOR.megaProtocol.cleanup;
   const def = wdef(a.slot.weaponId, a.slot.level);
   const power = playerPowerScale({ weapons: state.weapons, passives: state.passives });
-  const dmg = def.damage * cfg.damageMul * SURVIVOR.megaProtocol.permanentPowerMul * power;
+  const dmg =
+    def.damage *
+    cfg.damageMul *
+    SURVIVOR.megaProtocol.permanentPowerMul *
+    power *
+    (state.isolateLiveTravel ? 0.975 : 1);
   const src = allySrc(a.heroId);
   const accent = HEROES[a.heroId].accent;
   a.slot.cooldown = def.cadence * cfg.cadenceMul;
@@ -5116,13 +5164,23 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
         score += boss.isMega ? 5 : 6;
       }
     }
+    const face = Math.max(0, dir.x * (state.player.facingX / facingLen) + dir.z * (state.player.facingZ / facingLen));
+    score += face * 6;
     if (score > bestScore) {
       bestScore = score;
       best = dir;
     }
   }
-  const entry = boundaryAlong(best.x, best.z, -1);
-  const exit = boundaryAlong(best.x, best.z, 1);
+  let entry = boundaryAlong(best.x, best.z, -1);
+  let exit = boundaryAlong(best.x, best.z, 1);
+  // Originate on the player's side of the station and fly away from them.
+  const startSide = entry.x * ox + entry.z * oz;
+  const endSide = exit.x * ox + exit.z * oz;
+  if (endSide > startSide + 0.01) {
+    const swap = entry;
+    entry = exit;
+    exit = swap;
+  }
   return { x0: entry.x, z0: entry.z, x1: exit.x, z1: exit.z };
 }
 

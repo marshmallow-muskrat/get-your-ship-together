@@ -90,6 +90,7 @@ export class SurvivorHud {
   private onStartRebind: (a: ActionId) => void;
   private onResetKeybinds: () => void;
   private onUiScale: (s: number) => void;
+  private onCameraHalf: (half: number) => void;
   private onUpgradeNumbers: (on: boolean) => void;
   /** Whether upgrade cards show raw stat lines; persisted, default on. */
   private upgradeNumbers = true;
@@ -126,6 +127,7 @@ export class SurvivorHud {
       onStartRebind: (a: ActionId) => void;
       onResetKeybinds: () => void;
       onUiScale?: (s: number) => void;
+      onCameraHalf?: (half: number) => void;
       onUpgradeNumbers?: (on: boolean) => void;
       onOpenLeaderboard?: () => void;
       getKeybinds: () => KeybindMap;
@@ -141,6 +143,7 @@ export class SurvivorHud {
     this.onStartRebind = handlers.onStartRebind;
     this.onResetKeybinds = handlers.onResetKeybinds;
     this.onUiScale = handlers.onUiScale ?? (() => undefined);
+    this.onCameraHalf = handlers.onCameraHalf ?? (() => undefined);
     this.onUpgradeNumbers = handlers.onUpgradeNumbers ?? (() => undefined);
     this.onOpenLeaderboard = handlers.onOpenLeaderboard ?? (() => undefined);
     this.getKeybinds = handlers.getKeybinds;
@@ -270,6 +273,13 @@ export class SurvivorHud {
             <span id="sv-upgrade-numbers-val">OFF</span>
           </div>
         </div>
+        <div class="sv-ui-scale-row">
+          <label class="eyebrow" for="sv-camera-half">CAMERA DISTANCE</label>
+          <div class="sv-ui-scale-controls">
+            <input type="range" id="sv-camera-half" min="12" max="21" step="1" value="21" />
+            <span id="sv-camera-half-val">21</span>
+          </div>
+        </div>
         <div id="sv-bind-list" class="sv-bind-list"></div>
         <div class="sv-end-actions">
           <button type="button" id="sv-reset-binds" class="sv-btn ghost">RESET TO DEFAULTS</button>
@@ -343,6 +353,7 @@ export class SurvivorHud {
       </div>
       <div id="sv-help" class="sv-help">
         <span id="sv-help-move">WASD / arrows move</span>
+        <span id="sv-help-zoom">- / = zoom</span>
         <span id="sv-help-pause">Esc pause</span>
       </div>
     `;
@@ -375,6 +386,13 @@ export class SurvivorHud {
     });
     const nums = this.root.querySelector<HTMLInputElement>('#sv-upgrade-numbers');
     nums?.addEventListener('change', () => this.onUpgradeNumbers(nums.checked));
+    const cam = this.root.querySelector<HTMLInputElement>('#sv-camera-half');
+    cam?.addEventListener('input', () => {
+      const v = Number(cam.value);
+      const lab = this.root.querySelector('#sv-camera-half-val');
+      if (lab) lab.textContent = String(v);
+      this.onCameraHalf(v);
+    });
   }
 
   /**
@@ -399,6 +417,13 @@ export class SurvivorHud {
     if (el) el.value = String(Math.round(scale * 100));
     const lab = this.root.querySelector('#sv-ui-scale-val');
     if (lab) lab.textContent = `${Math.round(scale * 100)}%`;
+  }
+
+  setCameraHalf(half: number): void {
+    const el = this.root.querySelector<HTMLInputElement>('#sv-camera-half');
+    if (el) el.value = String(half);
+    const lab = this.root.querySelector('#sv-camera-half-val');
+    if (lab) lab.textContent = String(half);
   }
 
   setLeaderboardOpen(open: boolean): void {
@@ -564,6 +589,10 @@ export class SurvivorHud {
     const helpPause = this.root.querySelector('#sv-help-pause');
     if (helpPause) {
       helpPause.innerHTML = `<kbd>${formatKeyCode(binds.pause)}</kbd> pause`;
+    }
+    const helpZoom = this.root.querySelector('#sv-help-zoom');
+    if (helpZoom) {
+      helpZoom.innerHTML = `<kbd>${formatKeyCode(binds.zoomOut)}</kbd> / <kbd>${formatKeyCode(binds.zoomIn)}</kbd> zoom`;
     }
     this.buildBindList();
     this.lastBindKey = JSON.stringify(binds);

@@ -150,6 +150,10 @@ export interface SurvivorProjectile {
   launchFz: number;
   /** Handedness of the curve. Twin Orbit deliberately uses opposite signs. */
   curveSign: -1 | 1;
+  /** True once this throw has struck a monster or boss. Return waits on this. */
+  struck: boolean;
+  /** After an overshoot, fly straight home instead of rewinding the crescent. */
+  homeStraight: boolean;
   hitIds: Set<number> | null;
   /**
    * Telemetry bucket override.
@@ -333,6 +337,8 @@ export interface SurvivorPickup {
   life: number;
   /** High-value energy bundle (same type, larger visual). */
   premium?: boolean;
+  /** Drawn scale. Elite/boss repair orbs use 2 so the bigger heal is obvious. */
+  visualScale?: number;
 }
 
 export interface SurvivorWeaponSlot {

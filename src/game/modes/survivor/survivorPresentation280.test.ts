@@ -1260,6 +1260,17 @@ describe('§10 Cleanup Crew allies show their propulsion', () => {
     return out;
   }
 
+  it('draws allied Mechs at the same scale as the player Mech', () => {
+    const { renderer, state } = crewScene(9964);
+    expect(state.allies.some((a) => a.active && a.phase === 'active')).toBe(true);
+    let sawMech = false;
+    renderer.root.traverse((o) => {
+      if (Math.abs(o.scale.x - SURVIVOR.actorScale.player) < 0.02) sawMech = true;
+    });
+    expect(sawMech).toBe(true);
+    renderer.dispose();
+  });
+
   it('gives every deployed ally exactly two bounded thruster plumes', () => {
     const { renderer, state } = crewScene(9960);
     const deployed = state.allies.filter((a) => a.active).length;

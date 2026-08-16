@@ -20,6 +20,9 @@ import { SurvivorRenderer } from './survivorRender';
 import { SurvivorHud } from './survivorHud';
 import {
   assignKeybind,
+  CAMERA_HALF_DEFAULT,
+  CAMERA_HALF_STEP,
+  clampCameraHalf,
   clampUiScale,
   findActionForCode,
   formatKeyCode,
@@ -78,6 +81,7 @@ export class SurvivorMode {
   private keybinds: KeybindMap = loadSettings().keybinds;
   private uiScale = loadSettings().uiScale;
   private upgradeNumbers = loadSettings().upgradeNumbers;
+  private cameraHalf = loadSettings().cameraHalf;
   private settingsOpen = false;
   private rebindingAction: ActionId | null = null;
   /** Block gameplay input while rebinding or settings open */
@@ -154,6 +158,13 @@ export class SurvivorMode {
       e.stopPropagation();
       this.hud?.setStatsOpen(false);
       this.codesDown.delete(code);
+      return;
+    }
+
+    const zoomAction = findActionForCode(this.keybinds, code);
+    if (zoomAction === 'zoomIn' || zoomAction === 'zoomOut') {
+      e.preventDefault();
+      this.nudgeCamera(zoomAction === 'zoomIn' ? -CAMERA_HALF_STEP : CAMERA_HALF_STEP);
       return;
     }
 
@@ -251,7 +262,10 @@ export class SurvivorMode {
     room.dispose();
     pmrem.dispose();
 
-    this.camera = SurvivorArena.createFixedCamera(window.innerWidth / Math.max(1, window.innerHeight));
+    this.camera = SurvivorArena.createFixedCamera(
+      window.innerWidth / Math.max(1, window.innerHeight),
+      this.cameraHalf,
+    );
     this.arena = new SurvivorArena();
     this.actors = new SurvivorRenderer(this.assets);
 
@@ -324,13 +338,17 @@ export class SurvivorMode {
         this.keybinds = resetKeybinds();
         this.uiScale = 1;
         this.upgradeNumbers = UPGRADE_NUMBERS_DEFAULT;
+        this.cameraHalf = CAMERA_HALF_DEFAULT;
         this.persistSettings();
         this.applyUiScale(1);
         this.hud?.setUiScale(1);
         this.hud?.setUpgradeNumbers(this.upgradeNumbers);
+        this.hud?.setCameraHalf(this.cameraHalf);
         this.hud?.refreshKeybindLabels(this.keybinds);
+        this.resize();
       },
       onUiScale: (s: number) => this.setUiScale(s),
+      onCameraHalf: (half: number) => this.setCameraHalf(half),
       onUpgradeNumbers: (on: boolean) => this.setUpgradeNumbers(on),
       onOpenLeaderboard: () => this.hud?.setLeaderboardOpen(true),
 
@@ -341,6 +359,7 @@ export class SurvivorMode {
     this.applyUiScale(this.uiScale);
     this.hud.setUiScale(this.uiScale);
     this.hud.setUpgradeNumbers(this.upgradeNumbers);
+    this.hud.setCameraHalf(this.cameraHalf);
 
     this.bindWindowListeners();
     this.canvas.classList.add('game-mode');
@@ -587,7 +606,7 @@ export class SurvivorMode {
     this.renderer.setSize(w, h, false);
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
-    SurvivorArena.resizeFixedCamera(this.camera, w, h);
+    SurvivorArena.resizeFixedCamera(this.camera, w, h, this.cameraHalf);
   }
 
   private sampleInput(): SurvivorInput {
@@ -736,7 +755,19 @@ export class SurvivorMode {
       keybinds: this.keybinds,
       uiScale: this.uiScale,
       upgradeNumbers: this.upgradeNumbers,
+      cameraHalf: this.cameraHalf,
     });
+  }
+
+  setCameraHalf(half: number): void {
+    this.cameraHalf = clampCameraHalf(half);
+    this.persistSettings();
+    this.hud?.setCameraHalf(this.cameraHalf);
+    this.resize();
+  }
+
+  private nudgeCamera(delta: number): void {
+    this.setCameraHalf(this.cameraHalf + delta);
   }
 
   setUpgradeNumbers(on: boolean): void {

@@ -287,17 +287,22 @@ export class SurvivorArena {
     this.fillLight.position.set(x + 12, 8, z - 10);
   }
 
-  static createFixedCamera(aspect: number): THREE.OrthographicCamera {
-    const { viewW, viewH } = SurvivorArena.viewSize(aspect);
+  static createFixedCamera(aspect: number, half: number = SURVIVOR.cameraHalf): THREE.OrthographicCamera {
+    const { viewW, viewH } = SurvivorArena.viewSize(aspect, half);
     const cam = new THREE.OrthographicCamera(-viewW / 2, viewW / 2, viewH / 2, -viewH / 2, 0.1, 180);
     cam.up.set(0, 1, 0);
     SurvivorArena.followPlayer(cam, 0, 0);
     return cam;
   }
 
-  static resizeFixedCamera(cam: THREE.OrthographicCamera, width: number, height: number): void {
+  static resizeFixedCamera(
+    cam: THREE.OrthographicCamera,
+    width: number,
+    height: number,
+    half: number = SURVIVOR.cameraHalf,
+  ): void {
     const aspect = width / Math.max(1, height);
-    const { viewW, viewH } = SurvivorArena.viewSize(aspect);
+    const { viewW, viewH } = SurvivorArena.viewSize(aspect, half);
     cam.left = -viewW / 2;
     cam.right = viewW / 2;
     cam.top = viewH / 2;
@@ -305,8 +310,7 @@ export class SurvivorArena {
     cam.updateProjectionMatrix();
   }
 
-  private static viewSize(aspect: number): { viewW: number; viewH: number } {
-    const half = SURVIVOR.cameraHalf;
+  private static viewSize(aspect: number, half: number = SURVIVOR.cameraHalf): { viewW: number; viewH: number } {
     let viewH = half * 2;
     let viewW = viewH * aspect;
     const minW = half * 2 * 1.05;

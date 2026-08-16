@@ -33,6 +33,7 @@ import {
   displayName,
   repairOrbBonusAtLevel,
   shipDamageTakenMul,
+  shipCooldownAtLevel,
   weaponStatsAtLevel,
   type PassiveId,
   type WeaponId,
@@ -457,8 +458,12 @@ export function passiveCard(
       // compare is how survivable the form actually becomes.
       const at = (lv: number) => round((1 - shipDamageTakenMul(lv)) * 100);
       stats.push(`Afterburner damage taken −${at(currentLevel)}% → −${at(next)}%`);
+      stats.push(
+        `Afterburner recharge ${shipCooldownAtLevel(currentLevel)}s → ${shipCooldownAtLevel(next)}s`,
+      );
       stats.push(`Afterburner window ${SURVIVOR.ship.duration.toFixed(2)}s`);
-      summary = 'Afterburner takes less damage. Astronaut and Mech stay the same.';
+      summary =
+        'Afterburner takes less damage and recharges 1s faster per level. Astronaut and Mech stay the same.';
       break;
     }
   }

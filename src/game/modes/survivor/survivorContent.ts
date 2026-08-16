@@ -89,8 +89,9 @@ export const SURVIVOR = {
   combatSpawnHalf: 32,
   /** Stable boss entry distance, independent of the expanded global platform. */
   bossSpawnRadius: 14,
-  /** Wider overview so a closing boss stays on-screen when the player kites. */
+  /** Default and maximum camera distance. Players may zoom in from here. */
   cameraHalf: 21,
+  cameraHalfMin: 12,
   actorScale: {
     player: 1.5,
     enemy: 1.5,
@@ -270,18 +271,22 @@ export const SURVIVOR = {
     fraction: 0.18,
     /** @deprecated Flat 100-integrity fixture equivalent; production uses `fraction`. */
     value: 18,
-    /** Miniboss guaranteed reward. */
-    minibossFraction: 0.36,
+    /** Elite guaranteed reward: 2× an ordinary orb. */
+    eliteFraction: 0.36,
+    /** Miniboss guaranteed reward: 2× the previous miniboss orb. */
+    minibossFraction: 0.72,
     /** @deprecated Flat 100-integrity fixture equivalent. */
-    minibossValue: 36,
-    /** Boss guaranteed reward. */
-    bossFraction: 0.45,
+    minibossValue: 72,
+    /** Boss guaranteed reward: 2× the previous boss orb. */
+    bossFraction: 0.9,
     /** @deprecated Flat 100-integrity fixture equivalent. */
-    bossValue: 45,
+    bossValue: 90,
     /** Added to the boss fraction for a Mega-Boss reward. */
-    megaBonusFraction: 0.15,
+    megaBonusFraction: 0.3,
     /** @deprecated Flat 100-integrity fixture equivalent. */
-    megaBonus: 15,
+    megaBonus: 30,
+    /** Drawn scale for elite/boss/miniboss repair orbs so the 2× heal is obvious. */
+    notableVisualScale: 2,
   },
   gunship: {
     /** Warning lane duration before damage begins. */
@@ -289,11 +294,13 @@ export const SURVIVOR = {
     /** Active strafing duration after warning. */
     strafeDuration: 4.6,
     fireInterval: 0.16,
-    laneHalfWidth: 6.2,
+    laneHalfWidth: 12.4,
     enemyDamage: 38,
     bossDamage: 95,
-    impactRadius: 3.8,
+    impactRadius: 7.6,
     flyHeight: 6.5,
+    /** Cache flyby silhouette; 2× the previous ship so the doubled corridor reads. */
+    visualScale: 1.56,
     /** Percentage damage scales with every boss health curve automatically. */
     bossHealthFraction: 0.1,
     megaHealthFraction: 0.05,
@@ -680,7 +687,7 @@ export const SURVIVOR = {
     /** Maximum lateral bow as a fraction of turn distance. */
     curveBulge: 0.04,
     /** Decorative silhouette only; collision remains the authored projectile radius. */
-    visualRadiusMul: 1.55,
+    visualRadiusMul: 3.1,
     /** Diverging bearing between the pair at Twin Orbit, in radians. */
     twinSpread: 0.42,
     bossDamageMul: 0.75,
@@ -869,11 +876,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // Structural growth is capped at 2x projectiles across L1-L5; the rest of the
       // curve comes from per-shot damage and cadence, so L5 lands near 3.3x L1. Twin
       // Pulse at L4 is the one level that changes what the weapon is.
-      { level: 1, damage: 14, cadence: 0.32, count: 1, speed: 26, pierce: 0, life: 1.0, radius: 0.2 },
-      { level: 2, damage: 16, cadence: 0.281, count: 1, speed: 27, pierce: 0, life: 1.0, radius: 0.21 },
-      { level: 3, damage: 18, cadence: 0.237, count: 1, speed: 28, pierce: 0, life: 1.05, radius: 0.22 },
-      { tier: 'Twin Pulse', level: 4, damage: 20, cadence: 0.387, count: 2, speed: 29, pierce: 0, life: 1.1, radius: 0.23 },
-      { level: 5, damage: 22, cadence: 0.301, count: 2, speed: 31, pierce: 0, life: 1.15, radius: 0.25 },
+      { level: 1, damage: 14, cadence: 0.32, count: 1, speed: 26, pierce: 0, life: 1.0, radius: 0.4 },
+      { level: 2, damage: 16, cadence: 0.281, count: 1, speed: 27, pierce: 0, life: 1.0, radius: 0.42 },
+      { level: 3, damage: 18, cadence: 0.237, count: 1, speed: 28, pierce: 0, life: 1.05, radius: 0.44 },
+      { tier: 'Twin Pulse', level: 4, damage: 20, cadence: 0.387, count: 2, speed: 29, pierce: 0, life: 1.1, radius: 0.46 },
+      { level: 5, damage: 22, cadence: 0.301, count: 2, speed: 31, pierce: 0, life: 1.15, radius: 0.5 },
     ],
   },
   microdrone: {
@@ -1112,11 +1119,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
     description: 'A periodic radial discharge centered on the hero.',
     color: '#b899ff',
     levels: [
-      { level: 1, damage: 42, cadence: 3.2, count: 1, radius: 8.0, life: 0.35 },
-      { level: 2, damage: 54, cadence: 3.2, count: 1, radius: 8.0, life: 0.38 },
-      { level: 3, damage: 70, cadence: 3.2, count: 1, radius: 8.0, life: 0.42 },
-      { level: 4, damage: 90, cadence: 3.2, count: 1, radius: 8.0, life: 0.46 },
-      { tier: 'Echo Pulsar', level: 5, damage: 108, cadence: 3.2, count: 2, radius: 8.0, life: 0.5 },
+      { level: 1, damage: 42, cadence: 3.2, count: 1, radius: 16.0, life: 0.35 },
+      { level: 2, damage: 54, cadence: 3.2, count: 1, radius: 17.2, life: 0.38 },
+      { level: 3, damage: 70, cadence: 3.2, count: 1, radius: 18.4, life: 0.42 },
+      { level: 4, damage: 90, cadence: 3.2, count: 1, radius: 19.6, life: 0.46 },
+      { tier: 'Echo Pulsar', level: 5, damage: 108, cadence: 3.2, count: 2, radius: 20.8, life: 0.5 },
     ],
   },
 

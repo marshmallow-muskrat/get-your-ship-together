@@ -15,7 +15,9 @@ export type ActionId =
   | 'choice1'
   | 'choice2'
   | 'choice3'
-  | 'mute';
+  | 'mute'
+  | 'zoomIn'
+  | 'zoomOut';
 
 export type KeybindMap = Record<ActionId, string>;
 
@@ -33,6 +35,8 @@ export const ACTION_LABELS: Record<ActionId, string> = {
   choice2: 'Level-Up Choice 2',
   choice3: 'Level-Up Choice 3',
   mute: 'Mute',
+  zoomIn: 'Zoom In',
+  zoomOut: 'Zoom Out',
 };
 
 export const DEFAULT_KEYBINDS: KeybindMap = {
@@ -49,6 +53,8 @@ export const DEFAULT_KEYBINDS: KeybindMap = {
   choice2: 'Digit2',
   choice3: 'Digit3',
   mute: 'KeyM',
+  zoomIn: 'Equal',
+  zoomOut: 'Minus',
 };
 
 const ALL_ACTIONS = Object.keys(DEFAULT_KEYBINDS) as ActionId[];
@@ -110,6 +116,7 @@ export interface StoredSettings {
    * Persisted so players who prefer the cleaner cards can still turn them off.
    */
   upgradeNumbers: boolean;
+  cameraHalf: number;
 }
 
 export const UPGRADE_NUMBERS_DEFAULT = true;
@@ -124,6 +131,18 @@ export function clampUiScale(v: unknown): number {
   if (!Number.isFinite(n)) return UI_SCALE_DEFAULT;
   const stepped = Math.round(n * 20) / 20; // 0.05 steps
   return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, stepped));
+}
+
+export const CAMERA_HALF_DEFAULT = 21;
+export const CAMERA_HALF_MIN = 12;
+export const CAMERA_HALF_MAX = 21;
+export const CAMERA_HALF_STEP = 1;
+
+export function clampCameraHalf(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return CAMERA_HALF_DEFAULT;
+  const stepped = Math.round(n / CAMERA_HALF_STEP) * CAMERA_HALF_STEP;
+  return Math.min(CAMERA_HALF_MAX, Math.max(CAMERA_HALF_MIN, stepped));
 }
 
 export function loadSettings(): StoredSettings {
@@ -142,6 +161,7 @@ export function loadSettings(): StoredSettings {
       keybinds?: unknown;
       uiScale?: unknown;
       upgradeNumbers?: unknown;
+      cameraHalf?: unknown;
     };
     if (p.version !== 1) return defaultSettings();
     return {
@@ -151,6 +171,7 @@ export function loadSettings(): StoredSettings {
       // Settings written before endless-2.8.0 have no such key and must read as the
       // default rather than as enabled.
       upgradeNumbers: clampUpgradeNumbers(p.upgradeNumbers),
+      cameraHalf: clampCameraHalf(p.cameraHalf ?? CAMERA_HALF_DEFAULT),
     };
   } catch {
     return defaultSettings();
@@ -163,6 +184,7 @@ function defaultSettings(): StoredSettings {
     keybinds: cloneDefaults(),
     uiScale: UI_SCALE_DEFAULT,
     upgradeNumbers: UPGRADE_NUMBERS_DEFAULT,
+    cameraHalf: CAMERA_HALF_DEFAULT,
   };
 }
 
@@ -174,6 +196,7 @@ export function saveSettings(settings: StoredSettings): void {
       keybinds: normalizeKeybinds(settings.keybinds),
       uiScale: clampUiScale(settings.uiScale),
       upgradeNumbers: clampUpgradeNumbers(settings.upgradeNumbers),
+      cameraHalf: clampCameraHalf(settings.cameraHalf),
     };
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload));
   } catch {
@@ -286,4 +309,6 @@ export const REBINDABLE_ACTIONS: ActionId[] = [
   'choice2',
   'choice3',
   'mute',
+  'zoomIn',
+  'zoomOut',
 ];
