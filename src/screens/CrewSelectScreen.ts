@@ -209,7 +209,6 @@ export class CrewSelectScreen {
       </aside>
       <div class="corner-actions" aria-label="Screen actions">
         <div class="utility-actions">
-          <button class="select-hero-button exit-button" type="button" id="exit-button">EXIT</button>
           <button class="select-hero-button audio-button" type="button" id="audio-button">MUSIC ON · M</button>
         </div>
         <div class="mode-actions">
@@ -267,9 +266,6 @@ export class CrewSelectScreen {
     this.hud.querySelector('#audio-button')?.addEventListener('click', () => {
       this.audio.setMuted(!this.audio.isMuted());
       this.updateAudioLabel();
-    });
-    this.hud.querySelector('#exit-button')?.addEventListener('click', () => {
-      // Soft exit: stay on selection.
     });
     this.updateAudioLabel();
   }

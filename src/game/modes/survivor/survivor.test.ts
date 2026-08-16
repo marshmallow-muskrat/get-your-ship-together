@@ -108,11 +108,13 @@ import {
 } from './survivorKeybinds';
 import {
   LEADERBOARDS_STORAGE_KEY,
+  MAX_ARCHIVED_PARTITIONS,
   MAX_LEADERBOARD_ENTRIES,
   MAX_RUN_HISTORY_ENTRIES,
   RECORDS_STORAGE_KEY,
   formatSurvivalTime,
   getHeroLeaderboard,
+  getHeroLeaderboardArchive,
   getRunHistory,
   loadLeaderboards,
   loadRecords,
@@ -532,6 +534,68 @@ describe('per-hero leaderboards', () => {
     }
     expect(getHeroLeaderboard('flamingo').length).toBe(MAX_LEADERBOARD_ENTRIES);
     expect(getRunHistory('flamingo').length).toBe(12);
+  });
+
+  it('gives a new balance partition its own ten places', () => {
+    // Ten strong runs on the previous balance line.
+    for (let i = 0; i < MAX_LEADERBOARD_ENTRIES; i += 1) {
+      const archived = makeRunSummary({
+        survivalTime: 1200 + i,
+        kills: 500,
+        level: 30,
+        bossesDefeated: 9,
+        heroId: 'bee',
+        weapons: [],
+        passives: {},
+      });
+      archived.balanceVersion = 'endless-legacy';
+      recordRun(archived);
+    }
+    expect(getHeroLeaderboard('bee')).toHaveLength(0);
+
+    // A modest run on the current line is slower than every archived run. It used to be
+    // ranked against them, dropped, and never shown: the board stayed empty and the
+    // player's run vanished.
+    recordRun(
+      makeRunSummary({
+        survivalTime: 120,
+        kills: 20,
+        level: 4,
+        bossesDefeated: 0,
+        heroId: 'bee',
+        weapons: [],
+        passives: {},
+      }),
+    );
+
+    const board = getHeroLeaderboard('bee');
+    expect(board).toHaveLength(1);
+    expect(board[0]?.survivalTime).toBe(120);
+    // The archive is still intact behind it.
+    expect(getHeroLeaderboardArchive('bee')).toHaveLength(MAX_LEADERBOARD_ENTRIES + 1);
+    // And the all-time best still reads across partitions.
+    expect(loadRecords().bestByHero.bee?.survivalTime).toBe(1209);
+  });
+
+  it('retires the oldest partition instead of storing one per patch', () => {
+    for (const version of ['v-old', 'v-older', 'v-oldest', 'v-ancient']) {
+      const run = makeRunSummary({
+        survivalTime: 300,
+        kills: 10,
+        level: 5,
+        bossesDefeated: 1,
+        heroId: 'frog',
+        weapons: [],
+        passives: {},
+      });
+      run.balanceVersion = version;
+      run.timestamp += ['v-ancient', 'v-oldest', 'v-older', 'v-old'].indexOf(version);
+      recordRun(run);
+    }
+    const stored = getHeroLeaderboardArchive('frog');
+    const versions = new Set(stored.map((r) => r.balanceVersion));
+    expect(versions.size).toBeLessThanOrEqual(MAX_ARCHIVED_PARTITIONS + 1);
+    expect(versions.has('v-ancient')).toBe(false);
   });
 
   it('keeps recent non-record runs in bounded chronological history', () => {

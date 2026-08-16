@@ -2,7 +2,6 @@ import { HEROES } from '../../content/heroes';
 import {
   PASSIVES,
   SURVIVOR,
-  SURVIVOR_BALANCE_VERSION,
   WEAPONS,
   displayName,
   formatOverclockLabel,
@@ -37,6 +36,21 @@ import {
 import { aliveBossCount, primaryBoss } from './survivorState';
 import { renderStoredRunReport } from './storedRunReport';
 import type { HeroId } from '../../content/heroes';
+
+/**
+ * Whether this build should wear the TEST CENTER badge.
+ *
+ * The badge marks an internal balance candidate, so it must never appear on the build a
+ * player launches — it shipped on every production HUD, including marketing screenshots.
+ * A dev server, a fixture route, or an explicit `?testcenter=1` is a developer; nothing
+ * else is.
+ */
+function isTestCenterBuild(): boolean {
+  if (import.meta.env.DEV) return true;
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.has('fixture') || params.get('testcenter') === '1';
+}
 
 /** Run-report views. Source and form remain separate top-level views. */
 type StatsTab = 'source' | 'form' | 'run';
@@ -130,7 +144,7 @@ export class SurvivorHud {
         <div class="sv-identity">
           <div class="sv-protocol-line">
             <span class="eyebrow">CONTAINMENT PROTOCOL</span>
-            <span class="sv-test-tag">TEST CENTER</span>
+            ${isTestCenterBuild() ? '<span class="sv-test-tag">TEST CENTER</span>' : ''}
           </div>
           <strong id="sv-hero">—</strong>
         </div>
@@ -449,7 +463,9 @@ export class SurvivorHud {
       if (runs.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'sv-lb-empty';
-        empty.textContent = `No ${SURVIVOR_BALANCE_VERSION} runs yet. Older scores are archived by balance version.`;
+        // Players do not know what a balance version is; scores reset on a balance
+        // change and the message has to say that in those words.
+        empty.textContent = 'No ranked runs yet. Survive a run to open this board.';
         list.appendChild(empty);
       } else {
         runs.forEach((r, i) => {
