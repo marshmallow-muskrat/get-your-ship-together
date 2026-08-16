@@ -211,7 +211,10 @@ export function formatKeyCode(code: string): string {
   if (!code) return '?';
   if (code.startsWith('Key') && code.length === 4) return code.slice(3);
   if (code.startsWith('Digit') && code.length === 6) return code.slice(5);
-  if (code.startsWith('Arrow')) return code.replace('Arrow', 'Arrow ');
+  if (code === 'ArrowUp') return '↑';
+  if (code === 'ArrowDown') return '↓';
+  if (code === 'ArrowLeft') return '←';
+  if (code === 'ArrowRight') return '→';
   const special: Record<string, string> = {
     Escape: 'Esc',
     Space: 'Space',

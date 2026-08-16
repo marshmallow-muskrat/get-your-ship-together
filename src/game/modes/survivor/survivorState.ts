@@ -546,6 +546,8 @@ export interface SurvivorState {
   seed: number;
   rng: number;
   phase: SurvivorPhase;
+  /** Visible Mega-Boss gravity well. >0 means the player is being dragged. */
+  gravLock: number;
   player: {
     x: number;
     z: number;
@@ -1015,6 +1017,7 @@ export function createSurvivorState(
     seed,
     rng: seed,
     phase: 'playing',
+    gravLock: 0,
     player: {
       x: 0,
       z: 0,

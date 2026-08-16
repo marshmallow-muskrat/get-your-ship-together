@@ -709,7 +709,6 @@ export class SurvivorRenderer {
         this.enemies.set(e.id, vis);
         this.root.add(vis.root);
         if (e.isElite) this.addElitePresentation(vis);
-        if (e.defId === 'surge-flier') this.addSurgeFlierPresentation(vis);
       }
       const scale = e.isMiniboss
         ? SURVIVOR.actorScale.miniboss
@@ -722,8 +721,6 @@ export class SurvivorRenderer {
         // Collision remains on the simulation's XZ plane; this is presentation only.
         vis.root.position.y = 1.7 + Math.sin(state.time * 8.5 + e.id * 0.73) * 0.18;
         vis.root.rotation.z = Math.sin(state.time * 5.2 + e.id) * 0.1;
-        const flockFx = vis.root.getObjectByName('surge-flier-presentation');
-        if (flockFx) flockFx.rotation.y = state.time * 2.8 + e.id;
       }
       const shouldAnim = e.isElite || e.isMiniboss || this.animFrame % 2 === i % 2;
       if (vis.animator && shouldAnim) {
@@ -735,34 +732,6 @@ export class SurvivorRenderer {
       this.flash(vis, e.hitFlash, e.specialWindup > 0);
       if (e.isElite) this.updateElitePresentation(vis, e.health / Math.max(1, e.maxHealth), visibleEliteBars.has(e.id));
     }
-  }
-
-  /** Exclusive surge-flier silhouette: cold flight field plus crossed energy vanes. */
-  private addSurgeFlierPresentation(vis: ActorVis): void {
-    if (vis.root.getObjectByName('surge-flier-presentation')) return;
-    const fx = new THREE.Group();
-    fx.name = 'surge-flier-presentation';
-    const shell = new THREE.Mesh(this.eliteShellGeo, this.basic('#5adfff', 0.12, true));
-    shell.name = 'surge-flight-shell';
-    shell.position.y = 0.72;
-    shell.scale.set(1.15, 0.42, 1.15);
-    shell.userData.sharedGeometry = true;
-    shell.userData.ownsGeometry = false;
-    for (let i = 0; i < 2; i += 1) {
-      const ring = new THREE.Mesh(
-        this.eliteRingGeo,
-        this.basic(i === 0 ? '#6df4ff' : '#ad72ff', i === 0 ? 0.72 : 0.52, true),
-      );
-      ring.name = `surge-flight-vane-${i}`;
-      ring.position.y = 0.72;
-      ring.rotation.set(Math.PI / 2, i * Math.PI / 2, i === 0 ? 0.52 : -0.52);
-      ring.scale.set(1.35, 0.72, 1);
-      ring.userData.sharedGeometry = true;
-      ring.userData.ownsGeometry = false;
-      fx.add(ring);
-    }
-    fx.add(shell);
-    vis.root.add(fx);
   }
 
   private addElitePresentation(vis: ActorVis): void {
@@ -1073,7 +1042,12 @@ export class SurvivorRenderer {
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = y;
     mesh.renderOrder = opts.order ?? 8;
-    (mesh.material as THREE.MeshBasicMaterial).depthTest = true;
+    const mat = mesh.material as THREE.MeshBasicMaterial;
+    mat.depthTest = true;
+    mat.depthWrite = false;
+    mat.polygonOffset = true;
+    mat.polygonOffsetFactor = -2;
+    mat.polygonOffsetUnits = -2;
     return mesh;
   }
 
@@ -1091,18 +1065,18 @@ export class SurvivorRenderer {
     // Magnetically contained aurora: an inky violet sheath surrounding a broad,
     // saturated glow. There are deliberately no bright longitudinal rails; those read
     // as choppy white lines when adjacent capsules turned at ship speed.
-    g.add(this.plasmaLayer(quad, '#130b38', 0.62, 'pw-ember', 0.05, { order: 7 }));
-    g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap0', 0.05, { order: 7 }));
-    g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap1', 0.05, { order: 7 }));
-    g.add(this.plasmaLayer(quad, '#5c2bc7', 0.5, 'pw-fire', 0.055, { order: 8 }));
-    g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap0', 0.055, { order: 8 }));
-    g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap1', 0.055, { order: 8 }));
-    g.add(this.plasmaLayer(quad, '#36bddd', 0.34, 'pw-glow', 0.062, { order: 9 }));
-    g.add(this.plasmaLayer(cap, '#36bddd', 0.34, 'pw-glow-cap0', 0.062, { order: 9 }));
-    g.add(this.plasmaLayer(cap, '#36bddd', 0.34, 'pw-glow-cap1', 0.062, { order: 9 }));
+    g.add(this.plasmaLayer(quad, '#130b38', 0.62, 'pw-ember', 0.2, { order: 7 }));
+    g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap0', 0.2, { order: 7 }));
+    g.add(this.plasmaLayer(cap, '#130b38', 0.62, 'pw-ember-cap1', 0.2, { order: 7 }));
+    g.add(this.plasmaLayer(quad, '#5c2bc7', 0.5, 'pw-fire', 0.205, { order: 8 }));
+    g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap0', 0.205, { order: 8 }));
+    g.add(this.plasmaLayer(cap, '#5c2bc7', 0.5, 'pw-fire-cap1', 0.205, { order: 8 }));
+    g.add(this.plasmaLayer(quad, '#36bddd', 0.34, 'pw-glow', 0.212, { order: 9 }));
+    g.add(this.plasmaLayer(cap, '#36bddd', 0.34, 'pw-glow-cap0', 0.212, { order: 9 }));
+    g.add(this.plasmaLayer(cap, '#36bddd', 0.34, 'pw-glow-cap1', 0.212, { order: 9 }));
     // Three travelling charge knots sell flow along even an old, stationary segment.
     for (let i = 0; i < 3; i += 1) {
-      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#42cee5' : '#d85ac5', 0.42, 'pw-tongue', 0.068, {
+      const tongue = this.plasmaLayer(cap, i % 2 === 0 ? '#42cee5' : '#d85ac5', 0.42, 'pw-tongue', 0.195, {
         additive: true,
         order: 10,
       });
@@ -1611,7 +1585,7 @@ export class SurvivorRenderer {
         this.layoutGravityWell(obj, h, t);
         continue;
       }
-      obj.position.set(h.x, h.kind === 'wake' ? 0.06 : 0.04, h.z);
+      obj.position.set(h.x, h.kind === 'wake' ? 0.18 : 0.16, h.z);
       /*
        * The disc is the hazard, at exactly `h.radius`.
        *

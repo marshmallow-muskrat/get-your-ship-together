@@ -46,6 +46,15 @@ import { onboardingHelpShouldFade, onboardingUseFromPlayer } from './survivorOnb
  * A dev server, a fixture route, or an explicit `?testcenter=1` is a developer; nothing
  * else is.
  */
+function simplifyCardBadge(category: string): string {
+  if (category.startsWith('NEW ')) return 'NEW';
+  if (category.includes('UPGRADE')) return 'UPGRADE';
+  if (category === 'OVERCLOCK') return 'OVERCLOCK';
+  if (category.includes('PASSIVE')) return 'PASSIVE';
+  if (category.includes('PROTOCOL')) return 'PROTOCOL';
+  return category;
+}
+
 function isTestCenterBuild(): boolean {
   if (import.meta.env.DEV) return true;
   if (typeof window === 'undefined') return false;
@@ -148,10 +157,7 @@ export class SurvivorHud {
           <strong id="sv-hero">—</strong>
         </div>
         <div class="sv-timer-wrap">
-          <div id="sv-boss" class="sv-boss hidden">
-            <span class="eyebrow"><span id="sv-boss-name">CONTAINMENT BREACH</span> · P<span id="sv-boss-phase">1</span></span>
-            <div class="sv-track boss"><i id="sv-boss-hp"></i></div>
-          </div>
+          <div id="sv-boss-stack" class="sv-boss-stack hidden"></div>
           <div id="sv-miniboss" class="sv-miniboss hidden">
             <span class="eyebrow" id="sv-mb-name">WARDEN</span>
             <div class="sv-track miniboss"><i id="sv-mb-hp"></i></div>
@@ -159,6 +165,7 @@ export class SurvivorHud {
           <span class="eyebrow">SURVIVAL TIME</span>
           <strong id="sv-timer">00:00</strong>
           <div id="sv-inbound" class="sv-inbound hidden">CONTAINMENT BREACH</div>
+          <div id="sv-gravlock" class="sv-inbound sv-gravlock hidden">GRAVITY TUG · HOLD COURSE</div>
           <div id="sv-bosses-active" class="sv-bosses-active hidden"></div>
           <div id="sv-bosses-queued" class="sv-bosses-active hidden"></div>
         </div>
@@ -336,8 +343,7 @@ export class SurvivorHud {
       </div>
       <div id="sv-help" class="sv-help">
         <span id="sv-help-move">WASD move · auto fire</span>
-        <span id="sv-help-abil">abilities</span>
-        <span id="sv-help-pause">pause</span>
+        <span id="sv-help-pause">Esc pause</span>
       </div>
     `;
     host.appendChild(this.root);
@@ -551,30 +557,13 @@ export class SurvivorHud {
     set('sv-key-repulsor', formatKeyCode(binds.repulsor));
     set('sv-key-ship', formatKeyCode(binds.ship));
     set('sv-key-mech', formatKeyCode(binds.mech));
-    set(
-      'sv-help-move',
-      `${formatKeyCode(binds.moveUp)}${formatKeyCode(binds.moveLeft)}${formatKeyCode(binds.moveDown)}${formatKeyCode(binds.moveRight)} move · auto fire`,
-    );
-    set(
-      'sv-help-abil',
-      `<${formatKeyCode(binds.repulsor)}> Repulsor · <${formatKeyCode(binds.ship)}> Ship · <${formatKeyCode(binds.mech)}> Mech · ${formatKeyCode(binds.choice1)}/${formatKeyCode(binds.choice2)}/${formatKeyCode(binds.choice3)} upgrades`.replace(
-        /[<>]/g,
-        '',
-      ),
-    );
-    // rebuild help with kbd tags properly
-    const helpAbil = this.root.querySelector('#sv-help-abil');
-    if (helpAbil) {
-      helpAbil.innerHTML =
-        `<span data-help="dodge"><kbd>${formatKeyCode(binds.dodge)}</kbd> Dodge</span>` +
-        ` · <span data-help="repulsor"><kbd>${formatKeyCode(binds.repulsor)}</kbd> Repulsor</span>` +
-        ` · <span data-help="ship"><kbd>${formatKeyCode(binds.ship)}</kbd> Ship</span>` +
-        ` · <span data-help="mech"><kbd>${formatKeyCode(binds.mech)}</kbd> Mech</span>` +
-        ` · <kbd>${formatKeyCode(binds.choice1)}</kbd><kbd>${formatKeyCode(binds.choice2)}</kbd><kbd>${formatKeyCode(binds.choice3)}</kbd> upgrades`;
+    const helpMove = this.root.querySelector('#sv-help-move');
+    if (helpMove) {
+      helpMove.innerHTML = `<kbd>${formatKeyCode(binds.moveUp)}</kbd><kbd>${formatKeyCode(binds.moveLeft)}</kbd><kbd>${formatKeyCode(binds.moveDown)}</kbd><kbd>${formatKeyCode(binds.moveRight)}</kbd> move`;
     }
     const helpPause = this.root.querySelector('#sv-help-pause');
     if (helpPause) {
-      helpPause.innerHTML = `<kbd>${formatKeyCode(binds.pause)}</kbd> pause · Settings in pause menu`;
+      helpPause.innerHTML = `<kbd>${formatKeyCode(binds.pause)}</kbd> pause`;
     }
     this.buildBindList();
     this.lastBindKey = JSON.stringify(binds);
@@ -624,6 +613,8 @@ export class SurvivorHud {
 
     set('sv-timer', formatSurvivalTime(state.time));
     const inbound = this.root.querySelector('#sv-inbound');
+    const grav = this.root.querySelector('#sv-gravlock');
+    if (grav) grav.classList.toggle('hidden', state.gravLock <= 0);
     if (inbound) {
       inbound.classList.toggle('hidden', state.inboundBanner <= 0);
       if (state.inboundBanner > 0) {
@@ -945,19 +936,20 @@ export class SurvivorHud {
   }
 
   private publishBossBars(state: SurvivorState): void {
-    const pb = primaryBoss(state);
-    const boss = this.root.querySelector('#sv-boss');
-    if (boss) {
-      boss.classList.toggle('hidden', !pb);
-      const bh = this.root.querySelector<HTMLElement>('#sv-boss-hp');
-      if (bh && pb && pb.maxHealth > 0) {
-        bh.style.width = `${(pb.health / pb.maxHealth) * 100}%`;
-      }
-      const phase = this.root.querySelector('#sv-boss-phase');
-      if (phase && pb) phase.textContent = String(pb.phase);
-      const bname = this.root.querySelector('#sv-boss-name');
-      if (bname) bname.textContent = pb ? displayName(pb.displayName) : 'Containment Breach';
-      boss.classList.toggle('mega', !!(pb && pb.isMega));
+    const stack = this.root.querySelector('#sv-boss-stack');
+    if (stack) {
+      const alive = state.bosses.filter((b) => b.active && b.state !== 'dead').slice(0, 4);
+      stack.classList.toggle('hidden', alive.length === 0);
+      stack.innerHTML = alive
+        .map((b) => {
+          const pct = b.maxHealth > 0 ? Math.max(0, (b.health / b.maxHealth) * 100) : 0;
+          const mega = b.isMega ? ' mega' : '';
+          return `<div class="sv-boss${mega}">
+            <span class="eyebrow">${displayName(b.displayName)}${b.isMega ? ' · MEGA' : ''} · P${b.phase}</span>
+            <div class="sv-track boss"><i style="width:${pct}%"></i></div>
+          </div>`;
+        })
+        .join('');
     }
     const mb = this.root.querySelector('#sv-miniboss');
     if (mb) {
@@ -1119,7 +1111,7 @@ export class SurvivorHud {
 
             const badge = document.createElement('span');
             badge.className = 'eyebrow sv-card-badge';
-            badge.textContent = card?.category ?? fallbackLabel(c);
+            badge.textContent = simplifyCardBadge(card?.category ?? fallbackLabel(c));
             head.appendChild(badge);
 
             /*
@@ -1177,7 +1169,7 @@ export class SurvivorHud {
             if (this.upgradeNumbers && card && card.stats.length > 0) {
               const stats = document.createElement('span');
               stats.className = 'sv-card-stats';
-              for (const line of card.stats) {
+              for (const line of card.stats.slice(0, 3)) {
                 const row = document.createElement('span');
                 row.className = 'sv-card-stat';
                 row.textContent = line;
@@ -1558,9 +1550,6 @@ export class SurvivorHud {
     const help = this.root.querySelector('#sv-help');
     if (!help) return;
     const used = onboardingUseFromPlayer(state.player);
-    for (const [ability, done] of Object.entries(used)) {
-      help.querySelector(`[data-help="${ability}"]`)?.classList.toggle('done', done);
-    }
     if (this.helpHidden) return;
     if (onboardingHelpShouldFade(used, state.time)) {
       help.classList.add('fade');

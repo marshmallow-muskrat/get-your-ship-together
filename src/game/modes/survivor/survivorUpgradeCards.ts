@@ -86,7 +86,7 @@ export function levelProgression(
   opts: { capped?: boolean } = {},
 ): LevelProgression {
   const kind: LevelProgression['kind'] = from <= 0 ? 'acquire' : opts.capped ? 'max' : 'level';
-  const step = from <= 0 ? `Acquire · L${to}` : `L${from} → L${to}`;
+  const step = from <= 0 ? 'New' : `L${from} → L${to}`;
   return { kind, label: opts.capped ? `${step} · MAX` : step, from, to };
 }
 
@@ -316,7 +316,7 @@ export function weaponUpgradeCard(
     levels: progression.label,
     progression,
     name: formatOverclockLabel(oc),
-    summary: `Preserves the Level 5 ${fam.name} firing pattern and adds damage. Each Overclock is additive, so the bonus never compounds.`,
+    summary: `Same ${fam.name} pattern. Additive damage, never compounding.`,
     stats,
     tradeoff: null,
   };
@@ -335,14 +335,12 @@ export function newWeaponCard(weaponId: WeaponId): UpgradeCardCopy {
         : 'Projectiles';
   stats.push(`${countLabel} ${l1.count}`);
   stats.push(`${damageLabel(weaponId)} ${round(l1.damage)}`);
-  stats.push(`Volley interval ${round(l1.cadence, 2)}s`);
+  stats.push(`Volley ${round(l1.cadence, 2)}s`);
   if ((l1.pierce ?? 0) > 0) {
-    stats.push(weaponId === 'arc' ? `Chains ${1 + (l1.pierce ?? 0)} targets` : `Pierces ${l1.pierce}`);
+    stats.push(weaponId === 'arc' ? `Chains ${1 + (l1.pierce ?? 0)}` : `Pierces ${l1.pierce}`);
   }
-  if (l1.radius != null) stats.push(`Radius ${round(l1.radius, 2)}`);
-  if (l1.splash != null) stats.push(`Splash ${round(l1.splash, 2)}`);
-  if (l1.puddleDamage != null) stats.push(`Puddle ${round(l1.puddleDamage, 1)}/s`);
-  if (l1.length != null) stats.push(`Length ${round(l1.length, 1)}`);
+  if (l1.radius != null) stats.push(`Radius ${round(l1.radius, 1)}`);
+  if (l1.splash != null) stats.push(`Splash ${round(l1.splash, 1)}`);
   // An acquisition is progression too, and it now says so: `Acquire · L1` rather than
   // an empty badge, and certainly not the awkward `L0 → L1` a step formatter implies.
   const progression = levelProgression(0, 1);
@@ -352,9 +350,7 @@ export function newWeaponCard(weaponId: WeaponId): UpgradeCardCopy {
     levels: progression.label,
     progression,
     name: displayName(fam.name),
-    summary: fam.prototype
-      ? `${fam.description} Prototypes do not use one of your five weapon slots.`
-      : fam.description,
+    summary: fam.prototype ? `${fam.description} Free extra slot.` : fam.description,
     stats,
     tradeoff: null,
   };
@@ -381,7 +377,7 @@ export function passiveCard(
     case 'max-health': {
       const gain = hullPlatingGainAtLevel(next);
       stats.push(`Max integrity ${round(maxHealth)} → ${round(maxHealth + gain)}`);
-      summary = 'Adds permanent integrity and strengthens percentage-based Nanite Bleed repairs.';
+      summary = 'Raises max integrity. Percentage repairs get stronger too.';
       break;
     }
     case 'regen': {
@@ -400,7 +396,7 @@ export function passiveCard(
       const b = moveSpeedBonus(next);
       stats.push(`Move speed +${round(a * 100)}% → +${round(b * 100)}%`);
       stats.push(`Hard cap +${round(moveSpeedBonus(def.maxLevel) * 100)}%`);
-      summary = 'Move faster to hold spacing, cross attack lanes, and reposition for boss telegraphs.';
+      summary = 'Move faster to kite, dodge attack lanes, and reposition.';
       break;
     }
     case 'pickup-radius': {
@@ -411,7 +407,7 @@ export function passiveCard(
       stats.push(`Energy reach ${round(eA, 2)} → ${round(eB, 2)}`);
       stats.push(`Repair reach ${round(hA, 2)} → ${round(hB, 2)}`);
       stats.push('Pickups also travel to you faster');
-      summary = 'Pulls energy and repair orbs from farther away and accelerates collection. Repair reach scales faster; Ship and Mech retain their built-in bonus.';
+      summary = 'Pulls energy and repair orbs from farther away, faster.';
       break;
     }
     case 'weapon-haste': {
@@ -448,12 +444,12 @@ export function passiveCard(
         `Hard cap at L${cap}: ${round(mechDurationAtLevel(cap), 1)}s / ${round(mechCooldownAtLevel(cap), 1)}s · ${round(mechUptimeFractionAtLevel(cap) * 100, 1)}% uptime · +${round(mechSpeedBonusAtLevel(cap) * 100)}% speed`,
       );
       summary =
-        'Mech Overdrive lasts longer, recharges sooner, and moves faster. Cooldown is activation-to-activation and keeps counting down during Mech.';
+        'Mech lasts longer, recharges sooner, and moves faster. Cooldown is activation-to-activation and keeps counting down during Mech.';
       break;
     }
     case 'breach-shielding': {
       stats.push(`Boss damage taken −${round(currentLevel * def.perLevel * 100)}% → −${round(next * def.perLevel * 100)}%`);
-      summary = 'Reduces damage from boss attacks only. Ordinary horde contact is unaffected.';
+      summary = 'Take less damage from bosses. Horde contact is unchanged.';
       break;
     }
     case 'reinforced-airframe': {
@@ -462,8 +458,7 @@ export function passiveCard(
       const at = (lv: number) => round((1 - shipDamageTakenMul(lv)) * 100);
       stats.push(`Afterburner damage taken −${at(currentLevel)}% → −${at(next)}%`);
       stats.push(`Afterburner window ${SURVIVOR.ship.duration.toFixed(2)}s`);
-      summary =
-        'Fortifies Afterburner only, raising damage reduction from the 50% baseline toward the 75% L5 cap. Astronaut and Mech are unchanged.';
+      summary = 'Afterburner takes less damage. Astronaut and Mech stay the same.';
       break;
     }
   }

@@ -89,8 +89,8 @@ export const SURVIVOR = {
   combatSpawnHalf: 32,
   /** Stable boss entry distance, independent of the expanded global platform. */
   bossSpawnRadius: 14,
-  /** Balanced overview for the doubled station without reducing the hero to a speck. */
-  cameraHalf: 14.5,
+  /** Wider overview so a closing boss stays on-screen when the player kites. */
+  cameraHalf: 21,
   actorScale: {
     player: 1.5,
     enemy: 1.5,
@@ -105,7 +105,7 @@ export const SURVIVOR = {
   playerSpeed: 6.75,
   playerRadius: 0.55,
   playerInvuln: 0.38,
-  xpMagnetBase: 3.2,
+  xpMagnetBase: 5.8,
   /** Magnet Field energy gain per level. */
   xpMagnetPerLevel: 0.35,
   /** Health/repair magnet base — larger than energy for reliable collection. */
@@ -318,9 +318,14 @@ export const SURVIVOR = {
     initialCooldown: 30,
     /** Baseline 25% damage reduction in Mech form. */
     damageTakenMul: 0.75,
-    weaponDamageMul: 1.35,
+    /** Signature only: doubled damage while Mech is up. Other weapons stay baseline. */
+    weaponDamageMul: 2,
     weaponCadenceMul: 1.15,
-    weaponAreaMul: 1.15,
+    /** Signature only: doubled projectile / beam / blast size. */
+    weaponAreaMul: 2,
+    /** Extra burst around each signature impact. Does not apply to trails or puddles. */
+    signatureSplashRadius: 2.2,
+    signatureSplashMul: 0.35,
     /** Hero-specific automatic armaments, active only while transformed. */
     specials: {
       bee: { cadence: 1.55, damage: 24, count: 7, range: 18, radius: 0.8 },

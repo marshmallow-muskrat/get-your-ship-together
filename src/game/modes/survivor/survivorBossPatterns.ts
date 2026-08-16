@@ -1072,12 +1072,17 @@ function updateActive(
         const dx = b.lockX - p.x;
         const dz = b.lockZ - p.z;
         const d = Math.hypot(dx, dz) || 1;
-        const pull = 3.8 * dt;
-        p.x += (dx / d) * pull;
-        p.z += (dz / d) * pull;
-        const c = api.clampArena(p.x, p.z, SURVIVOR.playerRadius);
-        p.x = c.x;
-        p.z = c.z;
+        // Beat tugs: WASD works between yanks. A constant drag read as broken movement.
+        const beat = Math.sin(b.patternElapsed * 7.2);
+        if (beat > 0.18) {
+          const tug = 8.4 * ((beat - 0.18) / 0.82) * dt;
+          p.x += (dx / d) * tug;
+          p.z += (dz / d) * tug;
+          state.gravLock = 0.3;
+          const c = api.clampArena(p.x, p.z, SURVIVOR.playerRadius);
+          p.x = c.x;
+          p.z = c.z;
+        }
       } else {
         if (!b.patternTriggered) {
           b.patternTriggered = true;
@@ -1143,6 +1148,18 @@ function updateActive(
   }
 }
 
+/**
+ * Sprint when the player has opened a real gap. Close-range fight speed stays
+ * authored so in-fight timing and Titan comparisons do not drift; kiting across
+ * the station is what felt like the boss had given up.
+ */
+function bossCatchupMul(dist: number, isMega: boolean): number {
+  const start = 12;
+  if (dist <= start) return 1;
+  const extra = (dist - start) / 14;
+  return Math.min(isMega ? 2.4 : 2.15, 1 + extra);
+}
+
 /** Recovery movement when far and no locked telegraph. */
 function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, api: BossSimApi): void {
   const p = state.player;
@@ -1150,7 +1167,7 @@ function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, ap
   const dz = p.z - b.z;
   const dist = Math.hypot(dx, dz) || 1;
   if (dist > 8) {
-    const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * 0.45;
+    const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * 0.45 * bossCatchupMul(dist, b.isMega);
     b.x += (dx / dist) * spd * dt;
     b.z += (dz / dist) * spd * dt;
     const c = api.clampArena(b.x, b.z, b.colliderRadius);
@@ -1221,7 +1238,11 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
 
   if (b.state === 'idle') {
     if (dist > 5) {
-      const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * (1 + (phase - 1) * 0.08);
+      const spd =
+        SURVIVOR_BOSS.moveSpeed *
+        b.moveMul *
+        (1 + (phase - 1) * 0.08) *
+        bossCatchupMul(dist, b.isMega);
       b.x += b.facingX * spd * dt;
       b.z += b.facingZ * spd * dt;
       const c = api.clampArena(b.x, b.z, b.colliderRadius);

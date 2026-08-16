@@ -354,9 +354,28 @@ function hasteMul(state: SurvivorState): number {
 
 function areaMul(state: SurvivorState): number {
   const base = 1 + passiveLevel(state, 'area') * 0.055;
-  const mech = state.player.form === 'mech' ? SURVIVOR.mech.weaponAreaMul : 1;
   const titan = state.megaProtocol.titanActive ? SURVIVOR.megaProtocol.titanAreaMul : 1;
-  return base * mech * titan;
+  return base * titan;
+}
+
+/**
+ * Mech Overdrive only overcharges the hero's signature weapon.
+ *
+ * Applying the 2× size / 2× damage globally broke Plasma Wake continuity (wider
+ * segments no longer chained) and leaked into ally / Titan comparisons.
+ */
+function mechSignatureScale(
+  state: SurvivorState,
+  weaponId: WeaponId,
+): { damage: number; area: number; cadence: number } {
+  if (state.player.form !== 'mech' || weaponId !== heroStarterWeapon(state.heroId)) {
+    return { damage: 1, area: 1, cadence: 1 };
+  }
+  return {
+    damage: SURVIVOR.mech.weaponDamageMul,
+    area: SURVIVOR.mech.weaponAreaMul,
+    cadence: SURVIVOR.mech.weaponCadenceMul,
+  };
 }
 
 /**
@@ -915,7 +934,7 @@ function damageEnemy(
   state: SurvivorState,
   e: SurvivorEnemy,
   dmg: number,
-  opts?: { kind?: DamageEvent['kind']; pop?: number; src?: string },
+  opts?: { kind?: DamageEvent['kind']; pop?: number; src?: string; mechSplash?: boolean },
 ): void {
   if (!e.alive || dmg <= 0) return;
   const before = e.health;
@@ -939,6 +958,40 @@ function damageEnemy(
     state.miniboss.health = Math.max(0, e.health);
   }
   if (killed) killEnemy(state, e);
+}
+
+/**
+ * Burst around a signature impact while Mech is up.
+ *
+ * Called once per impact, never from puddles/trails, and never on the struck body —
+ * those already took the doubled signature hit.
+ */
+function maybeMechSignatureSplash(
+  state: SurvivorState,
+  x: number,
+  z: number,
+  baseDamage: number,
+  src?: string,
+): void {
+  if (state.player.form !== 'mech' || !src || baseDamage <= 0) return;
+  if (src !== weaponSrc(heroStarterWeapon(state.heroId))) return;
+  const radius = SURVIVOR.mech.signatureSplashRadius * areaMul(state);
+  const splash = baseDamage * SURVIVOR.mech.signatureSplashMul;
+  pushEffect(state, 'impact', x, z, 0.34, state.accent, radius, { radius });
+  pushEffect(state, 'pulse', x, z, 0.28, '#fff4c8', radius * 1.05, { radius: radius * 1.05 });
+  for (const n of state.enemies) {
+    if (!n.alive) continue;
+    const dist = Math.hypot(n.x - x, n.z - z);
+    if (dist < 0.22) continue;
+    if (dist > radius + n.radius) continue;
+    damageEnemy(state, n, splash, { kind: 'enemy', pop: 0.55, src, mechSplash: true });
+  }
+  for (const b of livingBosses(state)) {
+    const dist = Math.hypot(b.x - x, b.z - z);
+    if (dist < 0.35) continue;
+    if (dist > radius + b.colliderRadius) continue;
+    damageBoss(state, splash * 0.45, { boss: b, src, pop: 0.65 });
+  }
 }
 
 /**
@@ -1594,137 +1647,13 @@ function endShipForm(state: SurvivorState): void {
   pushEffect(state, 'transform', p.x, p.z, 0.4, '#88e0ff', 1.4);
 }
 
-function mechSpecialSource(heroId: HeroId): string {
-  return `mech-special:${heroId}`;
-}
-
 /**
  * Automatic hero-specific Mech armaments. These are simulation-owned attacks; the
  * renderer only presents the bounded effects/projectiles authored here.
  */
-function updateMechSpecial(state: SurvivorState, dt: number): void {
-  const p = state.player;
-  if (p.form !== 'mech' || !p.alive) return;
-  p.mechSpecialCd = Math.max(0, p.mechSpecialCd - dt);
-  if (p.mechSpecialCd > 0) return;
-
-  const cfg = SURVIVOR.mech.specials[state.heroId];
-  const src = mechSpecialSource(state.heroId);
-  const power = Math.min(2.5, 1 + Math.max(0, state.level - 1) * 0.04) * p.damageMul;
-  const damage = cfg.damage * power;
-  p.mechSpecialCd = cfg.cadence;
-
-  if (state.heroId === 'bee') {
-    const target = nearestEnemy(state, p.x, p.z, cfg.range);
-    const boss = nearestBoss(state, p.x, p.z, cfg.range);
-    const pos = target
-      ? { x: target.x, z: target.z }
-      : boss
-        ? { x: boss.x, z: boss.z }
-        : null;
-    if (!pos) {
-      p.mechSpecialCd = 0.25;
-      return;
-    }
-    const base = Math.atan2(pos.x - p.x, pos.z - p.z);
-    for (let i = 0; i < cfg.count; i += 1) {
-      const proj = acquireProjectile(state);
-      if (!proj) break;
-      const angle = base + (i - (cfg.count - 1) / 2) * 0.17;
-      const speed = 18;
-      resetProj(proj, state, 'drone', 'microdrone', p.x, p.z, Math.sin(angle) * speed, Math.cos(angle) * speed, {
-        damage,
-        radius: 0.22,
-        visualRadius: cfg.radius,
-        life: 1.45,
-        homing: true,
-        color: state.accent,
-        srcOverride: src,
-      });
-    }
-    pushEffect(state, 'mech-hive', p.x, p.z, 0.7, state.accent, 4.8, { radius: 4.8 });
-    return;
-  }
-
-  if (state.heroId === 'flamingo') {
-    const { fx, fz } = bestRailDirection(state, state.weapons[0]!, p.x, p.z, cfg.range, cfg.radius);
-    for (let i = 0; i < cfg.count; i += 1) {
-      const side = (i - (cfg.count - 1) / 2) * 0.72;
-      const ox = -fz * side;
-      const oz = fx * side;
-      const x1 = p.x + ox + fx * cfg.range;
-      const z1 = p.z + oz + fz * cfg.range;
-      state.rails.push({ x0: p.x + ox, z0: p.z + oz, x1, z1, life: 0.28, color: state.accent });
-      for (const e of state.enemies) {
-        if (e.alive && segmentHit(p.x + ox, p.z + oz, x1, z1, e.x, e.z, e.radius + cfg.radius * 0.5)) {
-          damageEnemy(state, e, damage, { kind: 'ability', pop: 0.9, src });
-          if (e.alive) applyKnockback(e, fx, fz, e.isMiniboss ? 1 : e.isElite ? 2.5 : 5.5);
-        }
-      }
-      for (const b of livingBosses(state)) {
-        if (segmentHit(p.x + ox, p.z + oz, x1, z1, b.x, b.z, b.colliderRadius + cfg.radius * 0.5)) {
-          damageBoss(state, damage * 0.62, { kind: 'ability', pop: 1, boss: b, src });
-        }
-      }
-    }
-    pushEffect(state, 'mech-prism', p.x, p.z, 0.72, state.accent, cfg.range, {
-      facingX: fx,
-      facingZ: fz,
-      length: cfg.range,
-      width: cfg.radius * 2,
-    });
-    return;
-  }
-
-  if (state.heroId === 'frog') {
-    pushEffect(state, 'mech-gravity', p.x, p.z, 0.95, state.accent, cfg.radius, { radius: cfg.radius });
-    for (const e of state.enemies) {
-      if (!e.alive) continue;
-      const dx = p.x - e.x;
-      const dz = p.z - e.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist > cfg.radius + e.radius) continue;
-      damageEnemy(state, e, damage, { kind: 'ability', pop: 0.85, src });
-      if (e.alive && dist > 0.2) {
-        const pull = e.isMiniboss ? 0.8 : e.isElite ? 1.8 : 4.6;
-        e.kbX += (dx / dist) * pull;
-        e.kbZ += (dz / dist) * pull;
-      }
-    }
-    for (const b of livingBosses(state)) {
-      if (Math.hypot(b.x - p.x, b.z - p.z) <= cfg.radius + b.colliderRadius) {
-        damageBoss(state, damage * 0.55, { kind: 'ability', pop: 0.95, boss: b, src });
-      }
-    }
-    return;
-  }
-
-  const targets = rocketClusterTargets(state, p.x, p.z, cfg.count, 0.42);
-  for (let i = 0; i < cfg.count; i += 1) {
-    const target = targets[i % Math.max(1, targets.length)] ?? {
-      x: p.x + Math.sin((i / cfg.count) * Math.PI * 2) * 6,
-      z: p.z + Math.cos((i / cfg.count) * Math.PI * 2) * 6,
-    };
-    const proj = acquireProjectile(state);
-    if (!proj) break;
-    const dx = target.x - p.x;
-    const dz = target.z - p.z;
-    const dist = Math.hypot(dx, dz) || 1;
-    const travel = 0.38 + i * 0.025;
-    resetProj(proj, state, 'rocket', 'rocket', p.x, p.z, (dx / dist) * (dist / travel), (dz / dist) * (dist / travel), {
-      damage,
-      radius: 0.25,
-      visualRadius: 0.55,
-      life: travel + 0.08,
-      color: state.accent,
-      armTimer: travel,
-      fuseDelay: 0.1,
-      explodeRadius: cfg.radius,
-      srcOverride: src,
-    });
-    pushEffect(state, 'telegraph', target.x, target.z, travel, state.accent, cfg.radius, { radius: cfg.radius });
-  }
-  pushEffect(state, 'mech-meteor', p.x, p.z, 0.8, state.accent, 5.4, { radius: 5.4 });
+function updateMechSpecial(_state: SurvivorState, _dt: number): void {
+  // Retired: Mech now overcharges the hero's signature weapon instead of a
+  // separate automatic special. Kept as a no-op so the step order stays stable.
 }
 
 /** Clear active thruster wakes (exhaust is presentation-only; wakes are hazards). */
@@ -1739,7 +1668,6 @@ export function clearShipHazards(state: SurvivorState): void {
 function fireWeapons(state: SurvivorState, dt: number): void {
   const p = state.player;
   const haste = hasteMul(state);
-  const area = areaMul(state);
   if (p.form === 'ship') {
     /*
      * Plasma Wake remains the one authored ship synergy, but it is no longer fired from
@@ -1753,17 +1681,21 @@ function fireWeapons(state: SurvivorState, dt: number): void {
     return;
   }
 
-  const mech = p.form === 'mech';
-
   for (const slot of state.weapons) {
     // Trail emission is distance-driven and handled by `updatePlasmaTrails`.
     if (slot.weaponId === 'plasma-wake') continue;
     slot.cooldown = Math.max(0, slot.cooldown - dt);
     if (slot.cooldown > 0) continue;
+    const over = mechSignatureScale(state, slot.weaponId);
+    const mech = over.damage > 1;
     const def = wdef(slot.weaponId, slot.level);
-    const cadence = def.cadence / haste / (mech ? SURVIVOR.mech.weaponCadenceMul : 1);
+    const cadence = def.cadence / haste / over.cadence;
     slot.cooldown = cadence;
     const count = def.count;
+    const area = areaMul(state) * over.area;
+    if (mech) {
+      pushEffect(state, 'pulse', p.x, p.z, 0.16, state.accent, 1.7, { radius: 1.7 });
+    }
 
     if (slot.weaponId === 'pulse') {
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 14);
@@ -1850,10 +1782,12 @@ function fireWeapons(state: SurvivorState, dt: number): void {
           width,
         });
         const dmg = def.damage * (mech ? SURVIVOR.mech.weaponDamageMul : 1) * p.damageMul;
+        const railSrc = weaponSrc('rail');
         for (const e of state.enemies) {
           if (!e.alive) continue;
           if (segmentHit(p.x + ox, p.z + oz, x1, z1, e.x, e.z, e.radius + width * 0.5)) {
-            damageEnemy(state, e, dmg, { src: weaponSrc('rail') });
+            damageEnemy(state, e, dmg, { src: railSrc });
+            maybeMechSignatureSplash(state, e.x, e.z, dmg, railSrc);
             if (e.alive) {
               const push = e.isMiniboss ? 0.8 : e.isElite ? 2.2 : 5.5;
               applyKnockback(e, fx, fz, push);
@@ -1873,7 +1807,8 @@ function fireWeapons(state: SurvivorState, dt: number): void {
               b.colliderRadius + width * 0.5,
             )
           ) {
-            damageBoss(state, dmg * 0.85, { boss: b, src: weaponSrc('rail') });
+            damageBoss(state, dmg * 0.85, { boss: b, src: railSrc });
+            maybeMechSignatureSplash(state, b.x, b.z, dmg * 0.85, railSrc);
           }
         }
       }
@@ -2196,7 +2131,6 @@ export function updatePlasmaTrails(state: SurvivorState, dt: number): void {
   const cfg = SURVIVOR.plasmaTrail;
   const def = wdef('plasma-wake', slot.level);
   const ship = p.form === 'ship';
-  const mech = p.form === 'mech';
 
   // Emitter throttle: a floor on how often a piece may be added, independent of frame rate.
   slot.cooldown = Math.max(0, slot.cooldown - dt);
@@ -2226,7 +2160,6 @@ export function updatePlasmaTrails(state: SurvivorState, dt: number): void {
   const damage =
     def.damage *
     plasmaDamageNorm(slot.level) *
-    (mech ? SURVIVOR.mech.weaponDamageMul : 1) *
     p.damageMul;
   const spacing = Math.max(cfg.minSegmentLength, ship ? cfg.shipSegmentLength : cfg.segmentLength);
   const ribbons = ribbonCount;
@@ -3019,6 +2952,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         if (dx * dx + dz * dz > (proj.radius + e.radius) ** 2) continue;
         hits?.add(e.id);
         damageEnemy(state, e, proj.damage, { src: projSrc(proj) });
+        maybeMechSignatureSplash(state, e.x, e.z, proj.damage, projSrc(proj));
         pushEffect(state, 'impact', proj.x, proj.z, 0.1, proj.color, 0.5);
       }
       for (const b of state.bosses) {
@@ -3129,6 +3063,9 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         else if (sr > 0 && d2 <= (sr + b.colliderRadius) ** 2) dealt = proj.damage * bossMul * shockMul;
         if (dealt > 0) damageBoss(state, dealt, { boss: b, src: projSrc(proj) });
       }
+      if (proj.kind === 'rocket') {
+        maybeMechSignatureSplash(state, proj.x, proj.z, proj.damage, projSrc(proj));
+      }
       proj.active = false;
       continue;
     }
@@ -3194,7 +3131,9 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       }
 
       if (hitEnemy) {
-        damageEnemy(state, hitEnemy, proj.damage, { src: projSrc(proj) });
+        const hitSrc = projSrc(proj);
+        damageEnemy(state, hitEnemy, proj.damage, { src: hitSrc });
+        maybeMechSignatureSplash(state, hitEnemy.x, hitEnemy.z, proj.damage, hitSrc);
         if (proj.kind === 'bioplasma') {
           const hx = hitEnemy.x;
           const hz = hitEnemy.z;
@@ -3233,7 +3172,9 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
           const dx = bb.x - proj.x;
           const dz = bb.z - proj.z;
           if (dx * dx + dz * dz <= (proj.radius + bb.colliderRadius) ** 2) {
-            damageBoss(state, proj.damage, { boss: bb, src: projSrc(proj) });
+            const hitSrc = projSrc(proj);
+            damageBoss(state, proj.damage, { boss: bb, src: hitSrc });
+            maybeMechSignatureSplash(state, bb.x, bb.z, proj.damage, hitSrc);
             if (proj.kind === 'bioplasma') {
               bioImpact(state, proj, bb.x, bb.z);
               proj.active = false;
@@ -5280,6 +5221,7 @@ function updatePlayer(state: SurvivorState, input: SurvivorInput, dt: number): v
   (p as { _prevZ?: number })._prevZ = p.z;
   if (!p.alive) return;
   if (p.invuln > 0) p.invuln = Math.max(0, p.invuln - dt);
+  if (state.gravLock > 0) state.gravLock = Math.max(0, state.gravLock - dt);
   if (p.hitFlash > 0) p.hitFlash = Math.max(0, p.hitFlash - dt);
   if (p.repulsorCd > 0) p.repulsorCd = Math.max(0, p.repulsorCd - dt);
   if (p.shipCd > 0 && p.form !== 'ship') p.shipCd = Math.max(0, p.shipCd - dt);

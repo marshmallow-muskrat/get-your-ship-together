@@ -339,10 +339,10 @@ describe('§5 upgrade cards', () => {
     expect(weaponUpgradeCard('pulse', 5).progression.label).toBe('L5 → L6');
     expect(weaponUpgradeCard('pulse', 5).progression.kind).toBe('level');
     // An acquisition is progression into the build, not `L0 → L1`.
-    expect(newWeaponCard('pulsar').progression.label).toBe('Acquire · L1');
+    expect(newWeaponCard('pulsar').progression.label).toBe('New');
     expect(newWeaponCard('pulsar').progression.kind).toBe('acquire');
     // Passives share the grammar exactly.
-    expect(passiveCard('area', 0, 120).progression.label).toBe('Acquire · L1');
+    expect(passiveCard('area', 0, 120).progression.label).toBe('New');
     expect(passiveCard('area', 3, 120).progression.label).toBe('L3 → L4');
     expect(passiveCard('area', 4, 120).progression.label).toBe('L4 → L5 · MAX');
     expect(passiveCard('area', 4, 120).progression.kind).toBe('max');

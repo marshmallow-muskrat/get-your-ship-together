@@ -125,7 +125,7 @@ export class AudioBus {
 
   private targetMusicVolume(): number {
     // Combat stays slightly quieter so the score supports focus instead of demanding it.
-    return this.mode === 'menu' ? 0.19 : 0.16;
+    return this.mode === 'menu' ? 0.22 : 0.36;
   }
 
   /**
@@ -138,6 +138,13 @@ export class AudioBus {
     this.mode = mode;
     if (this.context && this.musicBus) {
       this.musicBus.gain.setTargetAtTime(this.targetMusicVolume(), this.context.currentTime, 1.4);
+    }
+    if (this.musicSource) {
+      this.musicSource.playbackRate.setTargetAtTime(
+        this.mode === 'combat' ? 1.16 : 1,
+        this.context?.currentTime ?? 0,
+        0.6,
+      );
     }
   }
 
@@ -168,6 +175,7 @@ export class AudioBus {
     // Never loop past the authored end, even if the decoder handed back codec padding.
     source.loopEnd = Math.min(LOOP_SECONDS, this.musicBuffer.duration);
     source.connect(this.musicBus);
+    source.playbackRate.value = this.mode === 'combat' ? 1.16 : 1;
     source.start();
     this.musicSource = source;
   }

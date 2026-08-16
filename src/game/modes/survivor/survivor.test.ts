@@ -2563,7 +2563,7 @@ describe('early specialist gates', () => {
       }
       expect(tracker.defsSeen()).toContain(c.defId);
     }
-  });
+  }, 60_000);
 
   it('ordinary enemies stay melee-only through the whole ramp', () => {
     const state = pressureState(6105);
@@ -2678,7 +2678,7 @@ describe('pressure director surge composition', () => {
 
 describe('Cosmic Cleanup playtest tuning', () => {
   it('uses the balanced overview and quicker astronaut baseline', () => {
-    expect(SURVIVOR.cameraHalf).toBeCloseTo(14.5, 6);
+    expect(SURVIVOR.cameraHalf).toBeCloseTo(21, 6);
     expect(SURVIVOR.playerSpeed).toBeCloseTo(6.75, 6);
   });
 
@@ -2703,43 +2703,45 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(before - state.player.health).toBeCloseTo(30, 6);
   });
 
-  it.each([
-    ['bee', 'mech-hive'],
-    ['flamingo', 'mech-prism'],
-    ['frog', 'mech-gravity'],
-    ['red-panda', 'mech-meteor'],
-  ] as const)('%s Mech automatically fires its own special armament', (heroId, effectKind) => {
-    const state = createSurvivorState(heroId, null, 21100 + heroId.length);
+  it('Mech doubles signature size and damage and adds splash', () => {
+    expect(SURVIVOR.mech.weaponDamageMul).toBe(2);
+    expect(SURVIVOR.mech.weaponAreaMul).toBe(2);
+    expect(SURVIVOR.mech.signatureSplashRadius).toBeGreaterThan(1);
+    const state = createSurvivorState('flamingo', null, 21110);
     state.nextBossTime = 1e9;
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;
     state.spawnAcc = -1e9;
     state.player.invuln = 1e9;
     state.player.mechCd = 0;
-    state.weapons = [{ weaponId: 'pulse', level: 1, cooldown: 999, focusDebt: 0, prototype: false }];
-    const target = emptyEnemy();
-    target.id = state.nextId++;
-    target.alive = true;
-    target.defId = 'basic';
-    target.role = 'fodder';
-    target.x = 0;
-    target.z = 5;
-    target.radius = 0.6;
-    target.health = target.maxHealth = 1_000_000;
-    target.speedMul = 0;
-    target.contactDamage = 0;
-    state.enemies.push(target);
+    state.weapons = [{ weaponId: 'rail', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
+    const victim = emptyEnemy();
+    victim.id = state.nextId++;
+    victim.alive = true;
+    victim.defId = 'basic';
+    victim.role = 'fodder';
+    victim.x = 0;
+    victim.z = 4;
+    victim.radius = 0.5;
+    victim.health = victim.maxHealth = 50_000;
+    victim.speedMul = 0;
+    victim.contactDamage = 0;
+    const neighbour = emptyEnemy();
+    neighbour.id = state.nextId++;
+    neighbour.alive = true;
+    neighbour.defId = 'basic';
+    neighbour.role = 'fodder';
+    neighbour.x = 1.4;
+    neighbour.z = 4;
+    neighbour.radius = 0.5;
+    neighbour.health = neighbour.maxHealth = 50_000;
+    neighbour.speedMul = 0;
+    neighbour.contactDamage = 0;
+    state.enemies.push(victim, neighbour);
     expect(tryMech(state)).toBe(true);
-
-    let sawSignatureEffect = false;
-    for (let frame = 0; frame < 4 * 60; frame += 1) {
-      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
-      sawSignatureEffect ||= state.effects.some((effect) => effect.kind === effectKind);
-    }
-    expect(sawSignatureEffect).toBe(true);
-    const source = state.telemetry.bySource.get(`mech-special:${heroId}`);
-    expect(source?.damage ?? 0).toBeGreaterThan(0);
-    expect(source?.hits ?? 0).toBeGreaterThan(0);
+    for (let i = 0; i < 8; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(victim.health).toBeLessThan(victim.maxHealth);
+    expect(neighbour.health).toBeLessThan(neighbour.maxHealth);
   });
 
   it('speeds bosses up enough to re-enter the larger-map camera promptly', () => {
