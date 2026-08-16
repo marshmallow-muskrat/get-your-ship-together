@@ -4,7 +4,7 @@ import type { HeroId } from '../../content/heroes';
 import { HEROES } from '../../content/heroes';
 import { AssetLibrary } from '../../assets/AssetLibrary';
 import { AudioBus } from '../../audio/AudioBus';
-import { BOSS_DEFS, SURVIVOR, type SurvivorFixture } from './survivorContent';
+import { BOSS_DEFS, SURVIVOR, bossDefForIndex, type SurvivorFixture } from './survivorContent';
 import { createSurvivorState, type SurvivorState } from './survivorState';
 import {
   EMPTY_SURVIVOR_INPUT,
@@ -220,7 +220,8 @@ export class SurvivorMode {
   async start(): Promise<void> {
     if (this.disposed) return;
     this.audio.setMode('combat');
-    this.audio.preload();
+    // Music is fetched after the gating models, not alongside them — 1.6 MB competing
+    // for bandwidth with the assets a run cannot start without just delays the start.
     this.keybinds = loadSettings().keybinds;
 
     this.renderer = new THREE.WebGLRenderer({
@@ -250,17 +251,49 @@ export class SurvivorMode {
     this.actors = new SurvivorRenderer(this.assets);
 
     const shipUrl = HEROES[this.heroId].shipUrl;
+    /*
+     * Only the first boss's model gates the run.
+     *
+     * All six used to be fetched before the timer moved — roughly 7 MB — while the
+     * first boss does not arrive until two minutes in. The renderer does fall back to
+     * the demon when a model is uncached, but it caches that fallback for the boss's
+     * whole life, so the guarantee has to be real for the boss that can actually be
+     * reached first. The rest stream during the opening; boss two is four minutes out.
+     */
+    const firstBoss = bossDefForIndex(1);
     await Promise.all([
       this.assets.preloadHero(this.heroId),
       this.assets.preloadCombat(),
-      // Cleanup Crew can arrive from any Mega Cache, and the renderer clones its
-      // models synchronously, so the other three heroes must already be cached.
-      this.assets.preloadCleanupCrew(this.heroId),
       this.assets.loadUrl(shipUrl, 1.4),
-      ...BOSS_DEFS.map((b) => this.assets.loadUrl(b.url, b.targetHeight)),
+      this.assets.loadUrl(firstBoss.url, firstBoss.targetHeight),
       this.arena.build().then((g) => this.scene?.add(g)),
     ]);
     if (this.disposed) return;
+
+    /*
+     * Everything else streams during the opening.
+     *
+     * Both of these are needed by a renderer that clones synchronously, so they do have
+     * to be cached *before they are drawn* — but that is a very long way from run start:
+     *
+     *   - The remaining bosses: boss two is four minutes in.
+     *   - Cleanup Crew's three allied heroes: it comes from a Mega Cache, Mega bosses are
+     *     every `megaEvery` (5th) boss, so the earliest it can be chosen is around ten
+     *     minutes — and most runs never choose it at all. It was 4.2 MB of the gate.
+     *
+     * Failures are logged and left alone: a missing boss model degrades to the demon
+     * fallback the renderer already has, and neither should take a run down.
+     */
+    this.audio.preload();
+    void this.assets
+      .preloadCleanupCrew(this.heroId)
+      .catch((error) => console.warn('Cleanup Crew models unavailable', error));
+    for (const boss of BOSS_DEFS) {
+      if (boss.url === firstBoss.url) continue;
+      void this.assets
+        .loadUrl(boss.url, boss.targetHeight)
+        .catch((error) => console.warn(`Boss model unavailable: ${boss.id}`, error));
+    }
 
     this.scene.add(this.actors.root);
     await this.actors.setupPlayer(this.heroId);

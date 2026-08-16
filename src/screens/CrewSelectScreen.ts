@@ -17,6 +17,9 @@ export type CrewSelectHandlers = {
   onLaunch: (heroId: HeroId) => void;
 };
 
+/** Astronaut, mech and ship — what one hero needs before its plinth is complete. */
+const FORMS_PER_HERO = 3;
+
 /**
  * Mountable/disposable crew selection screen.
  * Owns its scene, renderer binding, listeners, and RAF.
@@ -46,6 +49,8 @@ export class CrewSelectScreen {
   private clock = new THREE.Clock();
   private hud: HTMLElement | null = null;
   private loading: HTMLElement | null = null;
+  /** In-flight or completed display-model loads, one entry per hero. */
+  private readonly heroLoads = new Map<HeroId, Promise<void>>();
 
   private onResize = (): void => this.resize();
   private onPointerDown = (): void => {
@@ -81,7 +86,6 @@ export class CrewSelectScreen {
   async mount(): Promise<void> {
     if (this.disposed) return;
     this.audio.setMode('menu');
-    this.audio.preload();
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -127,34 +131,31 @@ export class CrewSelectScreen {
       </div>`;
     this.host.appendChild(this.loading);
 
-    // Load all selection models (astronaut + mech + ship).
-    const total = HERO_LIST.length * 3;
-    let loaded = 0;
+    /*
+     * Gate the screen on the first hero only.
+     *
+     * This used to await all twelve models — every hero's astronaut, mech and ship —
+     * before the menu became usable: roughly 11 MB to render a plinth that shows one
+     * hero. The other three heroes stream in behind the screen, and `addForm` already
+     * skips a form whose model has not arrived, so a plinth is never half-built with
+     * broken geometry; it fills in as `ensureHero` resolves.
+     */
+    const first = HERO_LIST[this.selectedIndex] ?? HERO_LIST[0]!;
     const bar = this.loading.querySelector<HTMLElement>('#crew-loading-bar');
-    const bump = () => {
+    let loaded = 0;
+    await this.ensureHero(first, () => {
       loaded += 1;
-      if (bar) bar.style.width = `${Math.round((loaded / total) * 100)}%`;
-    };
-
-    await Promise.all(
-      HERO_LIST.flatMap((hero) => [
-        this.assets.loadUrl(hero.astronaut.url, 4.1).then(bump),
-        this.assets.loadUrl(hero.mech.url, 6.0).then(bump),
-        this.assets.loadUrl(hero.shipUrl).then((entry) => {
-          // Fit ship by width-ish for display
-          const box = new THREE.Box3().setFromObject(entry.template);
-          const size = box.getSize(new THREE.Vector3());
-          const dim = Math.max(size.x, size.z, 0.001);
-          entry.template.scale.multiplyScalar(5.8 / dim);
-          entry.template.updateMatrixWorld(true);
-          const b2 = new THREE.Box3().setFromObject(entry.template);
-          entry.template.position.y -= b2.min.y;
-          bump();
-        }),
-      ]),
-    );
+      if (bar) bar.style.width = `${Math.round((loaded / FORMS_PER_HERO) * 100)}%`;
+    });
 
     if (this.disposed) return;
+    // Music and the remaining roster both wait until the screen is usable, so neither
+    // competes for bandwidth with the models the first plinth needs.
+    this.audio.preload();
+    for (const hero of HERO_LIST) {
+      if (hero.id !== first.id) void this.ensureHero(hero);
+    }
+
     this.loading.remove();
     this.loading = null;
     this.updateSelection(0);
@@ -560,6 +561,64 @@ export class CrewSelectScreen {
     model.position.y += centerY - currentCenter.y;
   }
 
+  /**
+   * Load one hero's three display forms, at most once.
+   *
+   * Memoised per hero, so the background sweep, an early click on a hero that has not
+   * arrived, and the initial gating load all share a single set of requests.
+   *
+   * The completion handler rebuilds only the 3D forms, never `updateSelection` — that
+   * method calls straight back into here, and rebuilding through it would recurse.
+   */
+  private ensureHero(hero: HeroDef, onForm?: () => void): Promise<void> {
+    const existing = this.heroLoads.get(hero.id);
+    if (existing) return existing;
+
+    const task = Promise.all([
+      this.assets.loadUrl(hero.astronaut.url, 4.1).then(() => onForm?.()),
+      this.assets.loadUrl(hero.mech.url, 6.0).then(() => onForm?.()),
+      this.assets.loadUrl(hero.shipUrl).then((entry) => {
+        // Ships are fitted by footprint rather than height, once, on the shared template.
+        const box = new THREE.Box3().setFromObject(entry.template);
+        const size = box.getSize(new THREE.Vector3());
+        const dim = Math.max(size.x, size.z, 0.001);
+        entry.template.scale.multiplyScalar(5.8 / dim);
+        entry.template.updateMatrixWorld(true);
+        const fitted = new THREE.Box3().setFromObject(entry.template);
+        entry.template.position.y -= fitted.min.y;
+        onForm?.();
+      }),
+    ])
+      .then(() => {
+        if (this.disposed) return;
+        // If this hero is the one on the plinth, its forms can now be shown.
+        if (HERO_LIST[this.selectedIndex]?.id === hero.id) this.rebuildSelectedForms();
+      })
+      .catch((error) => {
+        // One unreachable model must not take down the whole screen.
+        console.warn(`Crew model unavailable for ${hero.id}`, error);
+      });
+
+    this.heroLoads.set(hero.id, task);
+    return task;
+  }
+
+  /** Rebuild just the plinth models for the current selection. */
+  private rebuildSelectedForms(): void {
+    const hero = HERO_LIST[this.selectedIndex];
+    if (!hero) return;
+    this.selectedHeroGroup.clear();
+    this.floaters.length = 0;
+    this.selectedHeroGroup.add(this.selectedHeroLight);
+    this.selectedHeroLight.color.set(hero.accent);
+    this.selectedHeroLight.position.set(0, 6, 2);
+    this.addForm(hero, 'astronaut');
+    this.addForm(hero, 'mech');
+    this.addForm(hero, 'ship');
+    this.selectionScale = 0.78;
+    this.selectedHeroGroup.scale.setScalar(this.selectionScale);
+  }
+
   private addForm(hero: HeroDef, kind: 'astronaut' | 'mech' | 'ship'): void {
     const url = kind === 'ship' ? hero.shipUrl : kind === 'astronaut' ? hero.astronaut.url : hero.mech.url;
     const entry = this.assets.get(url);
@@ -606,16 +665,10 @@ export class CrewSelectScreen {
       btn.setAttribute('aria-selected', String(i === index));
     });
 
-    this.selectedHeroGroup.clear();
-    this.floaters.length = 0;
-    this.selectedHeroGroup.add(this.selectedHeroLight);
-    this.selectedHeroLight.color.set(hero.accent);
-    this.selectedHeroLight.position.set(0, 6, 2);
-    this.addForm(hero, 'astronaut');
-    this.addForm(hero, 'mech');
-    this.addForm(hero, 'ship');
-    this.selectionScale = 0.78;
-    this.selectedHeroGroup.scale.setScalar(this.selectionScale);
+    // Selecting a hero that is still streaming promotes it; `ensureHero` is memoised,
+    // so an already-loaded hero costs nothing and does not rebuild twice.
+    void this.ensureHero(hero);
+    this.rebuildSelectedForms();
     if (shouldCue) this.audio.uiMove();
   }
 

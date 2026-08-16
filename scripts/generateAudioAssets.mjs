@@ -6,11 +6,15 @@
  * sit behind a dense survival run without adding fatigue. No samples, asset-pack files,
  * or third-party recordings are used.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OUT = fileURLToPath(new URL('../public/audio/', import.meta.url));
+// The uncompressed master is an intermediate, not a shipped asset. It is written next to
+// the encoded files, transcoded, and deleted; only the compressed masters are published.
+const MASTER = fileURLToPath(new URL('../public/audio/command-deck.wav', import.meta.url));
 const SR = 44_100;
 const DURATION = 128;
 const FRAMES = SR * DURATION;
@@ -221,5 +225,38 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
 const left = circularReverb(dryLeft, -1);
 const right = circularReverb(dryRight, 1);
 master(left, right);
-writeFileSync(join(OUT, 'command-deck.wav'), wavBuffer([left, right]));
-console.log(`Generated one ${DURATION}s project-owned ambient score at ${SR}Hz in ${OUT}`);
+writeFileSync(MASTER, wavBuffer([left, right]));
+console.log(`Rendered one ${DURATION}s project-owned ambient score at ${SR}Hz`);
+
+/**
+ * Encode the shipped masters.
+ *
+ * Two formats, because no single one is safe everywhere: Opus is the smaller and better
+ * of the pair, and AAC covers Safari, which only gained Ogg Opus support very recently.
+ * `AudioBus` probes `canPlayType` and downloads exactly one of them.
+ *
+ * Both are lossy and pad the tail, so the runtime pins the loop to `DURATION` rather
+ * than to the decoded buffer length — see `LOOP_SECONDS` in `src/game/audio/AudioBus.ts`.
+ * If you change `DURATION` here, change it there too.
+ */
+const ENCODES = [
+  { file: 'command-deck.opus', args: ['-c:a', 'libopus', '-b:a', '96k', '-vbr', 'on', '-application', 'audio'] },
+  { file: 'command-deck.m4a', args: ['-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart'] },
+];
+
+try {
+  for (const { file, args } of ENCODES) {
+    const target = join(OUT, file);
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', MASTER, ...args, target, '-y']);
+    console.log(`  ${file.padEnd(20)} ${(statSync(target).size / 1048576).toFixed(2)} MB`);
+  }
+  rmSync(MASTER);
+} catch (error) {
+  // A missing encoder must not leave an unplayable 22 MB WAV sitting in public/.
+  rmSync(MASTER, { force: true });
+  console.error(
+    '\nffmpeg (with libopus) is required to encode the shipped masters.\n' +
+      '  Debian/Ubuntu: apt-get install ffmpeg   macOS: brew install ffmpeg\n',
+  );
+  throw error;
+}

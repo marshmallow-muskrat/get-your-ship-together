@@ -2,10 +2,42 @@ import type { SurvivorState } from '../modes/survivor/survivorState';
 
 type AudioMode = 'menu' | 'combat';
 
-const TRACK_URL = '/audio/command-deck.wav';
+/**
+ * Compressed masters, best first.
+ *
+ * The score used to ship as a 22.6 MB uncompressed WAV — larger than the JavaScript
+ * bundle, every hero model and every boss model combined, and 57% of everything a
+ * first-time visitor downloaded. Opus at 96 kbps is 1.6 MB for the same 128 seconds.
+ * AAC is carried for Safari, which only gained Ogg Opus support very recently.
+ */
+const TRACK_SOURCES: ReadonlyArray<{ url: string; mime: string }> = [
+  { url: '/audio/command-deck.opus', mime: 'audio/ogg; codecs="opus"' },
+  { url: '/audio/command-deck.m4a', mime: 'audio/mp4; codecs="mp4a.40.2"' },
+];
+
+/**
+ * Authored loop length, matching `DURATION` in `scripts/generateAudioAssets.mjs`.
+ *
+ * A lossy encoder pads the tail — Opus adds ~6.5 ms here — and looping the decoded
+ * buffer's full length would replay that padding as a gap every time around. Pinning
+ * the loop to the authored length keeps the seam exact whatever the codec does.
+ */
+const LOOP_SECONDS = 128;
+
 // Keep the established key so existing players retain their mute preference after the
 // music-only redesign.
 const MUTE_KEY = 'gyst.audio.muted';
+
+/** First source this browser claims it can decode; null when none are playable. */
+function pickTrackUrl(): string | null {
+  if (typeof document === 'undefined') return TRACK_SOURCES[0]!.url;
+  const probe = document.createElement('audio');
+  for (const source of TRACK_SOURCES) {
+    // '' means no; 'maybe' and 'probably' are both worth attempting.
+    if (probe.canPlayType(source.mime) !== '') return source.url;
+  }
+  return null;
+}
 
 /**
  * Music-only audio system.
@@ -39,7 +71,12 @@ export class AudioBus {
   /** Begin the one network read without creating or resuming an AudioContext. */
   preload(): void {
     if (this.rawLoad || typeof fetch !== 'function') return;
-    this.rawLoad = fetch(TRACK_URL)
+    const url = pickTrackUrl();
+    if (!url) {
+      this.rawLoad = Promise.resolve(null);
+      return;
+    }
+    this.rawLoad = fetch(url)
       .then(async (response) => {
         if (!response.ok) throw new Error(`ambient score: HTTP ${response.status}`);
         return response.arrayBuffer();
@@ -91,9 +128,14 @@ export class AudioBus {
     return this.mode === 'menu' ? 0.19 : 0.16;
   }
 
+  /**
+   * Set the mix mode. Deliberately does *not* start the download: screens call
+   * `preload()` themselves once their blocking assets are in, so the score does not
+   * compete for bandwidth with the models they cannot start without. `unlock()` also
+   * preloads, so a user gesture still guarantees the fetch on any path.
+   */
   setMode(mode: AudioMode): void {
     this.mode = mode;
-    this.preload();
     if (this.context && this.musicBus) {
       this.musicBus.gain.setTargetAtTime(this.targetMusicVolume(), this.context.currentTime, 1.4);
     }
@@ -122,6 +164,9 @@ export class AudioBus {
     const source = this.context.createBufferSource();
     source.buffer = this.musicBuffer;
     source.loop = true;
+    source.loopStart = 0;
+    // Never loop past the authored end, even if the decoder handed back codec padding.
+    source.loopEnd = Math.min(LOOP_SECONDS, this.musicBuffer.duration);
     source.connect(this.musicBus);
     source.start();
     this.musicSource = source;
