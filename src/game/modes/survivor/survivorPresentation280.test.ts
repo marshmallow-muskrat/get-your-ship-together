@@ -65,6 +65,53 @@ describe('§0 station wayfinding never hides gameplay signals', () => {
     }
     arena.dispose();
   });
+
+  it('gives the central pad a brighter value than the outer ring', () => {
+    const arena = new SurvivorArena();
+    (arena as unknown as { addWayfinding(): void }).addWayfinding();
+    let pad: THREE.MeshStandardMaterial | null = null;
+    let rim: THREE.MeshStandardMaterial | null = null;
+    arena.root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const material = Array.isArray(object.material) ? object.material[0] : object.material;
+      if (!(material instanceof THREE.MeshStandardMaterial)) return;
+      if (object.geometry instanceof THREE.CircleGeometry) pad = material;
+      if (object.geometry instanceof THREE.RingGeometry) {
+        const params = object.geometry.parameters;
+        if (params.outerRadius > 20) rim = material;
+      }
+    });
+    expect(pad, 'no central pad').toBeTruthy();
+    expect(rim, 'no outer ring').toBeTruthy();
+    const value = (m: THREE.MeshStandardMaterial) => {
+      const c = m.color;
+      return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    };
+    expect(value(pad!), 'pad is not brighter than the rim').toBeGreaterThan(value(rim!) + 0.04);
+    arena.dispose();
+  });
+
+  it('lights the station with a reactor, a warm band and a hazard rim', () => {
+    const arena = new SurvivorArena();
+    (arena as unknown as { addLighting(): void }).addLighting();
+    const points: THREE.PointLight[] = [];
+    arena.root.traverse((object) => {
+      if (object instanceof THREE.PointLight) points.push(object);
+    });
+    expect(points.length, 'no reactor lighting zones').toBeGreaterThanOrEqual(3);
+    const hues = points.map((light) => {
+      const hsl = { h: 0, s: 0, l: 0 };
+      light.color.getHSL(hsl);
+      return hsl.h;
+    });
+    const hasCool = hues.some((h) => h > 0.45 && h < 0.7);
+    const hasWarm = hues.some((h) => h > 0.04 && h < 0.15);
+    const hasHazard = hues.some((h) => h < 0.04 || h > 0.95);
+    expect(hasCool, 'missing cool reactor light').toBe(true);
+    expect(hasWarm, 'missing warm band light').toBe(true);
+    expect(hasHazard, 'missing hazard rim light').toBe(true);
+    arena.dispose();
+  });
 });
 import {
   EMPTY_SURVIVOR_INPUT,

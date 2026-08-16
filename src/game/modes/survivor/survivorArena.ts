@@ -81,7 +81,7 @@ export class SurvivorArena {
   private addFloor(): void {
     const h = SURVIVOR.arenaHalf;
     const geo = new THREE.BoxGeometry(h * 2 + 4, 0.12, h * 2 + 4);
-    const mat = new THREE.MeshStandardMaterial({ color: '#080d15', roughness: 0.95, metalness: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({ color: '#03050a', roughness: 0.95, metalness: 0.05 });
     this.ground = this.generatedMesh(new THREE.Mesh(geo, mat));
     this.ground.position.set(0, -0.2, 0);
     this.ground.receiveShadow = true;
@@ -160,7 +160,7 @@ export class SurvivorArena {
   }
 
   private addWayfinding(): void {
-    const laneMat = this.wayfindingMaterial('#182435', '#0a1624', 0.45);
+    const laneMat = this.wayfindingMaterial('#1c3048', '#12344c', 0.55);
     /*
      * These are painted wayfinding layers, not gameplay surfaces. They ride above the
      * imported tiles so they remain crisp, but their materials never write depth; the
@@ -176,24 +176,36 @@ export class SurvivorArena {
 
     const pad = this.generatedMesh(new THREE.Mesh(
       new THREE.CircleGeometry(8.4, 64),
-      this.wayfindingMaterial('#111c2a', '#0a1825', 0.38),
+      this.wayfindingMaterial('#2a3d55', '#3a2814', 0.62),
     ));
     pad.rotation.x = -Math.PI / 2;
     pad.position.y = 0.092;
     pad.receiveShadow = true;
     const padEdge = this.generatedMesh(new THREE.Mesh(
       new THREE.RingGeometry(7.75, 8.35, 64),
-      this.wayfindingMaterial('#405268', '#4da9b4', 1.05),
+      this.wayfindingMaterial('#5ec8d4', '#4da9b4', 1.35),
     ));
     padEdge.rotation.x = -Math.PI / 2;
     padEdge.position.y = 0.105;
     const innerEdge = this.generatedMesh(new THREE.Mesh(
       new THREE.RingGeometry(3.8, 4.05, 48),
-      this.wayfindingMaterial('#6a5124', '#d69b32', 0.85),
+      this.wayfindingMaterial('#e8b44a', '#d69b32', 1.15),
     ));
     innerEdge.rotation.x = -Math.PI / 2;
     innerEdge.position.y = 0.108;
-    this.root.add(pad, padEdge, innerEdge);
+    const warmBand = this.generatedMesh(new THREE.Mesh(
+      new THREE.RingGeometry(20, 28, 80),
+      this.wayfindingMaterial('#2a1a0c', '#c47a28', 0.55),
+    ));
+    warmBand.rotation.x = -Math.PI / 2;
+    warmBand.position.y = 0.082;
+    const hazardRim = this.generatedMesh(new THREE.Mesh(
+      new THREE.RingGeometry(56, 63.6, 80),
+      this.wayfindingMaterial('#140808', '#e23a28', 0.72),
+    ));
+    hazardRim.rotation.x = -Math.PI / 2;
+    hazardRim.position.y = 0.08;
+    this.root.add(pad, padEdge, innerEdge, warmBand, hazardRim);
 
     const guideGeo = this.generatedGeometry(new THREE.BoxGeometry(0.12, 0.025, 2.7));
     const cyanGuides: THREE.Matrix4[] = [];
@@ -281,8 +293,8 @@ export class SurvivorArena {
   }
 
   private addLighting(): void {
-    const hemi = new THREE.HemisphereLight('#8aa0c0', '#0c1016', 0.5);
-    const key = new THREE.DirectionalLight('#c8d4e8', 1.1);
+    const hemi = new THREE.HemisphereLight('#7a90b0', '#08060a', 0.28);
+    const key = new THREE.DirectionalLight('#d4c4a8', 0.82);
     key.position.set(-10, 22, 12);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -295,17 +307,34 @@ export class SurvivorArena {
     key.shadow.camera.bottom = -sh;
     key.shadow.camera.near = 0.5;
     key.shadow.camera.far = 70;
-    const fill = new THREE.DirectionalLight('#4a6088', 0.3);
+    const fill = new THREE.DirectionalLight('#3a5078', 0.22);
     fill.position.set(12, 8, -10);
     const target = new THREE.Object3D();
     target.name = 'arena-light-target';
     key.target = target;
     fill.target = target;
+
+    const reactor = new THREE.PointLight('#4ec8d8', 5.2, 24, 2);
+    reactor.position.set(0, 6.5, 0);
+    reactor.name = 'arena-reactor';
+    const warmA = new THREE.PointLight('#d4923a', 2.4, 22, 2);
+    warmA.position.set(24, 4.2, 24);
+    const warmB = new THREE.PointLight('#d4923a', 2.4, 22, 2);
+    warmB.position.set(-24, 4.2, -24);
+    const hazardA = new THREE.PointLight('#e84530', 1.8, 18, 2);
+    hazardA.position.set(58, 3.4, 0);
+    const hazardB = new THREE.PointLight('#e84530', 1.8, 18, 2);
+    hazardB.position.set(-58, 3.4, 0);
+    const hazardC = new THREE.PointLight('#e84530', 1.8, 18, 2);
+    hazardC.position.set(0, 3.4, 58);
+    const hazardD = new THREE.PointLight('#e84530', 1.8, 18, 2);
+    hazardD.position.set(0, 3.4, -58);
+
     this.keyLight = key;
     this.fillLight = fill;
     this.lightTarget = target;
-    this.lights.push(hemi, key, fill);
-    this.root.add(hemi, key, fill, target);
+    this.lights.push(hemi, key, fill, reactor, warmA, warmB, hazardA, hazardB, hazardC, hazardD);
+    this.root.add(hemi, key, fill, target, reactor, warmA, warmB, hazardA, hazardB, hazardC, hazardD);
   }
 
   /** Keep the shadow footprint centred on the same world region as the follow camera. */
