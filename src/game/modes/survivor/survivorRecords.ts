@@ -14,6 +14,8 @@ export const LEADERBOARDS_STORAGE_KEY = 'gyst.survivor.leaderboards.v2';
 export const RUN_HISTORY_STORAGE_KEY = 'gyst.survivor.run-history.v1';
 export const MAX_LEADERBOARD_ENTRIES = 10;
 export const MAX_RUN_HISTORY_ENTRIES = 100;
+/** Archived balance partitions kept behind the current one before the oldest is dropped. */
+export const MAX_ARCHIVED_PARTITIONS = 2;
 
 export interface RunSummary {
   id: string;
@@ -208,8 +210,43 @@ function sortRuns(runs: RunSummary[]): RunSummary[] {
   });
 }
 
+/**
+ * Keep the top ten of **each balance partition**, not the top ten overall.
+ *
+ * The visible board is filtered to the current balance version, but trimming used to
+ * rank a new run against every archived run too. Shipping a balance change therefore
+ * emptied the visible board and then silently discarded any new run slower than the
+ * tenth-best archived one: the player finished a run, saw "no runs yet", and found
+ * nothing had been saved. A fresh partition now always has room for its own ten.
+ *
+ * Storage stays bounded by retaining only the most recent archived partitions, ranked
+ * by their newest run, so a long-lived install cannot accumulate a partition per patch.
+ */
 function trim(runs: RunSummary[]): RunSummary[] {
-  return sortRuns(runs).slice(0, MAX_LEADERBOARD_ENTRIES);
+  const newestPerVersion = new Map<string, number>();
+  for (const run of runs) {
+    const seen = newestPerVersion.get(run.balanceVersion) ?? -Infinity;
+    if (run.timestamp > seen) newestPerVersion.set(run.balanceVersion, run.timestamp);
+  }
+  const retained = new Set(
+    [...newestPerVersion.entries()]
+      // The live partition is always retained, even before it has its first run.
+      .filter(([version]) => version !== SURVIVOR_BALANCE_VERSION)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, MAX_ARCHIVED_PARTITIONS)
+      .map(([version]) => version),
+  );
+  retained.add(SURVIVOR_BALANCE_VERSION);
+
+  const kept = new Map<string, number>();
+  // Globally sorted so `loadRecords()` still reads the best run overall at index 0.
+  return sortRuns(runs).filter((run) => {
+    if (!retained.has(run.balanceVersion)) return false;
+    const count = kept.get(run.balanceVersion) ?? 0;
+    if (count >= MAX_LEADERBOARD_ENTRIES) return false;
+    kept.set(run.balanceVersion, count + 1);
+    return true;
+  });
 }
 
 /** Every recent completed run, newest first. Existing top-ten records seed migration. */
