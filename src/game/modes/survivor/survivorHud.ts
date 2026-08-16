@@ -36,6 +36,7 @@ import {
 import { aliveBossCount, primaryBoss } from './survivorState';
 import { renderStoredRunReport } from './storedRunReport';
 import type { HeroId } from '../../content/heroes';
+import { onboardingHelpShouldFade, onboardingUseFromPlayer } from './survivorOnboarding';
 
 /**
  * Whether this build should wear the TEST CENTER badge.
@@ -97,9 +98,7 @@ export class SurvivorHud {
    */
   private readyPrev = new Map<string, boolean>();
   private readyTimers = new Map<string, number>();
-  private helpTimer = 0;
   private helpHidden = false;
-  private startedAt = performance.now();
   private dmgPool: HTMLElement[] = [];
   private lastWeaponsKey = '';
   private lastBindKey = '';
@@ -566,7 +565,12 @@ export class SurvivorHud {
     // rebuild help with kbd tags properly
     const helpAbil = this.root.querySelector('#sv-help-abil');
     if (helpAbil) {
-      helpAbil.innerHTML = `<kbd>${formatKeyCode(binds.dodge)}</kbd> Dodge · <kbd>${formatKeyCode(binds.repulsor)}</kbd> Repulsor · <kbd>${formatKeyCode(binds.ship)}</kbd> Ship · <kbd>${formatKeyCode(binds.mech)}</kbd> Mech · <kbd>${formatKeyCode(binds.choice1)}</kbd><kbd>${formatKeyCode(binds.choice2)}</kbd><kbd>${formatKeyCode(binds.choice3)}</kbd> upgrades`;
+      helpAbil.innerHTML =
+        `<span data-help="dodge"><kbd>${formatKeyCode(binds.dodge)}</kbd> Dodge</span>` +
+        ` · <span data-help="repulsor"><kbd>${formatKeyCode(binds.repulsor)}</kbd> Repulsor</span>` +
+        ` · <span data-help="ship"><kbd>${formatKeyCode(binds.ship)}</kbd> Ship</span>` +
+        ` · <span data-help="mech"><kbd>${formatKeyCode(binds.mech)}</kbd> Mech</span>` +
+        ` · <kbd>${formatKeyCode(binds.choice1)}</kbd><kbd>${formatKeyCode(binds.choice2)}</kbd><kbd>${formatKeyCode(binds.choice3)}</kbd> upgrades`;
     }
     const helpPause = this.root.querySelector('#sv-help-pause');
     if (helpPause) {
@@ -681,7 +685,7 @@ export class SurvivorHud {
     this.publishLevelUp(state, binds);
     this.publishEnd(state);
     this.publishDamage(state);
-    this.publishHelp();
+    this.publishHelp(state);
   }
 
   private formatCd(seconds: number): string {
@@ -1550,11 +1554,16 @@ export class SurvivorHud {
     }
   }
 
-  private publishHelp(): void {
+  private publishHelp(state: SurvivorState): void {
+    const help = this.root.querySelector('#sv-help');
+    if (!help) return;
+    const used = onboardingUseFromPlayer(state.player);
+    for (const [ability, done] of Object.entries(used)) {
+      help.querySelector(`[data-help="${ability}"]`)?.classList.toggle('done', done);
+    }
     if (this.helpHidden) return;
-    this.helpTimer = (performance.now() - this.startedAt) / 1000;
-    if (this.helpTimer > 7) {
-      this.root.querySelector('#sv-help')?.classList.add('fade');
+    if (onboardingHelpShouldFade(used, state.time)) {
+      help.classList.add('fade');
       this.helpHidden = true;
     }
   }

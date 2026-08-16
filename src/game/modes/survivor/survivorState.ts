@@ -597,6 +597,11 @@ export interface SurvivorState {
     slowMul: number;
     /** Deterministic movement flag for idle/run animation. */
     isMoving: boolean;
+    /** First successful Dodge this run — drives onboarding help, not combat. */
+    usedDodge: boolean;
+    usedRepulsor: boolean;
+    usedShip: boolean;
+    usedMech: boolean;
     /** Remaining pause before Nanite Bleed resumes after damage. */
     regenPause: number;
     /** Shared boss body/charge contact throttle. */
@@ -1047,6 +1052,10 @@ export function createSurvivorState(
       damageMul: 1,
       mechReadyAnnounced: false,
       isMoving: false,
+      usedDodge: false,
+      usedRepulsor: false,
+      usedShip: false,
+      usedMech: false,
       regenPause: 0,
       bossContactCd: 0,
       slowTimer: 0,

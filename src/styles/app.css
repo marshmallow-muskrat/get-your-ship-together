@@ -2373,21 +2373,31 @@ html {
   bottom: 9.2rem;
   display: flex;
   flex-direction: column;
-  gap: 0.18rem;
-  font-size: 0.68rem;
-  color: rgba(190, 210, 240, 0.72);
+  gap: 0.22rem;
+  padding: 0.42rem 0.62rem;
+  border-radius: 0.28rem;
+  border: 1px solid rgba(170, 210, 255, 0.28);
+  background: rgba(4, 10, 20, 0.72);
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: rgba(236, 244, 255, 0.96);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   transition: opacity 0.8s ease;
 }
 .survivor-hud .sv-help.fade {
   opacity: 0;
 }
+.survivor-hud .sv-help [data-help].done {
+  opacity: 0.42;
+}
 .survivor-hud .sv-help kbd {
   font-family: 'Space Mono', monospace;
-  font-size: 0.62rem;
-  padding: 0.05rem 0.25rem;
+  font-size: 0.78rem;
+  padding: 0.05rem 0.28rem;
   border-radius: 0.2rem;
-  border: 1px solid rgba(160, 190, 255, 0.25);
-  background: rgba(8, 14, 28, 0.55);
+  border: 1px solid rgba(190, 220, 255, 0.45);
+  background: rgba(8, 14, 28, 0.75);
+  color: rgba(245, 250, 255, 0.98);
 }
 .survivor-hud .sv-dmg-layer {
   position: absolute;

@@ -1498,6 +1498,7 @@ export function tryRepulsor(state: SurvivorState): boolean {
   const push = cfg.push * (mech ? cfg.mechPushMul : 1);
 
   p.repulsorCd = cfg.cooldown * abilityCooldownMul(state);
+  p.usedRepulsor = true;
   // Multi-layer shockwave visual matching true gameplay radius
   pushEffect(state, 'repulsor', p.x, p.z, cfg.effectLife, state.accent, radius, { radius });
   pushEffect(state, 'pulse', p.x, p.z, cfg.effectLife * 0.7, '#ffffff', radius * 0.45, {
@@ -1556,6 +1557,7 @@ export function tryShip(state: SurvivorState): boolean {
   if (p.form === 'mech' || p.form === 'ship') return false;
   if (p.shipCd > 0) return false;
   p.form = 'ship';
+  p.usedShip = true;
   p.shipDuration = SURVIVOR.ship.duration;
   p.wakeTimer = 0;
   p.formTimer = 0;
@@ -1570,6 +1572,7 @@ export function tryMech(state: SurvivorState): boolean {
   if (p.mechCd > 0) return false;
   const cd = mechCooldownFor(state) * abilityCooldownMul(state);
   p.form = 'mech';
+  p.usedMech = true;
   // Set on activation and ticked even while Mech is active: the cycle is
   // activation-to-activation, so 14s of Mech costs ~31s of astronaut/ship time.
   p.mechCd = cd;
@@ -5261,6 +5264,7 @@ export function tryDodge(state: SurvivorState, moveX: number, moveY: number): bo
   p.dodgeDirZ = dz / len;
   p.dodgeActive = SURVIVOR.dodge.duration;
   p.dodgeCd = SURVIVOR.dodge.cooldown * abilityCooldownMul(state);
+  p.usedDodge = true;
   p.invuln = Math.max(p.invuln, SURVIVOR.dodge.invuln);
   p.facingX = p.dodgeDirX;
   p.facingZ = p.dodgeDirZ;
