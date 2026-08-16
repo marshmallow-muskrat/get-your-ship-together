@@ -8,6 +8,18 @@ The version names below are retrospective product milestones unless a balance ve
 
 ## [Unreleased]
 
+### First ninety seconds and a clean 2.11.0 line (`endless-2.11.0`)
+
+Onboarding no longer expires on wall clock during asset load. The help strip
+stays until each of the four abilities has been used, and it is large enough
+to read. Reactor Platform 7 has lighting contrast (reactor, warm band, hazard
+rim) without new art, and without regressing the pad depth-write contract.
+
+The weapon harness now has a `surrounded` scenario. Cadence and keep-away
+candidates for Rail Lance and Rocket Barrage were measured and discarded —
+they moved the finished L5/L1 curve out of band. Production damage tables are
+unchanged. The balance partition marker is `endless-2.11.0`.
+
 ### Boss fairness, control fields and the Cosmic Boomerang (`endless-2.8.0` Test Center candidate)
 
 **One boss damage law.** Every boss damage path is now `authored base x bossDamageScale(...)`,

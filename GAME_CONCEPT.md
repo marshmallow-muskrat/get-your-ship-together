@@ -23,6 +23,16 @@ Every run:
 
 There is no normal victory state. Survival time is the primary score.
 
+## Open product decision — the name
+
+The game still calls itself **Cosmic Cleanup!** while the repo, domain and studio
+identity are **Get Your Ship Together**. That split is unresolved and a Steam page
+is imminent. This document does not pick a winner.
+
+Outside view, for the owners: "Get Your Ship Together" is the stronger product
+name — a pun people repeat, searchable, and it describes the astronaut/ship/mech
+transform. "Cosmic Cleanup" is generic and crowded. The owners decide.
+
 ## Identity
 
 - Four animal astronauts with hero-specific astronaut, ship, and mech models

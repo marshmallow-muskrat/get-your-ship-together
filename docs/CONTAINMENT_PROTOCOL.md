@@ -2,7 +2,7 @@
 
 **Status:** Primary game direction  
 **Mode:** One-map endless high-score survival  
-**Current balance line:** `endless-2.8.0` (Test Center candidate)
+**Current balance line:** `endless-2.11.0`
 
 ## Purpose
 
@@ -20,6 +20,19 @@ Containment Protocol is the game, not a secondary experiment. The former campaig
 6. Fight escalating bosses at two-minute intervals.
 7. Continue until the build is overwhelmed.
 8. Record the run on that hero’s local leaderboard.
+
+## endless-2.11.0
+
+First-run help is driven from simulation time and stays until Dodge, Repulsor,
+Ship and Mech have each been used once. Reactor Platform 7 lighting uses a
+warmer central pad, a mid-ring emissive band and a hazard rim; wayfinding
+overlays still do not write depth.
+
+The weapon benchmark now includes a `surrounded` scenario (closing ring, no
+kite, 17% of starter weight). Rail Lance and Rocket Barrage cadence and damage
+are unchanged: scaling them at constant DPS, and a keep-away shove on the
+volley, both moved the finished L5/L1 curve out of band. See
+[`SURVIVAL_EXPERIMENTS.md`](SURVIVAL_EXPERIMENTS.md).
 
 ## Product decisions
 

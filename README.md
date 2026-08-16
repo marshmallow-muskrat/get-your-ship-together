@@ -93,7 +93,7 @@ Energy is run XP. The timer pauses during level-up choices, pause, and Settings.
 - [`docs/CONTAINMENT_PROTOCOL.md`](docs/CONTAINMENT_PROTOCOL.md) — gameplay, architecture, balance, and fixtures
 - [`docs/SURVIVAL_BENCHMARK.md`](docs/SURVIVAL_BENCHMARK.md) — generated full-run distribution and standard-deviation chart
 - [`docs/SURVIVAL_EXPERIMENTS.md`](docs/SURVIVAL_EXPERIMENTS.md) — preserved baseline/candidate simulation history
-- [`docs/PRESENTATION_AUDIT_280.md`](docs/PRESENTATION_AUDIT_280.md) — endless-2.8.0 presentation, geometry and combat-correctness audit
+- [`docs/PRESENTATION_AUDIT_280.md`](docs/PRESENTATION_AUDIT_280.md) — endless-2.8.0 presentation, geometry and combat-correctness audit (historical; current balance line is `endless-2.11.0`)
 - [`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md) — immutable releases and disposable Test Center experiments
 - [`AGENTS.md`](AGENTS.md) — implementation guardrails
 

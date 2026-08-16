@@ -1085,7 +1085,7 @@ describe('§22 Test Center metadata', () => {
    * lagged, a 2.8.0 Test Center build could not be told apart from production 2.7.0 by
    * the one check that exists to catch a mis-publish.
    */
-  it('partitions the playtest polish pass from production', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.10.0-test-center');
+  it('partitions the 2.11.0 line from earlier Test Center candidates', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.11.0');
   });
 });

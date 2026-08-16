@@ -1789,8 +1789,8 @@ describe('protocol presentation contracts', () => {
 });
 
 describe('balance version', () => {
-  it('is endless-2.10.0-test-center', () => {
-    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.10.0-test-center');
+  it('is endless-2.11.0', () => {
+    expect(SURVIVOR_BALANCE_VERSION).toBe('endless-2.11.0');
   });
 });
 

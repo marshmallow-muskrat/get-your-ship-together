@@ -28,7 +28,7 @@ import {
  * policy are unchanged — but their stamp records the partition that was live when they
  * were taken rather than the release they belong to.
  */
-export const SURVIVOR_BALANCE_VERSION = 'endless-2.10.0-test-center';
+export const SURVIVOR_BALANCE_VERSION = 'endless-2.11.0';
 
 /**
  * Piecewise-linear interpolation over ascending `[x, y]` anchors.
