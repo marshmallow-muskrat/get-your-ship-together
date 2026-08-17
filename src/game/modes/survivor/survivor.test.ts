@@ -845,12 +845,13 @@ describe('boss scaling and mega', () => {
     const h10 = bossDifficultyFor(10).healthMul;
     // Old 1.55^9 ≈ 38 for boss 10; new is much lower base before mega
     expect(bossHealthMulFor(5)).toBeLessThan(Math.pow(1.55, 4));
-    expect(isMegaBossIndex(5)).toBe(true);
+    expect(isMegaBossIndex(3)).toBe(true);
+    expect(isMegaBossIndex(5)).toBe(false);
     expect(isMegaBossIndex(4)).toBe(false);
     expect(h10).toBeGreaterThan(h5);
   });
 
-  it('spawns mega at index 5', () => {
+  it('spawns mega at every third boss', () => {
     const state = createSurvivorState('bee', 'survivor-mega', 2);
     for (let i = 0; i < 20; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
     const mega = state.bosses.find((b) => b.isMega);
@@ -894,9 +895,9 @@ describe('prototype unlock gates', () => {
 
 function spawnTestBoss(state: ReturnType<typeof createSurvivorState>, mega = false) {
   // Step until a boss exists or force-spawn via schedule
-  state.time = mega ? SURVIVOR.bossInterval * 5 - 0.01 : SURVIVOR.bossInterval - 0.01;
-  state.nextBossIndex = mega ? 5 : 1;
-  state.nextBossTime = mega ? SURVIVOR.bossInterval * 5 : SURVIVOR.bossInterval;
+  state.time = mega ? SURVIVOR.bossInterval * SURVIVOR.megaEvery - 0.01 : SURVIVOR.bossInterval - 0.01;
+  state.nextBossIndex = mega ? SURVIVOR.megaEvery : 1;
+  state.nextBossTime = mega ? SURVIVOR.bossInterval * SURVIVOR.megaEvery : SURVIVOR.bossInterval;
   for (let i = 0; i < 30; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
   const b = state.bosses.find((x) => x.active && x.state !== 'dead');
   expect(b).toBeTruthy();
@@ -1834,7 +1835,7 @@ describe('melee horde and endless-2.3.0 balance', () => {
     }
   });
 
-  it('boss queue drains 4 → 5 → 6 in exact order with 5 as Mega, losing none', () => {
+  it('boss queue drains 2 → 3 → 4 in exact order with 3 as Mega, losing none', () => {
     const state = createSurvivorState('bee', null, 920);
     state.player.invuln = 9999;
     state.weapons = [];
@@ -1842,10 +1843,10 @@ describe('melee horde and endless-2.3.0 balance', () => {
     // Controlled capacity: only the queue may produce bosses.
     state.nextBossIndex = 7;
     state.nextBossTime = 1e9;
-    state.pendingBossIndices = [4, 5, 6];
-    expect(isMegaBossIndex(5)).toBe(true);
+    state.pendingBossIndices = [2, 3, 4];
+    expect(isMegaBossIndex(3)).toBe(true);
+    expect(isMegaBossIndex(2)).toBe(false);
     expect(isMegaBossIndex(4)).toBe(false);
-    expect(isMegaBossIndex(6)).toBe(false);
 
     // state.bosses is append-only in spawn order, so it records the true drain order.
     const spawnOrder: number[] = [];
@@ -1868,18 +1869,18 @@ describe('melee horde and endless-2.3.0 balance', () => {
     }
 
     // Exact FIFO order — not merely "contains".
-    expect(spawnOrder).toEqual([4, 5, 6]);
+    expect(spawnOrder).toEqual([2, 3, 4]);
     expect(state.pendingBossIndices).toEqual([]);
     expect(state.bossesSpawned).toBe(3);
     // None duplicated.
     const indices = state.bosses.map((b) => b.index);
     expect(new Set(indices).size).toBe(indices.length);
-    // Index 5 is the Mega.
-    const five = state.bosses.find((b) => b.index === 5);
-    expect(five).toBeTruthy();
-    expect(five!.isMega).toBe(true);
+    // Index 3 is the Mega.
+    const three = state.bosses.find((b) => b.index === 3);
+    expect(three).toBeTruthy();
+    expect(three!.isMega).toBe(true);
+    expect(state.bosses.find((b) => b.index === 2)!.isMega).toBe(false);
     expect(state.bosses.find((b) => b.index === 4)!.isMega).toBe(false);
-    expect(state.bosses.find((b) => b.index === 6)!.isMega).toBe(false);
   });
 
   it('a later boss index queues behind earlier pending indices', () => {
@@ -2227,6 +2228,21 @@ describe('gravitic recall XP conservation', () => {
     runResolvingLevelUps(state, 200);
     expect(state.pickups.find((p) => p.id === 8899)?.active).toBe(true);
     expect(state.pickups.find((p) => p.id === 8901)?.active).toBe(true);
+    expect(totalEarnedXp(state) - earned0).toBe(total);
+  });
+
+  it('credits every snapshotted orb even if a floor slot is stolen mid-pull', () => {
+    const state = recallState(7311);
+    const total = scatterEnergy(state, [8, 9, 10]);
+    const earned0 = totalEarnedXp(state);
+    forceStartProtocol(state, 'gravitic-recall', 1);
+    expect(state.recall.totalXp).toBe(total);
+    const stolen = state.pickups.find((p) => p.id === 8801);
+    expect(stolen).toBeTruthy();
+    stolen!.active = false;
+    stolen!.magnetized = false;
+    for (let i = 0; i < 200; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
+    expect(state.recall.active).toBe(false);
     expect(totalEarnedXp(state) - earned0).toBe(total);
   });
 
@@ -2692,7 +2708,13 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(SURVIVOR.cameraHalfMin).toBeCloseTo(12, 6);
     expect(SURVIVOR.playerSpeed).toBeCloseTo(9.79, 6);
     expect(SURVIVOR.hordeTravelMul).toBeCloseTo(1.38, 6);
-    expect(SURVIVOR.bossTravelMul).toBeCloseTo(2.35, 6);
+    expect(SURVIVOR.bossTravelMul).toBeCloseTo(4.7, 6);
+    expect(SURVIVOR.megaEvery).toBe(3);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(2.6, 6);
+    expect(SURVIVOR.orbVisual.baseline).toBe(4);
+    expect(SURVIVOR.repulsor.radius).toBeCloseTo(179.55, 6);
+    expect(SURVIVOR.repulsor.push).toBeCloseTo(159.6, 6);
+    expect(SURVIVOR.boomerang.curveBulge).toBeCloseTo(0.32, 6);
   });
 
   it('sets a 30-second Ship recharge and lets Reinforced Airframe reach 25 seconds', () => {

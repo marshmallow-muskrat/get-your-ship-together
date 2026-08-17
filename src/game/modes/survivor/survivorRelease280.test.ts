@@ -351,6 +351,9 @@ describe('§5 upgrade cards', () => {
     // Repeatable passives never claim a cap they do not have.
     expect(passiveCard('max-health', 9, 200).progression.label).toBe('L9 → L10');
 
+    expect(hudSource).toMatch(/className = 'sv-card-badge'/);
+    expect(hudSource).not.toMatch(/function simplifyCardBadge/);
+    expect(hudSource).toMatch(/cardBadgeText\(card\?\.category/);
     expect(hudSource).toMatch(/className = 'sv-card-level'/);
     expect(hudSource).toMatch(/dataset\.progression/);
     expect(hudSource).not.toMatch(/dataset\.firstUpgrade/);
@@ -502,7 +505,8 @@ describe('§8 Cosmic Boomerang', () => {
       { weaponId: 'boomerang', level, cooldown: 0, focusDebt: 0, prototype: false },
     ];
     for (let i = 0; i < 8; i += 1) {
-      spawnEnemyForTest(state, 'basic', state.player.x, state.player.z + 3 + i * 1.6);
+      const side = i % 2 === 0 ? 2.4 : -2.4;
+      spawnEnemyForTest(state, 'basic', state.player.x + side, state.player.z + 3 + i * 1.6);
     }
     return state;
   }
@@ -542,8 +546,8 @@ describe('§8 Cosmic Boomerang', () => {
       maxLateral = Math.max(maxLateral, Math.abs(dx * disc.launchFz - dz * disc.launchFx));
     }
     expect(disc).not.toBeNull();
-    expect(maxLateral).toBeGreaterThan(0.35);
-    expect(maxLateral).toBeLessThan(disc!.turnDistance * 0.12);
+    expect(maxLateral).toBeGreaterThan(disc!.turnDistance * 0.22);
+    expect(maxLateral).toBeLessThan(disc!.turnDistance * 0.42);
   });
 
   it('strikes each body once per leg, and gets two legs', () => {
@@ -577,7 +581,16 @@ describe('§8 Cosmic Boomerang', () => {
      * strike something at point-blank. That is correct catch geometry, but it makes a
      * chasing target the wrong instrument for measuring the two-leg contract.
      */
-    const lane = { x: state.player.x, z: state.player.z + 4 };
+    const disc = state.projectiles.find((pr) => pr.active && pr.kind === 'boomerang')!;
+    const u = 0.42;
+    const along = disc.turnDistance * u;
+    const px = -disc.launchFz;
+    const pz = disc.launchFx;
+    const side = Math.sin(Math.PI * u) * disc.turnDistance * SURVIVOR.boomerang.curveBulge * disc.curveSign;
+    const lane = {
+      x: disc.originX + disc.launchFx * along + px * side,
+      z: disc.originZ + disc.launchFz * along + pz * side,
+    };
     const before = target.health;
     let legs = 0;
     let prevHealth = target.health;

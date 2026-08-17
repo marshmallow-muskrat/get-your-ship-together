@@ -218,9 +218,17 @@ export function shipCooldownFor(state: SurvivorState): number {
   return shipCooldownAtLevel(passiveLevel(state, 'reinforced-airframe')) * abilityCooldownMul(state);
 }
 
+function containmentMagnetBonus(state: SurvivorState): number {
+  if (state.isolateLiveTravel) return 0;
+  return passiveLevel(state, 'area') * SURVIVOR.containment.magnetBonusPerLevel;
+}
+
 /** Energy/XP magnet radius. */
 export function energyMagnetRadius(state: SurvivorState): number {
-  const magnet = SURVIVOR.xpMagnetBase + passiveLevel(state, 'pickup-radius') * SURVIVOR.xpMagnetPerLevel;
+  const magnet =
+    SURVIVOR.xpMagnetBase +
+    passiveLevel(state, 'pickup-radius') * SURVIVOR.xpMagnetPerLevel +
+    containmentMagnetBonus(state);
   if (state.player.form === 'ship') {
     const ship = SURVIVOR.heroShips[state.heroId];
     return Math.max(ship.collectionRadius, magnet + (ship.collectionRadius - SURVIVOR.playerRadius) * 0.55);
@@ -231,7 +239,10 @@ export function energyMagnetRadius(state: SurvivorState): number {
 
 /** Health/repair magnet radius — Magnet Field benefits health more than energy. */
 export function healthMagnetRadius(state: SurvivorState): number {
-  let r = SURVIVOR.healthMagnetBase + passiveLevel(state, 'pickup-radius') * SURVIVOR.healthMagnetPerLevel;
+  let r =
+    SURVIVOR.healthMagnetBase +
+    passiveLevel(state, 'pickup-radius') * SURVIVOR.healthMagnetPerLevel +
+    containmentMagnetBonus(state);
   if (state.player.form === 'ship') {
     const ship = SURVIVOR.heroShips[state.heroId];
     r = Math.max(r, SURVIVOR.healthShipMagnet, ship.collectionRadius + 3);
@@ -354,10 +365,61 @@ function hasteMul(state: SurvivorState): number {
   return 1 + passiveLevel(state, 'weapon-haste') * 0.055;
 }
 
+function fieldAreaPerLevel(state: SurvivorState): number {
+  return state.isolateLiveTravel
+    ? SURVIVOR.containment.publishedAreaPerLevel
+    : (PASSIVES.find((p) => p.id === 'area')?.perLevel ?? 0.12);
+}
+
 function areaMul(state: SurvivorState): number {
-  const base = 1 + passiveLevel(state, 'area') * 0.055;
+  const base = 1 + passiveLevel(state, 'area') * fieldAreaPerLevel(state);
   const titan = state.megaProtocol.titanActive ? SURVIVOR.megaProtocol.titanAreaMul : 1;
   return base * titan;
+}
+
+export function containmentWellRadius(state: SurvivorState): number {
+  const lv = passiveLevel(state, 'area');
+  if (lv <= 0) return 0;
+  return SURVIVOR.containment.wellRadiusBase + lv * SURVIVOR.containment.wellRadiusPerLevel;
+}
+
+function dampHostileShotInWell(
+  state: SurvivorState,
+  proj: { x: number; z: number; vx: number; vz: number; life: number; active: boolean },
+  dt: number,
+): void {
+  if (state.isolateLiveTravel) return;
+  const well = containmentWellRadius(state);
+  if (well <= 0) return;
+  const dx = proj.x - state.player.x;
+  const dz = proj.z - state.player.z;
+  if (dx * dx + dz * dz > well * well) return;
+  const keep = Math.pow(SURVIVOR.containment.projectileDampPerSec, dt);
+  proj.vx *= keep;
+  proj.vz *= keep;
+  proj.life -= dt * SURVIVOR.containment.projectileBurn;
+  if (proj.life <= 0) {
+    proj.active = false;
+    pushEffect(state, 'pulse', proj.x, proj.z, 0.16, '#9ef6ff', 0.55);
+  }
+}
+
+function updateContainmentField(state: SurvivorState, dt: number): void {
+  if (state.isolateLiveTravel) return;
+  const lv = passiveLevel(state, 'area');
+  if (lv <= 0 || !state.player.alive) return;
+  const well = containmentWellRadius(state);
+  const tick = SURVIVOR.containment.wellTick;
+  const prev = Math.floor((state.time - dt) / tick);
+  const next = Math.floor(state.time / tick);
+  if (next <= prev) return;
+  const dmg = SURVIVOR.containment.wellDamagePerLevel * lv;
+  const p = state.player;
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    if ((e.x - p.x) ** 2 + (e.z - p.z) ** 2 > (well + e.radius) ** 2) continue;
+    damageEnemy(state, e, dmg, { kind: 'ability', pop: 0.35, src: 'containment-field' });
+  }
 }
 
 /**
@@ -818,6 +880,7 @@ function reclaimPickupSlot(state: SurvivorState, preferKind: SurvivorPickup['kin
   let worstVal = Infinity;
   for (const p of state.pickups) {
     if (!p.active || p.kind !== 'xp') continue;
+    if (state.recall.active && state.recall.orbIds.includes(p.id)) continue;
     if (p.value < worstVal) {
       worstVal = p.value;
       worstXp = p;
@@ -1755,9 +1818,11 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const proj = acquireProjectile(state);
         if (!proj) break;
         const spd = def.speed ?? 26;
+        const rad = publishedRadius(state, 'pulse', (def.radius ?? 0.2) * area);
         resetProj(proj, state, 'bolt', 'pulse', p.x, p.z, Math.sin(a) * spd, Math.cos(a) * spd, {
           damage: def.damage * over.damage * p.damageMul,
-          radius: publishedRadius(state, 'pulse', (def.radius ?? 0.2) * area),
+          radius: rad,
+          visualRadius: rad * visualArea / Math.max(1e-6, area) * 2.15,
           life: def.life ?? 1,
           pierce: (def.pierce ?? 0) + (mech ? 1 : 0),
           color: state.accent,
@@ -2017,6 +2082,7 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         resetProj(proj, state, 'rotary-round', 'rotary', sx, sz, Math.sin(a + spread) * spd, Math.cos(a + spread) * spd, {
           damage: def.damage * over.damage * p.damageMul,
           radius: (def.radius ?? 0.17) * area,
+          visualRadius: (def.radius ?? 0.17) * visualArea * 2.6,
           life: def.life ?? 1.1,
           pierce: def.pierce ?? 0,
           color: WEAPONS.rotary.color,
@@ -2900,6 +2966,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
   for (const proj of state.projectiles) {
     if (!proj.active) continue;
     if (proj.kind === 'boss-orb' || proj.kind === 'boss-fan') {
+      dampHostileShotInWell(state, proj, dt);
       proj.life -= dt;
       proj.x += proj.vx * dt;
       proj.z += proj.vz * dt;
@@ -2934,11 +3001,11 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
 
     if (proj.kind === 'boomerang') {
       /*
-       * Two legs through one lane.
+       * Two legs through a crescent, not a lock-on.
        *
-       * Outbound until the throw reaches `turnDistance`, then it reverses and steers back
-       * toward the player — who has moved, so the return lane is never quite the outbound
-       * one and the weapon rewards positioning after the throw as well as before it.
+       * Outbound until the throw reaches `turnDistance`, bowing sideways like a thrown
+       * boomerang. It only reverses after a hit. The return rewinds the same crescent
+       * back to the origin; the last half-meter is a catch, not mid-flight homing.
        *
        * `hitIds` is cleared at the turn. Within a leg each body is struck once however
        * long the disc overlaps it, so there is no pierce counter to exhaust: the limit is
@@ -2946,6 +3013,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
        * weapon's whole identity.
        */
       const player = state.player;
+      const publishedPath = state.isolateLiveTravel || state.isolatePublishedWeapons;
       let caught = false;
       proj.life -= dt;
       const spd = proj.flightSpeed || Math.hypot(proj.vx, proj.vz) || 1;
@@ -2971,23 +3039,27 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         proj.flightDistance = Math.max(0, proj.flightDistance - spd * dt);
       }
 
-      /*
-       * Authored crescent flight, evaluated by simulation.
-       *
-       * `along` advances on the launch vector while a sine bow adds a perpendicular
-       * displacement. Past the turn distance the disc keeps flying straight until it
-       * has struck something — it will not come home empty.
-       */
       if (!proj.homeStraight) {
         const along = Math.min(proj.flightDistance, turn);
         const extra = Math.max(0, proj.flightDistance - turn);
         const u = along / turn;
         const px = -proj.launchFz;
         const pz = proj.launchFx;
-        const side = Math.sin(Math.PI * u) * turn * SURVIVOR.boomerang.curveBulge * proj.curveSign;
-        const homeBlend = proj.returning ? 1 - u : 0;
-        proj.x = proj.originX + proj.launchFx * (along + extra) + px * side + (player.x - proj.originX) * homeBlend;
-        proj.z = proj.originZ + proj.launchFz * (along + extra) + pz * side + (player.z - proj.originZ) * homeBlend;
+        const bulge = publishedPath
+          ? SURVIVOR.boomerang.publishedCurveBulge
+          : SURVIVOR.boomerang.curveBulge;
+        const side = Math.sin(Math.PI * u) * turn * bulge * proj.curveSign;
+        const homeBlend = publishedPath && proj.returning ? 1 - u : 0;
+        proj.x =
+          proj.originX +
+          proj.launchFx * (along + extra) +
+          px * side +
+          (player.x - proj.originX) * homeBlend;
+        proj.z =
+          proj.originZ +
+          proj.launchFz * (along + extra) +
+          pz * side +
+          (player.z - proj.originZ) * homeBlend;
       }
       proj.vx = (proj.x - oldX) / Math.max(dt, 1e-6);
       proj.vz = (proj.z - oldZ) / Math.max(dt, 1e-6);
@@ -3030,11 +3102,12 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       if (!proj.returning && !proj.homeStraight && proj.struck && proj.flightDistance >= turn - 1e-6) {
         proj.returning = true;
         proj.hitIds?.clear();
-        if (proj.flightDistance > turn + 0.25) proj.homeStraight = true;
+        if (publishedPath && proj.flightDistance > turn + 0.25) proj.homeStraight = true;
         else proj.flightDistance = turn;
         pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, { radius: 1.35 });
-      } else if (proj.returning && !proj.homeStraight && proj.flightDistance <= 1e-6) {
-        caught = true;
+      } else if (proj.returning && !proj.homeStraight && proj.flightDistance <= (publishedPath ? 1e-6 : 0.55)) {
+        if (publishedPath) caught = true;
+        else proj.homeStraight = true;
       }
 
       if (gone || caught) proj.active = false;
@@ -3233,7 +3306,15 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         if (proj.pierce > 0) proj.pierce -= 1;
         else {
           proj.active = false;
-          pushEffect(state, 'impact', proj.x, proj.z, 0.12, proj.color, 0.5);
+          if (proj.kind === 'bolt') {
+            pushEffect(state, 'impact', proj.x, proj.z, 0.2, proj.color, 0.95);
+            pushEffect(state, 'pulse', proj.x, proj.z, 0.16, '#d8fff8', 0.7);
+          } else if (proj.kind === 'rotary-round') {
+            pushEffect(state, 'impact', proj.x, proj.z, 0.16, '#ffe08a', 0.7);
+            pushEffect(state, 'muzzle', proj.x, proj.z, 0.08, '#fff4c0', 0.45);
+          } else {
+            pushEffect(state, 'impact', proj.x, proj.z, 0.12, proj.color, 0.5);
+          }
         }
         continue;
       }
@@ -3253,12 +3334,20 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
             } else if (proj.pierce > 0) proj.pierce -= 1;
             else {
               proj.active = false;
-              pushEffect(state, 'impact', proj.x, proj.z, 0.12, proj.color, 0.6);
+              if (proj.kind === 'bolt') {
+                pushEffect(state, 'impact', proj.x, proj.z, 0.22, proj.color, 1.1);
+                pushEffect(state, 'pulse', proj.x, proj.z, 0.18, '#d8fff8', 0.85);
+              } else if (proj.kind === 'rotary-round') {
+                pushEffect(state, 'impact', proj.x, proj.z, 0.18, '#ffe08a', 0.8);
+              } else {
+                pushEffect(state, 'impact', proj.x, proj.z, 0.12, proj.color, 0.6);
+              }
             }
           }
         }
       }
     } else {
+      dampHostileShotInWell(state, proj, dt);
       const p = state.player;
       const dx = p.x - proj.x;
       const dz = p.z - proj.z;
@@ -3870,6 +3959,9 @@ function updatePickups(state: SurvivorState, dt: number): void {
       if (playerCollectsPickup(p.x, p.z, prevX, prevZ, pk.x, pk.z, eDirect)) {
         pk.active = false;
         pk.magnetized = false;
+        if (state.recall.active && state.recall.orbIds.includes(pk.id)) {
+          state.recall.banked += pk.value;
+        }
         gainXp(state, pk.value);
         pushEffect(state, 'pickup', pk.x, pk.z, 0.28, '#66ffcc', 0.85);
       }
@@ -4697,7 +4789,7 @@ function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
     cfg.damageMul *
     SURVIVOR.megaProtocol.permanentPowerMul *
     power *
-    (state.isolateLiveTravel ? 0.975 : 1);
+    (state.isolateLiveTravel ? 0.92 : 1);
   const src = allySrc(a.heroId);
   const accent = HEROES[a.heroId].accent;
   a.slot.cooldown = def.cadence * cfg.cadenceMul;
@@ -5002,20 +5094,25 @@ function detonateSingularity(state: SurvivorState): void {
 function startGraviticRecall(state: SurvivorState): void {
   // Snapshot only energy orbs alive right now — health orbs and later spawns are never pulled.
   const ids: number[] = [];
+  const values: number[] = [];
   let total = 0;
   for (const pk of state.pickups) {
     if (!pk.active || pk.kind !== 'xp') continue;
     ids.push(pk.id);
+    values.push(pk.value);
     total += pk.value;
     pk.magnetized = true;
   }
   if (state.recall.active) {
     // Re-trigger mid-pull: merge so in-flight orbs still reach the player exactly once.
-    for (const id of ids) {
-      if (!state.recall.orbIds.includes(id)) state.recall.orbIds.push(id);
+    for (let i = 0; i < ids.length; i += 1) {
+      const id = ids[i]!;
+      if (state.recall.orbIds.includes(id)) continue;
+      state.recall.orbIds.push(id);
+      state.recall.orbValues.push(values[i]!);
+      state.recall.totalXp += values[i]!;
     }
     state.recall.t = 0;
-    state.recall.totalXp = total;
     return;
   }
   state.recall = {
@@ -5023,7 +5120,9 @@ function startGraviticRecall(state: SurvivorState): void {
     t: 0,
     duration: SURVIVOR.recallDuration,
     orbIds: ids,
+    orbValues: values,
     totalXp: total,
+    banked: 0,
   };
   pushEffect(state, 'pulse', state.player.x, state.player.z, 0.7, '#aaffee', 18, { radius: 18 });
   pushEffect(state, 'levelup', state.player.x, state.player.z, 0.45, '#66ffcc', 2.5);
@@ -5050,16 +5149,24 @@ function updateGraviticRecall(state: SurvivorState, dt: number): void {
   }
   if (r.t >= r.duration) {
     // Final snap-collect remaining recall orbs through gainXp once each.
-    for (const id of r.orbIds) {
+    for (let i = 0; i < r.orbIds.length; i += 1) {
+      const id = r.orbIds[i]!;
       const pk = state.pickups.find((x) => x.id === id && x.active && x.kind === 'xp');
       if (!pk) continue;
       pk.active = false;
       pk.magnetized = false;
+      r.banked += pk.value;
       gainXp(state, pk.value);
       pushEffect(state, 'pickup', p.x, p.z, 0.2, '#66ffcc', 0.7);
     }
+    // Floor pressure can still steal a snapshotted orb. Credit the remainder so the
+    // cache choice always pays 100% of the energy that was on the floor.
+    const shortfall = r.totalXp - r.banked;
+    if (shortfall > 1e-6) gainXp(state, shortfall);
     r.active = false;
     r.orbIds = [];
+    r.orbValues = [];
+    r.banked = 0;
   }
 }
 
@@ -5759,7 +5866,10 @@ function updateSpawns(state: SurvivorState, dt: number): void {
        * modifier: the horde must never inherit a permanent speed increase from an
        * event that has already ended.
        */
-      if (surging) spawned.speedMul *= 1 + SURVIVOR.surgeWaveSpeedBonus;
+      if (surging) {
+        const surgeBonus = state.isolateLiveTravel ? 1.3 : SURVIVOR.surgeWaveSpeedBonus;
+        spawned.speedMul *= 1 + surgeBonus;
+      }
       if (surging) s.packRemaining = Math.max(0, s.packRemaining - 1);
     }
   }
@@ -6359,6 +6469,7 @@ export function stepSurvivor(state: SurvivorState, input: SurvivorInput, dt: num
   updatePlasmaTrails(state, dt);
   updateMechSpecial(state, dt);
   fireWeapons(state, dt);
+  updateContainmentField(state, dt);
   updateProjectiles(state, dt);
   updateHazards(state, dt);
   updateEnemies(state, dt);

@@ -1164,7 +1164,7 @@ function bossCatchupMul(state: SurvivorState, dist: number, isMega: boolean): nu
   const start = 14;
   if (dist <= start) return travel;
   const extra = (dist - start) / 8;
-  return Math.min(isMega ? 4.2 : 3.6, travel + extra);
+  return Math.min(isMega ? 8.4 : 7.2, travel + extra);
 }
 
 /** Recovery movement when far and no locked telegraph. */

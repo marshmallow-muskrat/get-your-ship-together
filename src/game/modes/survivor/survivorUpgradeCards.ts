@@ -417,8 +417,15 @@ export function passiveCard(
       break;
     }
     case 'area': {
+      const well = (lv: number) =>
+        lv <= 0 ? 0 : SURVIVOR.containment.wellRadiusBase + lv * SURVIVOR.containment.wellRadiusPerLevel;
       stats.push(`Area +${round(currentLevel * def.perLevel * 100)}% → +${round(next * def.perLevel * 100)}%`);
-      summary = 'Every weapon radius, blast and beam gets larger.';
+      stats.push(`Well radius ${round(well(currentLevel), 1)} → ${round(well(next), 1)}`);
+      stats.push(
+        `Well pressure ${round(currentLevel * SURVIVOR.containment.wellDamagePerLevel)} → ${round(next * SURVIVOR.containment.wellDamagePerLevel)}`,
+      );
+      stats.push('Enemy shots inside the well break up');
+      summary = 'Weapons grow, and a visible well shreds incoming fire while pressing the horde.';
       break;
     }
     /*

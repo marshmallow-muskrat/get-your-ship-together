@@ -775,7 +775,11 @@ export interface SurvivorState {
     t: number;
     duration: number;
     orbIds: number[];
+    /** Face values snapshotted with `orbIds` so a stolen slot can still be credited. */
+    orbValues: number[];
     totalXp: number;
+    /** XP already granted from this snapshot; shortfall is paid at snap. */
+    banked: number;
   };
   /** Permanent, independently scheduled Mega-Cache effects. */
   megaProtocol: {
@@ -856,6 +860,8 @@ export interface SurvivorState {
    * Live play applies hordeTravelMul / bossTravelMul.
    */
   isolateLiveTravel: boolean;
+  /** Weapon benches keep the published boomerang lane while live play uses the crescent. */
+  isolatePublishedWeapons: boolean;
   /** Set once when defeat is recorded to local high scores. */
   runRecorded: boolean;
   inboundBanner: number;
@@ -1167,7 +1173,7 @@ export function createSurvivorState(
       hitIds: [],
       spawnSuppress: 0,
     },
-    recall: { active: false, t: 0, duration: SURVIVOR.recallDuration, orbIds: [], totalXp: 0 },
+    recall: { active: false, t: 0, duration: SURVIVOR.recallDuration, orbIds: [], orbValues: [], totalXp: 0, banked: 0 },
     megaProtocol: {
       id: null,
       remaining: 0,
@@ -1225,6 +1231,7 @@ export function createSurvivorState(
     enemyCap: SURVIVOR.enemyCap,
     muted: false,
     isolateLiveTravel: false,
+    isolatePublishedWeapons: false,
     runRecorded: false,
     inboundBanner: 0,
     metrics: {
@@ -1503,9 +1510,9 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
     state.nextCacheTime = 1e9;
     seedFixtureHorde(state, 28, 9);
   } else if (fixture === 'survivor-mega') {
-    state.time = SURVIVOR.bossInterval * 5 - 0.05;
-    state.nextBossIndex = 5;
-    state.nextBossTime = SURVIVOR.bossInterval * 5;
+    state.time = SURVIVOR.bossInterval * SURVIVOR.megaEvery - 0.05;
+    state.nextBossIndex = SURVIVOR.megaEvery;
+    state.nextBossTime = SURVIVOR.bossInterval * SURVIVOR.megaEvery;
     grantBuild(
       state,
       [
@@ -1517,7 +1524,7 @@ function applyFixture(state: SurvivorState, fixture: SurvivorFixture): void {
       12,
     );
   } else if (fixture === 'survivor-mega-cache') {
-    state.time = SURVIVOR.bossInterval * 5 + 5;
+    state.time = SURVIVOR.bossInterval * SURVIVOR.megaEvery + 5;
     state.nextBossTime = 1e9;
     state.nextCacheTime = 1e9;
     state.surge.nextSurgeAt = 1e9;

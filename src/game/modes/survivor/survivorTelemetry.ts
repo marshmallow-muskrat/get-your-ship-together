@@ -157,7 +157,8 @@ export type DamageSourceId =
   /** One bucket per hero's automatic Mech armament. */
   | `mech-special:${string}`
   | 'titan-singularity'
-  | 'aegis-pulse';
+  | 'aegis-pulse'
+  | 'containment-field';
 
 export interface SourceStats {
   id: string;
@@ -541,6 +542,8 @@ export function sourceLabel(id: string, weaponName: (id: string) => string): str
       return 'Singularity Engine';
     case 'aegis-pulse':
       return 'Aegis Pulse';
+    case 'containment-field':
+      return 'Containment Field';
     default:
       return id;
   }

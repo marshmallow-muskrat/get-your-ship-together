@@ -297,7 +297,7 @@ export class SurvivorMode {
      *
      *   - The remaining bosses: boss two is four minutes in.
      *   - Cleanup Crew's three allied heroes: it comes from a Mega Cache, Mega bosses are
-     *     every `megaEvery` (5th) boss, so the earliest it can be chosen is around ten
+     *     every `megaEvery` (3rd) boss, so the earliest it can be chosen is around six
      *     minutes — and most runs never choose it at all. It was 4.2 MB of the gate.
      *
      * Failures are logged and left alone: a missing boss model degrades to the demon

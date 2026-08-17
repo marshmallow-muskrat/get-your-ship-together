@@ -411,7 +411,7 @@ describe('§2b the Ground Slam damages the circle it telegraphs', () => {
 /* -------------------------------------------------- §3 modifier geometry */
 
 describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon', () => {
-  const FIELD_PER_LEVEL = 0.055;
+  const FIELD_PER_LEVEL = 0.12;
   const HASTE_PER_LEVEL = 0.055;
   /** base / field only / overclock only / both. */
   const MATRIX = [
@@ -449,10 +449,8 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
     return weaponStatsAtLevel(weaponId, level).radius! * (1 + field * FIELD_PER_LEVEL);
   }
 
-  it('states the contract once: 5.5% per level, hard-capped at L5', () => {
-    // Both passives are authored on the same per-level step and both cap at 5, so the
-    // widest either can ever be is +27.5%. Nothing below may exceed that.
-    expect(1 + 5 * FIELD_PER_LEVEL).toBeCloseTo(1.275, 9);
+  it('states the contract once: Field 12% and Overclock 5.5% per level, hard-capped at L5', () => {
+    expect(1 + 5 * FIELD_PER_LEVEL).toBeCloseTo(1.6, 9);
     expect(1 + 5 * HASTE_PER_LEVEL).toBeCloseTo(1.275, 9);
   });
 
@@ -611,7 +609,7 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
       expect(def.cadence / (1 + 5 * HASTE_PER_LEVEL)).toBeCloseTo(def.cadence / 1.275, 9);
       // Radius is read from the authored table and the field only; haste is not in it.
       expect(effectiveRadius(id, 5, 0)).toBeCloseTo(def.radius!, 9);
-      expect(effectiveRadius(id, 5, 5)).toBeCloseTo(def.radius! * 1.275, 9);
+      expect(effectiveRadius(id, 5, 5)).toBeCloseTo(def.radius! * 1.6, 9);
     }
   });
 
@@ -814,6 +812,55 @@ describe('§5 the Cosmic Boomerang is a boomerang that actually spins', () => {
   });
 });
 
+describe('Pulse Blaster and Rotary Cannon have distinct spell silhouettes', () => {
+  function fireUntil(
+    weaponId: WeaponId,
+    seed: number,
+    name: string,
+  ): { renderer: SurvivorRenderer; actor: THREE.Object3D | undefined } {
+    const renderer = new SurvivorRenderer(new AssetLibrary());
+    const state = quietArena(seed, 'survivor-start');
+    state.player.invuln = 1e9;
+    state.weapons = [{ weaponId, level: 3, cooldown: 0, prototype: false, focusDebt: 0 }];
+    const dummy = emptyEnemy();
+    dummy.id = nextEntityId(state);
+    dummy.alive = true;
+    dummy.x = state.player.x;
+    dummy.z = state.player.z + 6;
+    dummy.health = 1e9;
+    dummy.maxHealth = 1e9;
+    dummy.speedMul = 0;
+    state.enemies.push(dummy);
+    let actor: THREE.Object3D | undefined;
+    for (let i = 0; i < 240 && !actor; i += 1) {
+      stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
+      renderer.sync(state, DT);
+      renderer.root.traverse((o) => {
+        if (o.name === name) actor = o;
+      });
+    }
+    return { renderer, actor };
+  }
+
+  it('draws Pulse as a sheathed ion bolt, not a lone capsule', () => {
+    const { renderer, actor } = fireUntil('pulse', 9960, 'projectile-pulse');
+    expect(actor, 'no Pulse actor').toBeTruthy();
+    expect(actor!.getObjectByName('pulse-core')).toBeTruthy();
+    expect(actor!.getObjectByName('pulse-sheath')).toBeTruthy();
+    expect(actor!.getObjectByName('pulse-ring')).toBeTruthy();
+    renderer.dispose();
+  });
+
+  it('draws Rotary as a spinning tracer, not two boxes', () => {
+    const { renderer, actor } = fireUntil('rotary', 9961, 'projectile-rotary-round');
+    expect(actor, 'no Rotary actor').toBeTruthy();
+    expect(actor!.getObjectByName('rotary-slug')).toBeTruthy();
+    expect(actor!.getObjectByName('rotary-spin')).toBeTruthy();
+    expect(actor!.getObjectByName('rotary-ring-a')).toBeTruthy();
+    renderer.dispose();
+  });
+});
+
 /* ---------------------------------- §6 Orbital Lance reads as an impact */
 
 describe('§6 the Orbital Lance impact communicates its damaged area', () => {
@@ -841,7 +888,7 @@ describe('§6 the Orbital Lance impact communicates its damaged area', () => {
   it('draws the core blast at the core damage radius and the shockwave at the outer one', () => {
     for (const field of [0, 5]) {
       const { seen } = detonate(9970 + field, 5, field);
-      const core = weaponStatsAtLevel('orbital', 5).radius! * (1 + field * 0.055);
+      const core = weaponStatsAtLevel('orbital', 5).radius! * (1 + field * 0.12);
       const outer = core * SURVIVOR.orbital.shockwaveRadiusMul;
 
       const strike = seen.get('orbital-strike');

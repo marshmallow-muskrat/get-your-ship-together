@@ -46,12 +46,7 @@ import { onboardingHelpShouldFade, onboardingUseFromPlayer } from './survivorOnb
  * A dev server, a fixture route, or an explicit `?testcenter=1` is a developer; nothing
  * else is.
  */
-function simplifyCardBadge(category: string): string {
-  if (category.startsWith('NEW ')) return 'NEW';
-  if (category.includes('UPGRADE')) return 'UPGRADE';
-  if (category === 'OVERCLOCK') return 'OVERCLOCK';
-  if (category.includes('PASSIVE')) return 'PASSIVE';
-  if (category.includes('PROTOCOL')) return 'PROTOCOL';
+function cardBadgeText(category: string): string {
   return category;
 }
 
@@ -1139,8 +1134,8 @@ export class SurvivorHud {
             head.className = 'sv-card-head';
 
             const badge = document.createElement('span');
-            badge.className = 'eyebrow sv-card-badge';
-            badge.textContent = simplifyCardBadge(card?.category ?? fallbackLabel(c));
+            badge.className = 'sv-card-badge';
+            badge.textContent = cardBadgeText(card?.category ?? fallbackLabel(c));
             head.appendChild(badge);
 
             /*

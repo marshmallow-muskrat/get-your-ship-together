@@ -109,8 +109,8 @@ export const SURVIVOR = {
    * Weapon benches and Titan comparisons divide this back out so published close-rates stay put.
    */
   hordeTravelMul: 1.38,
-  /** Live close-range boss chase vs authored moveSpeed (2.6). ~8 u/s on the first boss. */
-  bossTravelMul: 2.35,
+  /** Live close-range boss chase vs authored moveSpeed (2.6). Isolated from Titan / weapon benches. */
+  bossTravelMul: 4.7,
   playerRadius: 0.55,
   playerInvuln: 0.38,
   xpMagnetBase: 5.8,
@@ -149,7 +149,7 @@ export const SURVIVOR = {
   surgeRecovery: 13.5,
   /** Surge-spawned enemies only — never the standing horde. */
   /** Surge-only: stacked on authored speed so the flock outruns a kiting astronaut. */
-  surgeWaveSpeedBonus: 1.3,
+  surgeWaveSpeedBonus: 2.6,
   /** Opening flock size; later minutes add more via surgePackSizeAt. */
   surgePackSize: 32,
   /** Recovery holds replacements until population falls to this fraction of target. */
@@ -184,7 +184,8 @@ export const SURVIVOR = {
   shieldDuration: 30,
   shieldDurationEnhanced: 45,
   shieldEnhancedMul: 1.35,
-  megaEvery: 5,
+  /** Mega-Boss + Titan cache every 3rd scheduled boss (6 / 12 / 18 min). */
+  megaEvery: 3,
   megaHealthMul: 1.6,
   megaDamageMul: 1.25,
   /**
@@ -285,8 +286,37 @@ export const SURVIVOR = {
     megaBonusFraction: 0.3,
     /** @deprecated Flat 100-integrity fixture equivalent. */
     megaBonus: 30,
-    /** Drawn scale for elite/boss/miniboss repair orbs so the 2× heal is obvious. */
+    /** Drawn scale relative to the 4× orb baseline so elite/boss/miniboss heals stay obvious. */
     notableVisualScale: 2,
+  },
+  /**
+   * Pickup silhouette scale. Combat collection radii stay authored; only the drawn
+   * orb grows so floor energy and repair stay readable at the current zoom.
+   */
+  orbVisual: {
+    /** Ordinary energy / repair baseline multiplier. */
+    baseline: 4,
+    /** Premium energy vs ordinary energy (1.18 × baseline). */
+    premiumMul: 1.18,
+    /** Repair group vs energy (1.18 × baseline × pickup.visualScale). */
+    repairMul: 1.18,
+  },
+  /**
+   * Containment Field. Weapon benches / Titan keep the published +5.5%/level radius
+   * via isolateLiveTravel; live play uses the authored passive perLevel (12%).
+   * The well is a new, visible identity so the card is not "slightly bigger bullets".
+   */
+  containment: {
+    publishedAreaPerLevel: 0.055,
+    wellRadiusBase: 6.4,
+    wellRadiusPerLevel: 1.8,
+    wellTick: 0.45,
+    wellDamagePerLevel: 14,
+    magnetBonusPerLevel: 0.7,
+    /** Enemy-shot speed kept after each second inside the well. */
+    projectileDampPerSec: 0.28,
+    /** Extra life drain on enemy shots inside the well, per second. */
+    projectileBurn: 1.6,
   },
   gunship: {
     /** Warning lane duration before damage begins. */
@@ -684,8 +714,10 @@ export const SURVIVOR = {
    */
   boomerang: {
     turnDistancePerLife: 4.2,
-    /** Maximum lateral bow as a fraction of turn distance. */
-    curveBulge: 0.04,
+    /** Maximum lateral bow as a fraction of turn distance. A real crescent, not a lock-on. */
+    curveBulge: 0.32,
+    /** Published close-rate path used by weapon benches and Titan isolation. */
+    publishedCurveBulge: 0.04,
     /** Decorative silhouette only; collision remains the authored projectile radius. */
     visualRadiusMul: 3.1,
     /** Diverging bearing between the pair at Twin Orbit, in radians. */
@@ -695,12 +727,12 @@ export const SURVIVOR = {
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
-    radius: 17.955,
-    damage: 20,
+    radius: 179.55,
+    damage: 60,
     /** Player progression keeps the 30-second active relevant without clock scaling. */
-    damagePerPlayerLevel: 0.05,
-    maxDamageMul: 2.5,
-    push: 15.96,
+    damagePerPlayerLevel: 0.15,
+    maxDamageMul: 16,
+    push: 159.6,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
     mechRadiusMul: 1.25,
@@ -1241,9 +1273,10 @@ export const PASSIVES: PassiveDef[] = [
   {
     id: 'area',
     name: 'Containment Field',
-    description: 'Larger weapon areas and blasts (+5.5% radius per level).',
+    description:
+      'Larger weapon areas and a visible well that shreds incoming shots and pressures the horde (+12% radius per level).',
     maxLevel: 5,
-    perLevel: 0.055,
+    perLevel: 0.12,
   },
   {
     id: 'overdrive-systems',

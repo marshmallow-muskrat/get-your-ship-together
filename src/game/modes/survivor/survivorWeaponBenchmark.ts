@@ -283,6 +283,11 @@ export function runWeaponBenchmark(
   ];
   setupScenario(state, scenario);
   state.time = startTime;
+  /*
+   * Live crescent flight is a feel change. The published L1–L5 close-rate still
+   * measures the original lane so Twin Orbit does not become a hidden growth axis.
+   */
+  if (weaponId === 'boomerang') state.isolatePublishedWeapons = true;
 
   const hp0 = new Map<number, number>();
   for (const e of state.enemies) {
@@ -540,8 +545,8 @@ export const REPRESENTATIVE_BUILDS: Array<{
     level: 8,
   },
   {
-    label: '10:00 — fifth boss (Mega)',
-    atBossIndex: 5,
+    label: '6:00 — third boss (Mega)',
+    atBossIndex: 3,
     weapons: [
       { id: 'pulse', level: 5 },
       { id: 'microdrone', level: 5 },
@@ -552,8 +557,8 @@ export const REPRESENTATIVE_BUILDS: Array<{
     level: 22,
   },
   {
-    label: '20:00 — tenth boss (Mega)',
-    atBossIndex: 10,
+    label: '12:00 — sixth boss (Mega)',
+    atBossIndex: 6,
     weapons: [
       { id: 'pulse', level: 8 },
       { id: 'microdrone', level: 8 },

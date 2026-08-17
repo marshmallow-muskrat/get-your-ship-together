@@ -140,6 +140,15 @@ export class SurvivorRenderer {
   private shieldWasActive = false;
   /** Shared procedural projectile geometry; all are bounded and allocated once. */
   private boltGeo = new THREE.CapsuleGeometry(0.085, 0.34, 3, 8);
+  private pulseCoreGeo = new THREE.CapsuleGeometry(0.075, 0.62, 4, 8);
+  private pulseSheathGeo = new THREE.CapsuleGeometry(0.16, 0.4, 4, 8);
+  private pulseRingGeo = new THREE.TorusGeometry(0.18, 0.03, 6, 18);
+  private pulseSparkGeo = new THREE.ConeGeometry(0.055, 0.2, 5);
+  private rotarySlugGeo = new THREE.CapsuleGeometry(0.05, 0.72, 3, 7);
+  private rotaryGlowGeo = new THREE.CapsuleGeometry(0.11, 0.5, 3, 7);
+  private rotaryRingGeo = new THREE.TorusGeometry(0.15, 0.024, 5, 16);
+  private fieldRoot: THREE.Group | null = null;
+  private fieldMats: THREE.MeshBasicMaterial[] = [];
   private enemyShardGeo = new THREE.OctahedronGeometry(1, 0);
   private bioCoreGeo = new THREE.IcosahedronGeometry(0.56, 1);
   private bioShellGeo = new THREE.IcosahedronGeometry(1, 1);
@@ -174,6 +183,11 @@ export class SurvivorRenderer {
     this.root.name = 'survivor-actors';
     // Author the reusable projectile axes once. Forward is +Z throughout survivor mode.
     this.boltGeo.rotateX(Math.PI / 2);
+    this.pulseCoreGeo.rotateX(Math.PI / 2);
+    this.pulseSheathGeo.rotateX(Math.PI / 2);
+    this.pulseSparkGeo.rotateX(Math.PI / 2);
+    this.rotarySlugGeo.rotateX(Math.PI / 2);
+    this.rotaryGlowGeo.rotateX(Math.PI / 2);
     this.enemyShardGeo.scale(0.36, 0.3, 0.9);
     this.bossFanGeo.rotateX(Math.PI / 2);
     this.bossFanCoreGeo.rotateX(Math.PI / 2);
@@ -415,8 +429,24 @@ export class SurvivorRenderer {
       return g;
     }
     if (kind === 'bolt') {
-      const bolt = shared(this.boltGeo, this.mat(color), 'projectile-bolt');
-      return bolt;
+      const g = new THREE.Group();
+      g.name = 'projectile-pulse';
+      const part = (geometry: THREE.BufferGeometry, material: THREE.Material, name: string): THREE.Mesh => {
+        const mesh = shared(geometry, material, name);
+        mesh.userData.ownsMaterial = true;
+        return mesh;
+      };
+      const core = part(this.pulseCoreGeo, this.effectMat('#f4fffd', 1, true), 'pulse-core');
+      const sheath = part(this.pulseSheathGeo, this.effectMat(color, 0.52, true), 'pulse-sheath');
+      const ring = part(this.pulseRingGeo, this.effectMat('#9cfff2', 0.8, true), 'pulse-ring');
+      ring.rotation.y = Math.PI / 2;
+      const sparkA = part(this.pulseSparkGeo, this.effectMat('#c8fff8', 0.7, true), 'pulse-spark-a');
+      sparkA.position.set(0.12, 0.04, -0.28);
+      const sparkB = part(this.pulseSparkGeo, this.effectMat(color, 0.55, true), 'pulse-spark-b');
+      sparkB.position.set(-0.1, -0.03, -0.36);
+      sparkB.scale.setScalar(0.75);
+      g.add(sheath, core, ring, sparkA, sparkB);
+      return g;
     }
     if (kind === 'enemy') {
       const shard = shared(this.enemyShardGeo, this.proceduralMat('#ff4966', 0.92, true), 'projectile-enemy');
@@ -473,17 +503,24 @@ export class SurvivorRenderer {
     const g = new THREE.Group();
     g.name = `projectile-${kind}`;
     if (kind === 'rotary-round') {
-      const glow = this.ownMesh(new THREE.Mesh(
-        new THREE.BoxGeometry(0.13, 0.11, 1.05),
-        this.effectMat('#ffb52f', 0.45, true),
-      ));
-      const core = this.ownMesh(new THREE.Mesh(
-        new THREE.BoxGeometry(0.045, 0.05, 0.78),
-        this.effectMat('#fff8d6', 1, true),
-      ));
-      glow.position.z = -0.25;
-      core.position.z = -0.08;
-      g.add(glow, core);
+      const part = (geometry: THREE.BufferGeometry, material: THREE.Material, name: string): THREE.Mesh => {
+        const mesh = shared(geometry, material, name);
+        mesh.userData.ownsMaterial = true;
+        return mesh;
+      };
+      const glow = part(this.rotaryGlowGeo, this.effectMat('#ffb52f', 0.5, true), 'rotary-glow');
+      const slug = part(this.rotarySlugGeo, this.effectMat('#fff7d2', 1, true), 'rotary-slug');
+      const spin = new THREE.Group();
+      spin.name = 'rotary-spin';
+      const ringA = part(this.rotaryRingGeo, this.effectMat('#ffd46a', 0.86, true), 'rotary-ring-a');
+      ringA.rotation.y = Math.PI / 2;
+      const ringB = part(this.rotaryRingGeo, this.effectMat('#ff8a3d', 0.62, true), 'rotary-ring-b');
+      ringB.rotation.x = Math.PI / 2;
+      ringB.scale.setScalar(0.78);
+      spin.add(ringA, ringB);
+      const ember = part(this.pulseSparkGeo, this.effectMat('#fff0b0', 0.7, true), 'rotary-ember');
+      ember.position.z = -0.42;
+      g.add(glow, slug, spin, ember);
       return g;
     }
     const bodyMat = this.effectMat(kind === 'rocket' ? '#dbeeff' : color, 1, true);
@@ -559,6 +596,7 @@ export class SurvivorRenderer {
     this.syncCache(state);
     this.syncGunship(state, dt);
     this.syncShield(state, dt);
+    this.syncContainmentField(state, dt);
     this.syncEffects(state);
     this.syncAttacks(state);
     this.syncRails(state);
@@ -902,6 +940,20 @@ export class SurvivorRenderer {
         if (ringB) ringB.rotation.x -= dt * 3.3;
         const locator = mesh.getObjectByName('orbital-locator');
         if (locator) locator.rotation.z += dt * 5.5;
+        const pulseRing = mesh.getObjectByName('pulse-ring');
+        if (pulseRing) pulseRing.rotation.z += dt * 10;
+        const pulseSheath = mesh.getObjectByName('pulse-sheath');
+        if (pulseSheath) {
+          const pulse = 0.92 + Math.sin(performance.now() * 0.03 + p.id) * 0.1;
+          pulseSheath.scale.set(pulse, pulse, 1);
+        }
+        const rotarySpin = mesh.getObjectByName('rotary-spin');
+        if (rotarySpin) rotarySpin.rotation.z += dt * 22;
+        const rotaryGlow = mesh.getObjectByName('rotary-glow');
+        if (rotaryGlow) {
+          const flicker = 0.88 + Math.sin(performance.now() * 0.08 + p.id) * 0.14;
+          rotaryGlow.scale.set(1, 1, flicker);
+        }
       }
       if (boomerang) {
         /*
@@ -951,13 +1003,15 @@ export class SurvivorRenderer {
                 : p.kind === 'boss-fan'
                   ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5)
                   : p.kind === 'bolt'
-                    ? Math.max(0.85, (p.visualRadius || p.radius) / 0.2)
+                    ? Math.max(0.95, (p.visualRadius || p.radius) / 0.2)
+                    : p.kind === 'rotary-round'
+                      ? Math.max(1.05, (p.visualRadius || p.radius) / 0.17)
                     : p.kind === 'enemy'
                       ? Math.max(0.8, (p.visualRadius || p.radius) / 0.2)
                       : 1;
       if (!(mesh instanceof THREE.Group)) {
         mesh.scale.setScalar(s);
-      } else if (p.kind === 'drone' || p.kind === 'rocket') {
+      } else if (p.kind === 'drone' || p.kind === 'rocket' || p.kind === 'bolt' || p.kind === 'rotary-round') {
         mesh.scale.setScalar(s);
       } else if (p.kind === 'bioplasma' || p.kind === 'boss-orb' || p.kind === 'boss-fan') {
         mesh.scale.setScalar(Math.max(0.12, p.visualRadius || p.radius));
@@ -1721,7 +1775,7 @@ export class SurvivorRenderer {
             c.material.opacity = base * (full ? 0.32 : pulse);
           }
         });
-        const baseScale = 1.18 * (p.visualScale ?? 1);
+        const baseScale = SURVIVOR.orbVisual.repairMul * SURVIVOR.orbVisual.baseline * (p.visualScale ?? 1);
         obj.scale.setScalar(
           full ? baseScale * 0.72 : expiring ? baseScale * (0.95 + Math.sin(performance.now() * 0.03) * 0.12) : baseScale,
         );
@@ -1737,7 +1791,9 @@ export class SurvivorRenderer {
         const coil = obj.getObjectByName('energy-coil');
         if (shell) shell.rotation.z += 0.022;
         if (coil) coil.rotation.z -= 0.055;
-        obj.scale.setScalar(p.premium ? 1.18 : 1);
+        obj.scale.setScalar(
+          SURVIVOR.orbVisual.baseline * (p.premium ? SURVIVOR.orbVisual.premiumMul : 1),
+        );
       } else {
         const bob = 0.55 + Math.sin(performance.now() * 0.008 + p.id) * 0.12;
         obj.position.set(p.x, bob, p.z);
@@ -1834,6 +1890,52 @@ export class SurvivorRenderer {
         c.material.opacity = (c.userData.baseOp as number) * intensity * (0.6 + frac * 0.5);
       }
     });
+  }
+
+  private ensureContainmentField(): THREE.Group {
+    if (this.fieldRoot) return this.fieldRoot;
+    const g = new THREE.Group();
+    g.name = 'containment-well';
+    const shellMat = this.effectMat('#66f0ff', 0.16, true);
+    shellMat.depthWrite = false;
+    this.fieldMats.push(shellMat);
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), shellMat);
+    shell.name = 'field-shell';
+    const rimMat = this.effectMat('#b8fff6', 0.55, true);
+    rimMat.depthWrite = false;
+    this.fieldMats.push(rimMat);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1, 0.028, 8, 48), rimMat);
+    rim.rotation.x = Math.PI / 2;
+    rim.name = 'field-rim';
+    const ringMat = this.effectMat('#7cf0ff', 0.38, true);
+    ringMat.depthWrite = false;
+    this.fieldMats.push(ringMat);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.02, 6, 32), ringMat);
+    ring.rotation.x = Math.PI / 2.6;
+    ring.name = 'field-ring';
+    g.add(shell, rim, ring);
+    g.visible = false;
+    this.root.add(g);
+    this.fieldRoot = g;
+    return g;
+  }
+
+  private syncContainmentField(state: SurvivorState, dt: number): void {
+    const g = this.ensureContainmentField();
+    const lv = state.passives['area'] ?? 0;
+    const well =
+      lv > 0 ? SURVIVOR.containment.wellRadiusBase + lv * SURVIVOR.containment.wellRadiusPerLevel : 0;
+    if (well <= 0 || !state.player.alive) {
+      g.visible = false;
+      return;
+    }
+    g.visible = true;
+    g.position.set(state.player.x, 0.7, state.player.z);
+    g.scale.setScalar(well);
+    const ring = g.getObjectByName('field-ring');
+    const rim = g.getObjectByName('field-rim');
+    if (ring) ring.rotation.z += dt * 0.9;
+    if (rim) rim.rotation.z -= dt * 0.35;
   }
 
   private ensureCacheActor(): THREE.Group {
@@ -3017,6 +3119,19 @@ export class SurvivorRenderer {
     }
     this.allies.clear();
     this.boltGeo.dispose();
+    this.pulseCoreGeo.dispose();
+    this.pulseSheathGeo.dispose();
+    this.pulseRingGeo.dispose();
+    this.pulseSparkGeo.dispose();
+    this.rotarySlugGeo.dispose();
+    this.rotaryGlowGeo.dispose();
+    this.rotaryRingGeo.dispose();
+    if (this.fieldRoot) {
+      this.root.remove(this.fieldRoot);
+      this.disposeEffectObject(this.fieldRoot);
+      this.fieldRoot = null;
+    }
+    this.fieldMats = [];
     this.enemyShardGeo.dispose();
     this.bioCoreGeo.dispose();
     this.bioShellGeo.dispose();
