@@ -40,6 +40,7 @@ import {
   surgePackSizeAt,
   xpForLevel,
   isMegaBossIndex,
+  megaBossDef,
   breachShieldingReduction,
   BOSS_DAMAGE_BASE,
   computeShieldDuration,
@@ -697,7 +698,9 @@ function killEnemy(state: SurvivorState, e: SurvivorEnemy): void {
   e.alive = false;
   state.kills += 1;
   pushEffect(state, 'death', e.x, e.z, 0.4, e.isMiniboss ? '#ffdd66' : '#ff8866', e.isMiniboss ? 2.4 : e.isElite ? 1.6 : 1);
-  dropPickup(state, e.x, e.z, 'xp', e.xp);
+  dropPickup(state, e.x, e.z, 'xp', Math.max(1, e.xp || 3), {
+    coalesce: e.defId !== 'surge-flier',
+  });
   // Elites: larger energy reward (same pickup type, premium visual).
   if (e.isElite && !e.isMiniboss) {
     state.telemetry.eliteKills += 1;
@@ -900,7 +903,7 @@ function dropPickup(
   z: number,
   kind: SurvivorPickup['kind'],
   value: number,
-  opts?: { premium?: boolean; healFraction?: number; visualScale?: number },
+  opts?: { premium?: boolean; healFraction?: number; visualScale?: number; coalesce?: boolean },
 ): void {
   const pos = safePickupPosition(x, z);
   // Light deterministic de-stack: nudge if another active pickup shares the exact cell.
@@ -919,8 +922,8 @@ function dropPickup(
     }
   }
 
-  // Nearby XP coalesce (reliable).
-  if (kind === 'xp') {
+  // Nearby XP coalesce (reliable). Surge kills stay as their own orbs so the flock reads.
+  if (kind === 'xp' && opts?.coalesce !== false) {
     let best: SurvivorPickup | null = null;
     let bestD = 2.8 * 2.8;
     for (const p of state.pickups) {
@@ -970,7 +973,8 @@ function dropPickup(
           worst.value += value;
           return;
         }
-        return;
+        slot = reclaimPickupSlot(state, kind);
+        if (!slot) return;
       }
       slot = reclaimPickupSlot(state, kind);
       if (!slot) return;
@@ -4191,18 +4195,31 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
     return bag;
   };
 
+  const recencyKey = (c: UpgradeChoice): string =>
+    c.kind === 'passive'
+      ? `p:${c.passiveId}`
+      : c.kind === 'new-weapon'
+        ? `n:${c.weaponId}`
+        : `u:${c.weaponId}`;
+  const recent = new Set(state.recentOfferKeys);
+  const preferFresh = (pool: UpgradeChoice[]): UpgradeChoice[] => {
+    const fresh = pool.filter((c) => !recent.has(recencyKey(c)));
+    const stale = pool.filter((c) => recent.has(recencyKey(c)));
+    return [...shuffle(fresh), ...shuffle(stale)];
+  };
+
   // Mixed-category offers so endless Overclocks never starve passives.
   // Card 1: offensive (new weapon / authored upgrade / overclock / free prototype)
   // Card 2: passive/defensive whenever eligible
   // Card 3: wildcard from remaining
   // Forced prototype may occupy one card but never all three.
-  const offensivePool = shuffle([
+  const offensivePool = preferFresh([
     ...shuffle(newWeapons),
     ...shuffle(authored),
     ...shuffle(overclocks),
     ...shuffle(freePrototypes),
   ]);
-  const passivePool = shuffle(passives);
+  const passivePool = preferFresh(passives);
   const forcedPool = shuffle(forcedPrototypes);
 
   const choices: UpgradeChoice[] = [];
@@ -4285,7 +4302,9 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
       passiveId: 'max-health',
     });
   }
-  return choices.slice(0, 3);
+  const picked = choices.slice(0, 3);
+  state.recentOfferKeys = [...state.recentOfferKeys, ...picked.map(recencyKey)].slice(-9);
+  return picked;
 }
 
 function openLevelUp(state: SurvivorState): void {
@@ -4929,15 +4948,24 @@ function fireAllySignature(state: SurvivorState, a: SurvivorAlly): void {
   }
 }
 
+function fleetLaneHalf(state: SurvivorState): number {
+  return state.isolateLiveTravel
+    ? SURVIVOR.megaProtocol.publishedFleetLaneHalfWidth
+    : SURVIVOR.megaProtocol.fleetLaneHalfWidth;
+}
+
+function fleetTravelTime(state: SurvivorState): number {
+  return state.isolateLiveTravel
+    ? SURVIVOR.megaProtocol.publishedFleetTravel
+    : SURVIVOR.megaProtocol.fleetTravel;
+}
+
 function fleetLane(state: SurvivorState, pass: number): { x0: number; z0: number; x1: number; z1: number } {
   /*
-   * The expanded station must not double Carrier Wing's travel lane and dilute the
-   * protocol. Keep its original 64-wide combat sweep, but centre that window on the
-   * current engagement and shift it inside the station near a perimeter. This preserves
-   * the authored timing/damage density while letting the protocol work anywhere on the
-   * larger map.
+   * Isolated Titan comparisons keep the original 64-wide combat sweep. Live play
+   * crosses the whole station so the four-ship formation actually reads as air support.
    */
-  const h = SURVIVOR.combatSpawnHalf * 0.96;
+  const h = (state.isolateLiveTravel ? SURVIVOR.combatSpawnHalf : SURVIVOR.arenaHalf) * 0.96;
   const limit = SURVIVOR.arenaHalf - h;
   const cx = Math.max(-limit, Math.min(limit, state.player.x));
   const cz = Math.max(-limit, Math.min(limit, state.player.z));
@@ -4954,7 +4982,7 @@ function telegraphFleetPass(state: SurvivorState, pass: number): void {
   pushEffect(state, 'telegraph', (lane.x0 + lane.x1) / 2, (lane.z0 + lane.z1) / 2,
     SURVIVOR.megaProtocol.fleetWarn, '#ffd46a', len, {
       length: len,
-      width: SURVIVOR.megaProtocol.fleetLaneHalfWidth * 2,
+      width: fleetLaneHalf(state) * 2,
       facingX: dx / len,
       facingZ: dz / len,
     });
@@ -4977,23 +5005,35 @@ function launchFleetPass(state: SurvivorState, pass: number): void {
   const dx = lane.x1 - lane.x0;
   const dz = lane.z1 - lane.z0;
   const len = Math.hypot(dx, dz) || 1;
-  const half = SURVIVOR.megaProtocol.fleetLaneHalfWidth;
-  const shipColors = ['#66eaff', '#ffd46a', '#ff8ed8'] as const;
-  pushEffect(state, 'fleet-ship', lane.x0, lane.z0, SURVIVOR.megaProtocol.fleetTravel, shipColors[pass] ?? '#ffd46a', 3.1, {
-    facingX: dx / len,
-    facingZ: dz / len,
-    length: len,
-    width: half * 2,
-  });
+  const fx = dx / len;
+  const fz = dz / len;
+  const px = -fz;
+  const pz = fx;
+  const half = fleetLaneHalf(state);
+  const travel = fleetTravelTime(state);
+  const shipColors = ['#f5ae42', '#ff7c9a', '#71f6da', '#ff876b'] as const;
+  const count = state.isolateLiveTravel ? 1 : 4;
+  const span = half * 1.35;
+  for (let i = 0; i < count; i += 1) {
+    const u = count === 1 ? 0 : (i / (count - 1) - 0.5) * 2;
+    const ox = px * span * u;
+    const oz = pz * span * u;
+    pushEffect(state, 'fleet-ship', lane.x0 + ox, lane.z0 + oz, travel, shipColors[i] ?? '#ffd46a', 3.1, {
+      facingX: fx,
+      facingZ: fz,
+      length: len,
+      width: half * 2,
+    });
+  }
   state.megaProtocol.fleetDamageDue.push({
     pass,
-    at: state.megaProtocol.elapsed + SURVIVOR.megaProtocol.fleetTravel * 0.5,
+    at: state.megaProtocol.elapsed + travel * 0.5,
   });
 }
 
 function damageFleetLane(state: SurvivorState, pass: number): void {
   const lane = fleetLane(state, pass);
-  const half = SURVIVOR.megaProtocol.fleetLaneHalfWidth;
+  const half = fleetLaneHalf(state);
   for (const e of state.enemies) {
     if (!e.alive || distPointToSegment(e.x, e.z, lane.x0, lane.z0, lane.x1, lane.z1) > half + e.radius) continue;
     const power = SURVIVOR.megaProtocol.permanentPowerMul;
@@ -5185,7 +5225,7 @@ function updateMegaProtocol(state: SurvivorState, dt: number): void {
     if (m.elapsed + 1e-6 >= m.fleetNextAt) {
       launchFleetPass(state, m.fleetNextPass % cfg.fleetPasses);
       m.fleetNextPass += 1;
-      m.fleetNextAt += 4.0;
+      m.fleetNextAt += fleetTravelTime(state) + cfg.fleetGap + cfg.fleetWarn;
     }
     for (const due of [...m.fleetDamageDue]) {
       if (m.elapsed + 1e-6 < due.at) continue;
@@ -5942,7 +5982,7 @@ function spawnBossAtIndex(state: SurvivorState, index: number, fromStack = false
   const px = state.player.x;
   const pz = state.player.z;
   const ang = (index * 1.7) % (Math.PI * 2);
-  const bdef = bossDefForIndex(index);
+  const bdef = mega ? megaBossDef() : bossDefForIndex(index);
   const collR = bdef.colliderRadius * (mega ? SURVIVOR.megaColliderMul : 1);
   const forward = clampArena(
     px + Math.sin(ang) * SURVIVOR.bossSpawnRadius,
@@ -6114,35 +6154,19 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
         });
       }
       const halfW = cfg.laneHalfWidth * (g.potency > 1 ? 1.15 : 1);
-      const pot = g.potency;
       for (const e of state.enemies) {
         if (!e.alive || g.hitIds.includes(e.id)) continue;
         const d = distPointToSegment(e.x, e.z, g.x0, g.z0, g.x1, g.z1);
         const along = Math.hypot(e.x - g.x, e.z - g.z);
         if (d <= halfW + e.radius && along <= cfg.impactRadius + 1.4) {
           g.hitIds.push(e.id);
-          // Once-per-target: delete ordinary; fraction miniboss/boss max HP.
           const dmg = e.maxHealth * 1.1;
           // Single authoritative damage-number path — normal death/reward processing included.
           damageEnemy(state, e, dmg, { kind: 'gunship', pop: 1, src: 'gunship' });
           pushEffect(state, 'impact', e.x, e.z, 0.28, '#ffd46a', 1.6);
         }
       }
-      for (const b of livingBosses(state)) {
-        if (!b.active || b.state === 'dead' || g.hitIds.includes(b.id)) continue;
-        const d = distPointToSegment(b.x, b.z, g.x0, g.z0, g.x1, g.z1);
-        const along = Math.hypot(b.x - g.x, b.z - g.z);
-        const br = b.colliderRadius;
-        if (d <= halfW + br * 0.5 && along <= cfg.impactRadius + br) {
-          g.hitIds.push(b.id);
-          const frac = b.isMega
-            ? cfg.megaHealthFraction * pot
-            : cfg.bossHealthFraction * pot;
-          const dmg = b.maxHealth * frac;
-          damageBoss(state, dmg, { kind: 'gunship', pop: 1, boss: b, x: b.x, z: b.z, src: 'gunship' });
-          pushEffect(state, 'impact', b.x, b.z, 0.35, '#ffd46a', 2.2);
-        }
-      }
+      // Cache gunship deletes the horde. Bosses are left for the player.
       if (g.hitIds.length > 0) {
         g.spawnSuppress = Math.max(
           g.spawnSuppress,
@@ -6220,14 +6244,14 @@ function openProtocolCache(state: SurvivorState): void {
     if (p.id === 'aegis-barrier') {
       body = `<mark class="sv-protocol-highlight">3 SECONDS INVULNERABLE</mark> Repel the nearby horde, then absorb ~${shieldPts} damage for ${Math.round(shieldDur)}s.${enhanced ? ' Enhanced.' : ''}`;
     } else if (p.id === 'gunship-flyby') {
-      body = `Wide corridor strike. Deletes ordinary enemies, dents bosses, then suppresses reinforcements for ${Math.round(SURVIVOR.gunship.spawnSuppressDuration)}s.${enhanced ? ' Enhanced lane.' : ''}`;
+      body = `All four hero ships fly the lane together and delete ordinary enemies. Bosses are left for you. Suppresses reinforcements for ${Math.round(SURVIVOR.gunship.spawnSuppressDuration)}s.${enhanced ? ' Enhanced lane.' : ''}`;
     } else if (p.id === 'gravitic-recall') {
       body =
         energyOrbs > 0
           ? `Recall ${energyXp} energy from ${energyOrbs} orbs.`
           : 'No energy currently on the field.';
     } else if (p.id === 'carrier-wing') {
-      body = 'Permanent fighter support repeatedly strafes distributed threats. Stacks with other Mega armaments.';
+      body = 'Permanent: all four hero ships repeatedly fly the whole station in formation and shred the horde. Stacks with other Mega armaments.';
     } else if (p.id === 'cleanup-crew') {
       body =
         'Permanent allied Mechs join the run, each using their signature weapon. Stacks with other Mega armaments.';
@@ -6280,11 +6304,11 @@ export function applyBossBodyContact(state: SurvivorState): void {
      * the body sweeps and it lands exactly once, so ordinary body contact must not also
      * bill the player for the same pass — see `isCommittedTraversal`.
      */
-    if (isCommittedTraversal(b)) continue;
+    if (isCommittedTraversal(b) || b.traversalBodyLock > 0) continue;
     const dx = p.x - b.x;
     const dz = p.z - b.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > b.colliderRadius + pr + 0.05) continue;
+    if (dist > b.colliderRadius + pr + SURVIVOR.bossBodyContactPad) continue;
     const dmg = BOSS_DAMAGE_BASE.body * bossDamageMultiplier(b);
     damagePlayer(state, dmg, makeBossSource(b, 'boss-body', 'Body Slam'));
     p.bossContactCd = 0.45;

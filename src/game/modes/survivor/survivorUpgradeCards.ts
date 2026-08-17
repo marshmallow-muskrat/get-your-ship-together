@@ -250,7 +250,8 @@ export function weaponUpgradeSummary(
         : `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}`;
     parts.push(phrase ? `${fam.name} ${phrase}.` : fam.description);
   }
-  return parts.join(' ');
+  const identity = fam.description.replace(/\.*\s*$/, '');
+  return `${fam.name}: ${identity}. ${parts.join(' ')}`.replace(/\.\s+\./g, '.');
 }
 
 /**
@@ -317,7 +318,7 @@ export function weaponUpgradeCard(
     levels: progression.label,
     progression,
     name: formatOverclockLabel(oc),
-    summary: `Same ${fam.name} pattern. Additive damage, never compounding.`,
+    summary: `${fam.name}: ${fam.description.replace(/\.*\s*$/, '')}. Same pattern. Additive damage, never compounding.`,
     stats,
     tradeoff: null,
   };
@@ -373,6 +374,7 @@ export function passiveCard(
   const next = currentLevel + 1;
   const stats: string[] = [];
   let summary = def.description;
+  const identity = def.description.replace(/\.*\s*$/, '');
 
   switch (passiveId) {
     case 'max-health': {
@@ -482,13 +484,15 @@ export function passiveCard(
   // step reads `L3 → L4` and a first pick reads `Acquire · L1`, exactly as a weapon's
   // does. It previously produced a bare `L1` for a new passive and nothing marked it.
   const progression = levelProgression(currentLevel, next, { capped });
+  const described =
+    currentLevel > 0 ? `${def.name}: ${identity}. ${summary}` : summary;
   return {
     category: currentLevel > 0 ? 'PASSIVE UPGRADE' : 'NEW PASSIVE',
     parent: displayName(def.name),
     levels: progression.label,
     progression,
     name: def.name,
-    summary,
+    summary: described.replace(/\.\s+\./g, '.').replace(/\s+/g, ' ').trim(),
     stats,
     tradeoff: null,
   };

@@ -663,7 +663,7 @@ describe('§3 pressure director', () => {
   });
 
   it('gives the surge wave its own speed bonus, never the standing horde', () => {
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBe(2.6);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBe(1.85);
     // The global curve is untouched by any surge that has been and gone.
     const before = enemySpeedMulAt(300);
     const { state } = runDirector(36, 100);
@@ -841,6 +841,7 @@ describe('§13 upgrade cards', () => {
     // launches faster and hits harder, so it must not rename the player's weapon.
     const card = weaponUpgradeCard('microdrone', 2);
     expect(card.name).toBe('Microdrone Swarm');
+    expect(card.summary).toMatch(/Microdrone Swarm/i);
     expect(card.summary).toMatch(/harder/i);
     expect(card.summary).toMatch(/faster/i);
   });

@@ -5,7 +5,7 @@ import {
   WEAPONS,
   displayName,
   formatOverclockLabel,
-  isSignatureWeapon,
+  heroStarterWeapon,
   overclockLevel,
   shipCooldownAtLevel,
 } from './survivorContent';
@@ -999,7 +999,8 @@ export class SurvivorHud {
       '|' +
       state.protocolActive.map((t) => `${t.id}:${t.remaining.toFixed(0)}`).join('|') +
       `|mega:${state.megaProtocol.owned.join(',')}:${state.megaProtocol.cooldownRefits}` +
-      `|sh:${state.player.shieldPoints.toFixed(0)}`;
+      `|sh:${state.player.shieldPoints.toFixed(0)}` +
+      `|lv:${state.level}`;
     if (key === this.lastWeaponsKey) return;
     this.lastWeaponsKey = key;
     const build = this.root.querySelector('#sv-build');
@@ -1013,8 +1014,10 @@ export class SurvivorHud {
             ? `<small class="sv-build-oc">${formatOverclockLabel(oc)} · Dmg +${Math.round(oc * 8)}%</small>`
             : '';
         const proto = w.prototype || fam.prototype ? ' · PROTO' : '';
-        const signature = isSignatureWeapon(w.weaponId) ? ' · SIGNATURE' : '';
-        return `<div class="sv-build-item${signature ? ' signature' : ''}" style="--wep:${fam.color}"><span>${fam.name}${signature}${proto}${ocBit}</span><strong>L${w.level}</strong></div>`;
+        const signature = w.weaponId === heroStarterWeapon(state.heroId);
+        const sigLabel = signature ? ' · Signature Weapon' : '';
+        const shownLevel = signature ? state.level : w.level;
+        return `<div class="sv-build-item${signature ? ' signature' : ''}" style="--wep:${fam.color}"><span>${fam.name}${sigLabel}${proto}${ocBit}</span><strong>L${shownLevel}</strong></div>`;
       })
       .join('');
     const pass = Object.entries(state.passives)

@@ -352,6 +352,9 @@ describe('§5 upgrade cards', () => {
     expect(passiveCard('max-health', 9, 200).progression.label).toBe('L9 → L10');
 
     expect(hudSource).toMatch(/className = 'sv-card-badge'/);
+    expect(hudSource).toMatch(/Signature Weapon/);
+    expect(hudSource).toMatch(/shownLevel = signature \? state\.level : w\.level/);
+    expect(cssSource).not.toMatch(/--card-kind:/);
     expect(hudSource).not.toMatch(/function simplifyCardBadge/);
     expect(hudSource).toMatch(/cardBadgeText\(card\?\.category/);
     expect(hudSource).toMatch(/className = 'sv-card-level'/);
@@ -751,9 +754,11 @@ describe('§3 one impact per committed traversal', () => {
       b.state = 'active';
       expect(isCommittedTraversal(b), pattern).toBe(TRAVERSAL_PATTERNS.includes(pattern));
     }
-    // Outside the active window a traversal pattern id alone means nothing.
+    // Windup of a charge/leap is committed so the windup walk cannot also body-slam.
     b.pattern = 'ravage-charge';
     b.state = 'windup';
+    expect(isCommittedTraversal(b)).toBe(true);
+    b.state = 'idle';
     expect(isCommittedTraversal(b)).toBe(false);
   });
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HEROES } from '../../content/heroes';
+import { HERO_LIST, HEROES } from '../../content/heroes';
 import { BOSS_DEMON, ENEMY_BY_ID, MELEE_BLOB } from '../../content/enemies';
 import { AssetLibrary, createAnimator } from '../../assets/AssetLibrary';
 import { BOSS_DEFS, HORDE, SURVIVOR, SURVIVOR_BOSS, bossDefForIndex } from './survivorContent';
@@ -999,9 +999,9 @@ export class SurvivorRenderer {
             : p.kind === 'bioplasma'
               ? 1.45
               : p.kind === 'boss-orb'
-                ? Math.max(2.8, (p.visualRadius || p.radius) * 4.2)
+                ? Math.max(2.8, (p.visualRadius || p.radius) * 4.2 * SURVIVOR.bossRangedVisualMul)
                 : p.kind === 'boss-fan'
-                  ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5)
+                  ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5 * SURVIVOR.bossRangedVisualMul)
                   : p.kind === 'bolt'
                     ? Math.max(0.95, (p.visualRadius || p.radius) / 0.2)
                     : p.kind === 'rotary-round'
@@ -1013,8 +1013,13 @@ export class SurvivorRenderer {
         mesh.scale.setScalar(s);
       } else if (p.kind === 'drone' || p.kind === 'rocket' || p.kind === 'bolt' || p.kind === 'rotary-round') {
         mesh.scale.setScalar(s);
-      } else if (p.kind === 'bioplasma' || p.kind === 'boss-orb' || p.kind === 'boss-fan') {
+      } else if (p.kind === 'bioplasma') {
         mesh.scale.setScalar(Math.max(0.12, p.visualRadius || p.radius));
+      } else if (p.kind === 'boss-orb' || p.kind === 'boss-fan') {
+        const vis = Math.max(0.12, p.visualRadius || p.radius);
+        mesh.scale.setScalar(
+          vis * (p.kind === 'boss-orb' ? 4.2 : 3.5) * SURVIVOR.bossRangedVisualMul,
+        );
       } else if (p.kind === 'orbital-marker') {
         mesh.scale.setScalar(Math.max(0.35, (p.visualRadius || p.radius) * 1.6));
       }
@@ -2047,59 +2052,49 @@ export class SurvivorRenderer {
     g.position.y = near ? 0.15 : 0;
   }
 
-  private ensureGunship(): THREE.Object3D {
-    if (this.gunshipRoot) return this.gunshipRoot;
-    let root: THREE.Object3D | null = null;
-    if (this.heroShipUrl) {
-      const cloned = this.assets.clone(this.heroShipUrl);
-      if (cloned) root = cloned.root;
-    }
-    if (!root) {
-      // Procedural fallback ship if asset missing
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(
+  private makeFormationShip(url: string, accent: string, index: number): THREE.Group {
+    const wrap = new THREE.Group();
+    wrap.name = `gunship-ship-${index}`;
+    let body: THREE.Object3D | null = this.assets.clone(url)?.root ?? null;
+    if (!body) {
+      const fallback = new THREE.Group();
+      const hull = new THREE.Mesh(
         new THREE.ConeGeometry(0.6, 2.4, 8),
-        this.effectMat(this.heroAccent, 0.95, true),
+        this.effectMat(accent, 0.95, true),
       );
-      body.rotation.x = Math.PI / 2;
-      g.add(body);
-      root = g;
+      hull.rotation.x = Math.PI / 2;
+      fallback.add(hull);
+      body = fallback;
     }
-    root.visible = false;
-    // Thrusters for the flyover
+    body.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.userData.ownsGeometry = false;
+        o.userData.ownsMaterial = false;
+      }
+    });
+    wrap.add(body);
     const thruster = new THREE.Group();
     thruster.name = 'gunship-thrusters';
-    const makeCone = (x: number, color: string) => {
-      const m = this.effectMat(color, 0.85, true);
+    for (const x of [-0.28, 0.28]) {
+      const m = this.effectMat(x < 0 ? '#fffef5' : accent, 0.85, true);
       this.gunshipMats.push(m);
       const cone = new THREE.Mesh(new THREE.ConeGeometry(0.18, 1.4, 8, 1, true), m);
       cone.rotation.x = Math.PI / 2;
       cone.position.set(x, 0.15, -1.1);
       thruster.add(cone);
-    };
-    makeCone(-0.28, '#fffef5');
-    makeCone(0.28, this.heroAccent);
-    root.add(thruster);
-    const weapons = new THREE.Group();
-    weapons.name = 'gunship-weapons';
-    for (const side of [-1, 1]) {
-      const podMat = this.effectMat('#18283e', 0.96);
-      this.gunshipMats.push(podMat);
-      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.78, 8), podMat);
-      pod.rotation.x = Math.PI / 2;
-      pod.position.set(side * 0.54, -0.08, 0.35);
-      pod.userData.ownsGeometry = true;
-      pod.userData.ownsMaterial = false;
-      const muzzleMat = this.effectMat('#ffd46a', 0.2, true);
-      this.gunshipMats.push(muzzleMat);
-      const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), muzzleMat);
-      muzzle.name = `gunship-muzzle-${side}`;
-      muzzle.position.set(side * 0.54, -0.08, 0.78);
-      muzzle.userData.ownsGeometry = true;
-      muzzle.userData.ownsMaterial = false;
-      weapons.add(pod, muzzle);
     }
-    root.add(weapons);
+    wrap.add(thruster);
+    return wrap;
+  }
+
+  private ensureGunship(): THREE.Object3D {
+    if (this.gunshipRoot) return this.gunshipRoot;
+    const root = new THREE.Group();
+    root.name = 'gunship-formation';
+    root.visible = false;
+    HERO_LIST.forEach((hero, i) => {
+      root.add(this.makeFormationShip(hero.shipUrl, hero.accent, i));
+    });
     this.root.add(root);
     this.gunshipRoot = root;
     return root;
@@ -2114,26 +2109,21 @@ export class SurvivorRenderer {
     }
     root.visible = true;
     const height = SURVIVOR.gunship.flyHeight;
-    // During warning, park just off the start edge slightly raised; then fly the lane.
     root.position.set(g.x, height, g.z);
     root.rotation.y = Math.atan2(g.facingX, g.facingZ);
-    // The cache flyby is air support, not a boss collider. Keep it clearly larger than
-    // the player's ship while leaving the firing lane, cannon beams and ground threats
-    // visible beneath it.
-    root.scale.setScalar(SURVIVOR.actorScale.ship * SURVIVOR.gunship.visualScale);
-    const thr = root.getObjectByName('gunship-thrusters');
-    if (thr) {
-      const flicker = 0.85 + Math.sin(performance.now() * 0.05) * 0.2;
-      thr.scale.set(1, 1, g.firing ? 1.2 * flicker : 0.7);
-    }
-    for (const side of [-1, 1]) {
-      const muzzle = root.getObjectByName(`gunship-muzzle-${side}`);
-      if (muzzle instanceof THREE.Mesh && muzzle.material instanceof THREE.MeshBasicMaterial) {
-        const cadence = Math.max(0, Math.sin((g.t - g.warnDuration) * Math.PI * 2 / SURVIVOR.gunship.fireInterval));
-        muzzle.material.opacity = g.firing ? 0.2 + cadence * 0.8 : 0.08;
-        muzzle.scale.setScalar(g.firing ? 0.8 + cadence * 0.9 : 0.55);
+    const shipScale = SURVIVOR.actorScale.ship * SURVIVOR.gunship.visualScale;
+    const spacing = 3.55;
+    const ships = root.children.filter((c) => c.name.startsWith('gunship-ship-'));
+    ships.forEach((ship, i) => {
+      const u = ships.length <= 1 ? 0 : i / (ships.length - 1) - 0.5;
+      ship.position.set(u * 2 * spacing, 0, 0);
+      ship.scale.setScalar(shipScale);
+      const thr = ship.getObjectByName('gunship-thrusters');
+      if (thr) {
+        const flicker = 0.85 + Math.sin(performance.now() * 0.05 + i) * 0.2;
+        thr.scale.set(1, 1, g.firing ? 1.2 * flicker : 0.7);
       }
-    }
+    });
   }
 
   private disposeEffectObject(obj: THREE.Object3D): void {
@@ -2769,7 +2759,10 @@ export class SurvivorRenderer {
     }
     if (e.kind === 'fleet-ship') {
       let ship: THREE.Object3D | null = null;
-      if (this.heroShipUrl) ship = this.assets.clone(this.heroShipUrl)?.root ?? null;
+      const hero =
+        HERO_LIST.find((h) => h.accent.toLowerCase() === e.color.toLowerCase()) ?? HERO_LIST[0];
+      if (hero) ship = this.assets.clone(hero.shipUrl)?.root ?? null;
+      if (!ship && this.heroShipUrl) ship = this.assets.clone(this.heroShipUrl)?.root ?? null;
       if (ship) {
         ship.scale.setScalar(1.15);
         ship.traverse((o) => {

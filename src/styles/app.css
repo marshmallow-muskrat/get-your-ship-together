@@ -2905,39 +2905,18 @@ html {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  padding: 0.28rem 0.55rem;
-  border-radius: 0.28rem;
-  border: 1px solid color-mix(in srgb, var(--card-kind, var(--hud-accent)) 70%, white 10%);
-  background: color-mix(in srgb, var(--card-kind, var(--hud-accent)) 28%, rgba(6, 12, 22, 0.92));
-  color: #f4fbff;
+  padding: 0.22rem 0.48rem;
+  border-radius: 0.22rem;
+  border: 1px solid color-mix(in srgb, var(--hud-accent) 55%, white 12%);
+  background: color-mix(in srgb, var(--hud-accent) 16%, rgba(8, 14, 28, 0.92));
+  color: color-mix(in srgb, var(--hud-accent) 78%, white 22%);
   font-family: 'Space Mono', monospace;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   line-height: 1.2;
   text-transform: uppercase;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
   white-space: nowrap;
-}
-.survivor-hud .sv-card[data-card-category='new-weapon'],
-.survivor-hud .sv-card[data-card-category='new-prototype'] {
-  --card-kind: #3de0ff;
-}
-.survivor-hud .sv-card[data-card-category='weapon-upgrade'],
-.survivor-hud .sv-card[data-card-category='prototype-upgrade'] {
-  --card-kind: #ffd46a;
-}
-.survivor-hud .sv-card[data-card-category='new-passive'] {
-  --card-kind: #ff6ad5;
-}
-.survivor-hud .sv-card[data-card-category='passive-upgrade'] {
-  --card-kind: #b388ff;
-}
-.survivor-hud .sv-card[data-card-category='overclock'] {
-  --card-kind: #ff8a3d;
-}
-.survivor-hud .sv-card[data-card-category='protocol'] {
-  --card-kind: #ffe27a;
 }
 .survivor-hud .sv-card-sigil {
   display: none;

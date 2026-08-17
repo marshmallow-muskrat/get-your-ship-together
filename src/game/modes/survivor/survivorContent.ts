@@ -149,7 +149,7 @@ export const SURVIVOR = {
   surgeRecovery: 13.5,
   /** Surge-spawned enemies only — never the standing horde. */
   /** Surge-only: stacked on authored speed so the flock outruns a kiting astronaut. */
-  surgeWaveSpeedBonus: 2.6,
+  surgeWaveSpeedBonus: 1.85,
   /** Opening flock size; later minutes add more via surgePackSizeAt. */
   surgePackSize: 32,
   /** Recovery holds replacements until population falls to this fraction of target. */
@@ -197,7 +197,11 @@ export const SURVIVOR = {
    */
   megaVisualMul: 1.5,
   megaColliderMul: 1.32,
-  megaMoveMul: 0.96,
+  megaMoveMul: 1.44,
+  /** Extra reach so standing in the drawn body actually bills a slam. */
+  bossBodyContactPad: 1.65,
+  /** Drawn scale of boss orbs / fan shards vs their collision radius. */
+  bossRangedVisualMul: 4,
   fixedDt: 1 / 60,
   /**
    * Bounded repair economy.
@@ -295,7 +299,7 @@ export const SURVIVOR = {
    */
   orbVisual: {
     /** Ordinary energy / repair baseline multiplier. */
-    baseline: 4,
+    baseline: 2,
     /** Premium energy vs ordinary energy (1.18 × baseline). */
     premiumMul: 1.18,
     /** Repair group vs energy (1.18 × baseline × pickup.visualScale). */
@@ -324,7 +328,7 @@ export const SURVIVOR = {
     /** Active strafing duration after warning. */
     strafeDuration: 4.6,
     fireInterval: 0.16,
-    laneHalfWidth: 12.4,
+    laneHalfWidth: 16.4,
     enemyDamage: 38,
     bossDamage: 95,
     impactRadius: 7.6,
@@ -434,9 +438,11 @@ export const SURVIVOR = {
     titanDamageTakenMul: 0.72,
     fleetPasses: 3,
     fleetWarn: 0.8,
-    fleetTravel: 1.65,
-    fleetGap: 0.55,
-    fleetLaneHalfWidth: 4.6,
+    fleetTravel: 4.8,
+    publishedFleetTravel: 1.65,
+    fleetGap: 0.7,
+    fleetLaneHalfWidth: 11.2,
+    publishedFleetLaneHalfWidth: 4.6,
     fleetMinibossFraction: 0.9,
     fleetBossFraction: 0.06,
     fleetMegaFraction: 0.03,
@@ -727,12 +733,12 @@ export const SURVIVOR = {
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
-    radius: 179.55,
+    radius: 89.775,
     damage: 60,
     /** Player progression keeps the 30-second active relevant without clock scaling. */
     damagePerPlayerLevel: 0.15,
     maxDamageMul: 16,
-    push: 159.6,
+    push: 79.8,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
     mechRadiusMul: 1.25,
@@ -785,7 +791,7 @@ export const SURVIVOR = {
     exhaustTickCd: 0.2,
     exhaustEliteMul: 0.55,
     exhaustBossMul: 0.45,
-    exhaustVisualScale: 1.85,
+    exhaustVisualScale: 3.7,
     /** Power scale caps thruster damage growth with permanent build. */
     powerScaleCap: 10.0,
     /**
@@ -1191,11 +1197,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // hit strength (304 max hit) — it was coverage: 2.6% of a 21:18 run because a
       // 2.1-2.6 radius simply missed most of what was on screen. `radius` is the
       // high-damage core; the wider shockwave is derived from it in SURVIVOR.orbital.
-      { level: 1, damage: 140, cadence: 4.2, count: 1, radius: 3.2, life: 0.85 },
-      { level: 2, damage: 168, cadence: 4.0, count: 1, radius: 3.45, life: 0.8 },
-      { level: 3, damage: 205, cadence: 3.8, count: 1, radius: 3.7, life: 0.78 },
-      { level: 4, damage: 250, cadence: 3.6, count: 1, radius: 3.95, life: 0.72 },
-      { tier: 'Judgment Array', level: 5, damage: 290, cadence: 5.9, count: 2, radius: 4.25, life: 0.68 },
+      { level: 1, damage: 140, cadence: 4.2, count: 1, radius: 12.8, life: 0.85 },
+      { level: 2, damage: 168, cadence: 4.0, count: 1, radius: 13.8, life: 0.8 },
+      { level: 3, damage: 205, cadence: 3.8, count: 1, radius: 14.8, life: 0.78 },
+      { level: 4, damage: 250, cadence: 3.6, count: 1, radius: 15.8, life: 0.72 },
+      { tier: 'Judgment Array', level: 5, damage: 290, cadence: 5.9, count: 2, radius: 17.0, life: 0.68 },
     ],
   },
 
@@ -1613,7 +1619,7 @@ export const BOSS_DEFS: BossDef[] = [
     colliderRadius: 1.1,
     visualScale: 3.5,
     role: 'flyer',
-    accent: '#c080ff',
+    accent: '#ff8a32',
     anim: { idle: ['Flying_Idle', 'Idle'], walk: ['Fast_Flying', 'Fly'], attack: ['Punch', 'Headbutt', 'Attack'], hit: ['HitReact'], death: ['Death'] },
     preferredPatterns: ['fan', 'line', 'summon', 'breach-orb', 'contamination'],
     uniquePattern: 'aerial-strafe',
@@ -1633,6 +1639,11 @@ export const BOSS_DEFS: BossDef[] = [
   },
 ];
 
+/** Mega-Bosses always use the orange dragon, regardless of schedule index. */
+export function megaBossDef(): BossDef {
+  return BOSS_DEFS.find((d) => d.id === 'dragon') ?? BOSS_DEFS[BOSS_DEFS.length - 1]!;
+}
+
 /** Deterministic boss model for schedule index n (1-based). Avoids immediate repeats. */
 export function bossDefForIndex(index: number): BossDef {
   const n = Math.max(1, Math.floor(index));
@@ -1640,6 +1651,15 @@ export function bossDefForIndex(index: number): BossDef {
   // Rotate with offset so consecutive bosses differ
   const idx = (n - 1 + Math.floor((n - 1) / len)) % len;
   return BOSS_DEFS[idx]!;
+}
+
+export function bossDefOf(boss: { defId?: string; index: number; isMega?: boolean }): BossDef {
+  if (boss.isMega) return megaBossDef();
+  if (boss.defId) {
+    const found = BOSS_DEFS.find((d) => d.id === boss.defId);
+    if (found) return found;
+  }
+  return bossDefForIndex(boss.index);
 }
 
 export function heroStarterWeapon(heroId: HeroId): WeaponId {
@@ -2026,13 +2046,13 @@ export const SURVIVOR_BOSS = {
   phase2Threshold: 0.66,
   phase3Threshold: 0.33,
   patterns: {
-    pulse: { windup: 1.0, active: 0.7, recovery: 0.85, damage: 16, maxRadius: 8 },
+    pulse: { windup: 1.0, active: 0.7, recovery: 0.85, damage: 16, maxRadius: 16 },
     line: { windup: 0.9, active: 0.45, recovery: 0.95, damage: 20, length: 20, width: 1.25 },
     fan: { windup: 1.05, active: 0.18, recovery: 0.95, damage: 12, count: 5, speed: 10 },
     summon: { windup: 0.95, active: 0.12, recovery: 1.15, count: 5 },
     'breach-orb': { windup: 1.1, active: 0.2, recovery: 1.0, damage: 18, speed: 7 },
-    contamination: { windup: 1.0, active: 0.35, recovery: 1.05, damage: 10, radius: 3.0, life: 6 },
-    'rupture-ring': { windup: 1.15, active: 0.9, recovery: 1.1, damage: 18, maxRadius: 10 },
+    contamination: { windup: 1.0, active: 0.35, recovery: 1.05, damage: 10, radius: 6.0, life: 6 },
+    'rupture-ring': { windup: 1.15, active: 0.9, recovery: 1.1, damage: 18, maxRadius: 20 },
     'cryo-lanes': { windup: 1.1, active: 0.7, recovery: 1.15, damage: 14, length: 22, width: 1.1 },
     // The charge corridor is the sole consumer of the `charge` physical tier: it is the
     // telegraphed body impact, so it reads its damage from there rather than authoring a
@@ -2047,9 +2067,9 @@ export const SURVIVOR_BOSS = {
     },
     'sweeping-beam': { windup: 1.15, active: 1.4, recovery: 1.1, damage: 16, length: 24, width: 1.0 },
     'aerial-strafe': { windup: 1.0, active: 1.1, recovery: 1.0, damage: 14, length: 30, width: 1.6 },
-    'spore-bloom': { windup: 1.05, active: 0.4, recovery: 1.2, damage: 12, count: 5, radius: 1.4 },
-    'gravity-collapse': { windup: 1.3, active: 1.5, recovery: 1.3, damage: 22, maxRadius: 11 },
-    cataclysm: { windup: 1.2, active: 2.0, recovery: 1.4, damage: 20, count: 4, radius: 3.2 },
+    'spore-bloom': { windup: 1.05, active: 0.4, recovery: 1.2, damage: 12, count: 5, radius: 2.8 },
+    'gravity-collapse': { windup: 1.3, active: 1.5, recovery: 1.3, damage: 22, maxRadius: 22 },
+    cataclysm: { windup: 1.2, active: 2.0, recovery: 1.4, damage: 20, count: 4, radius: 6.4 },
   },
   phaseMods: {
     1: { recoveryMul: 1.0, damageMul: 1.0, fanCountAdd: 0, summonCount: 3, idleGap: 0.55 },
@@ -2432,7 +2452,7 @@ export const PROTOCOLS: ProtocolDef[] = [
   {
     id: 'gunship-flyby',
     title: 'Gunship Flyby',
-    body: 'Your ship strafes a lane, guaranteeing kills on ordinary enemies.',
+    body: 'All four hero ships strafe a lane and delete ordinary enemies. Bosses are left for you.',
     duration: 6,
   },
   {
@@ -2448,7 +2468,7 @@ export const MEGA_PROTOCOLS: ProtocolDef[] = [
   {
     id: 'carrier-wing',
     title: 'Carrier Wing',
-    body: 'A permanent fighter squadron strafes distributed threats.',
+    body: 'All four hero ships permanently fly the whole station in formation and shred the horde.',
     duration: Number.POSITIVE_INFINITY,
   },
   {

@@ -1126,11 +1126,12 @@ describe('§9 Arc Conductor L5 forks instead of adding a fifth jump', () => {
   /** An arena holding `n` enemies on distinct bearings around the player. */
   function ring(seed: number, n: number, radius: number): SurvivorState {
     const state = quietArena(seed, 'survivor-arc');
+    state.passives = { area: 2, 'weapon-haste': 2 };
     state.weapons = [{ weaponId: 'arc', level: 5, cooldown: 0, prototype: true, focusDebt: 0 }];
     state.player.invuln = 1e9;
     state.enemyCap = 0;
     state.spawnAcc = -1e9;
-    for (const e of state.enemies) e.alive = false;
+    state.enemies = [];
     for (let i = 0; i < n; i += 1) {
       const e = emptyEnemy();
       e.id = nextEntityId(state);

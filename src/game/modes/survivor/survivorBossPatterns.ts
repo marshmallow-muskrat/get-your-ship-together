@@ -16,10 +16,10 @@ import {
   SURVIVOR_BOSS,
   assertNever,
   bossDamageScale,
-  bossDefForIndex,
   bossPhaseFromHealth,
   elitePopulationBudgetAt,
   isMegaOnlyPattern,
+  bossDefOf,
   type BossPatternId,
 } from './survivorContent';
 import type {
@@ -221,9 +221,10 @@ function dmgScale(b: SurvivorBoss): number {
   return bossDamageMultiplier(b);
 }
 
-function recScale(b: SurvivorBoss): number {
+function recScale(state: SurvivorState, b: SurvivorBoss): number {
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
-  return b.recoveryMul * SURVIVOR_BOSS.phaseMods[phase].recoveryMul;
+  const live = state.isolateLiveTravel ? 1 : 0.52;
+  return b.recoveryMul * SURVIVOR_BOSS.phaseMods[phase].recoveryMul * live;
 }
 
 /** Spawn one attack entity owned by this boss. */
@@ -256,7 +257,7 @@ function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number):
   // Scoped to this boss only — simultaneous bosses never clean each other's attacks.
   fadeBossAttacks(state, b.id);
   b.state = 'recover';
-  b.timer = recovery * recScale(b);
+  b.timer = recovery * recScale(state, b);
   b.previousPattern = b.pattern;
   b.pattern = null;
   b.telegraphR = 0;
@@ -273,6 +274,9 @@ function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number):
    * never made safer by the player hitting it hard.
    */
   if (b.pendingPhaseTransition) onPhaseTransitionReady?.(state, b);
+  if (b.previousPattern && COMMITTED_TRAVERSAL[b.previousPattern]) {
+    b.traversalBodyLock = 2.8;
+  }
 }
 
 /**
@@ -294,7 +298,7 @@ function beginRecover(state: SurvivorState, b: SurvivorBoss, id: BossPatternId):
 }
 
 export function selectBossPattern(state: SurvivorState, b: SurvivorBoss, api: BossSimApi): BossPatternId {
-  const def = bossDefForIndex(b.index);
+  const def = bossDefOf(b);
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
   const uniqueEvery = phase >= 3 ? 3 : phase >= 2 ? 4 : 5;
   const megaEvery = phase >= 3 ? 2 : 3;
@@ -398,7 +402,7 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
   switch (pattern) {
     case 'pulse':
       // Footprint of the whole pulse; becomes the expanding band on activation.
-      addAttack(state, b, pattern, circleAt(b.x, b.z, cfg.maxRadius ?? 8), warn);
+      addAttack(state, b, pattern, circleAt(b.x, b.z, cfg.maxRadius ?? 16), warn);
       break;
 
     case 'line': {
@@ -473,7 +477,7 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
     }
 
     case 'rupture-ring':
-      addAttack(state, b, pattern, circleAt(b.x, b.z, cfg.maxRadius ?? 10), warn);
+      addAttack(state, b, pattern, circleAt(b.x, b.z, cfg.maxRadius ?? 20), warn);
       break;
 
     case 'cryo-lanes': {
@@ -580,7 +584,7 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
     case 'gravity-collapse':
       b.lockX = b.x;
       b.lockZ = b.z;
-      addAttack(state, b, pattern, circleAt(b.lockX, b.lockZ, cfg.maxRadius ?? 11), warn);
+      addAttack(state, b, pattern, circleAt(b.lockX, b.lockZ, cfg.maxRadius ?? 22), warn);
       break;
 
     case 'cataclysm': {
@@ -664,7 +668,12 @@ const COMMITTED_TRAVERSAL: Record<BossPatternId, boolean> = {
 
 /** Whether this boss is mid-traversal and so owns its own single impact. */
 export function isCommittedTraversal(b: SurvivorBoss): boolean {
-  return b.state === 'active' && b.pattern != null && COMMITTED_TRAVERSAL[b.pattern];
+  const id = b.state === 'recover' ? b.previousPattern : b.pattern;
+  return (
+    id != null &&
+    COMMITTED_TRAVERSAL[id] &&
+    (b.state === 'active' || b.state === 'windup' || b.state === 'recover')
+  );
 }
 
 function activateBossPattern(state: SurvivorState, b: SurvivorBoss): void {
@@ -1164,7 +1173,7 @@ function bossCatchupMul(state: SurvivorState, dist: number, isMega: boolean): nu
   const start = 14;
   if (dist <= start) return travel;
   const extra = (dist - start) / 8;
-  return Math.min(isMega ? 8.4 : 7.2, travel + extra);
+  return Math.min(isMega ? 12.6 : 7.2, travel + extra);
 }
 
 /** Recovery movement when far and no locked telegraph. */
@@ -1173,8 +1182,8 @@ function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, ap
   const dx = p.x - b.x;
   const dz = p.z - b.z;
   const dist = Math.hypot(dx, dz) || 1;
-  if (dist > 8) {
-    const recoverMul = state.isolateLiveTravel ? 0.45 : 0.72;
+  if (dist > 3.2) {
+    const recoverMul = state.isolateLiveTravel ? 0.45 : 1.12;
     const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * recoverMul * bossCatchupMul(state, dist, b.isMega);
     b.x += (dx / dist) * spd * dt;
     b.z += (dz / dist) * spd * dt;
@@ -1182,6 +1191,30 @@ function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, ap
     b.x = c.x;
     b.z = c.z;
   }
+}
+
+function advanceBossTowardPlayer(
+  state: SurvivorState,
+  b: SurvivorBoss,
+  dt: number,
+  api: BossSimApi,
+  speedFrac: number,
+): void {
+  const p = state.player;
+  const dx = p.x - b.x;
+  const dz = p.z - b.z;
+  const dist = Math.hypot(dx, dz) || 1;
+  if (dist <= 3.4) return;
+  const spd =
+    SURVIVOR_BOSS.moveSpeed *
+    b.moveMul *
+    speedFrac *
+    bossCatchupMul(state, dist, b.isMega);
+  b.x += (dx / dist) * spd * dt;
+  b.z += (dz / dist) * spd * dt;
+  const c = api.clampArena(b.x, b.z, b.colliderRadius);
+  b.x = c.x;
+  b.z = c.z;
 }
 
 /**
@@ -1223,6 +1256,7 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
   if (!b.active || b.state === 'dead') return;
   if (b.hitFlash > 0) b.hitFlash = Math.max(0, b.hitFlash - dt);
   if (b.repulsorCd > 0) b.repulsorCd = Math.max(0, b.repulsorCd - dt);
+  if (b.traversalBodyLock > 0) b.traversalBodyLock = Math.max(0, b.traversalBodyLock - dt);
 
   const p = state.player;
   const dx = p.x - b.x;
@@ -1266,6 +1300,9 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
 
   if (b.state === 'windup') {
     b.patternElapsed += dt;
+    if (!state.isolateLiveTravel && !lockedMove) {
+      advanceBossTowardPlayer(state, b, dt, api, 0.55);
+    }
     // Do not retarget locked patterns
     if (b.timer <= 0 && b.pattern) {
       activateBossPattern(state, b);
@@ -1286,6 +1323,9 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
       b.timer = 0.4;
       fadeBossAttacks(state, b.id);
       return;
+    }
+    if (!state.isolateLiveTravel && !lockedMove) {
+      advanceBossTowardPlayer(state, b, dt, api, 0.42);
     }
     updateActive(state, b, dt, api);
     // Absolute safety: if somehow still active with timer long expired

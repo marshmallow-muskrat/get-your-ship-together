@@ -493,6 +493,8 @@ export interface SurvivorBoss {
   attacksSinceMega: number;
   /** Previous completed pattern id for anti-repeat. */
   previousPattern: import('./survivorContent').BossPatternId | null;
+  /** Brief window after a charge/leap so the landing is not also a body slam. */
+  traversalBodyLock: number;
   /** Total attack cycles completed this life. */
   attacksCompleted: number;
   /**
@@ -862,6 +864,8 @@ export interface SurvivorState {
   isolateLiveTravel: boolean;
   /** Weapon benches keep the published boomerang lane while live play uses the crescent. */
   isolatePublishedWeapons: boolean;
+  /** Last offered upgrade keys so the next modal is less likely to repeat them. */
+  recentOfferKeys: string[];
   /** Set once when defeat is recorded to local high scores. */
   runRecorded: boolean;
   inboundBanner: number;
@@ -929,6 +933,7 @@ export function emptyBoss(): SurvivorBoss {
     attacksSinceUnique: 0,
     attacksSinceMega: 0,
     previousPattern: null,
+    traversalBodyLock: 0,
     attacksCompleted: 0,
     shipRamCd: 0,
     zones: [],
@@ -1232,6 +1237,7 @@ export function createSurvivorState(
     muted: false,
     isolateLiveTravel: false,
     isolatePublishedWeapons: false,
+    recentOfferKeys: [],
     runRecorded: false,
     inboundBanner: 0,
     metrics: {

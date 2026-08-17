@@ -59,6 +59,8 @@ import {
   shipCooldownFor,
   updatePlasmaTrails,
 } from './survivorSim';
+import { selectWeaponTarget } from './survivorTargeting';
+import { weaponUpgradeCard } from './survivorUpgradeCards';
 import {
   BOSS_DEFS,
   OVERCLOCK_DAMAGE_PER_LEVEL,
@@ -71,6 +73,7 @@ import {
   bossCategoryDamage,
   computeShieldPoints,
   bossDefForIndex,
+  megaBossDef,
   bossDifficultyFor,
   bossPhaseFromHealth,
   bossTimeForIndex,
@@ -856,6 +859,7 @@ describe('boss scaling and mega', () => {
     for (let i = 0; i < 20; i += 1) stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
     const mega = state.bosses.find((b) => b.isMega);
     expect(mega).toBeTruthy();
+    expect(mega!.defId).toBe('dragon');
     expect(mega!.visualScale).toBeGreaterThan(5);
   });
 });
@@ -2710,11 +2714,117 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(SURVIVOR.hordeTravelMul).toBeCloseTo(1.38, 6);
     expect(SURVIVOR.bossTravelMul).toBeCloseTo(4.7, 6);
     expect(SURVIVOR.megaEvery).toBe(3);
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(2.6, 6);
-    expect(SURVIVOR.orbVisual.baseline).toBe(4);
-    expect(SURVIVOR.repulsor.radius).toBeCloseTo(179.55, 6);
-    expect(SURVIVOR.repulsor.push).toBeCloseTo(159.6, 6);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(1.85, 6);
+    expect(SURVIVOR.orbVisual.baseline).toBe(2);
+    expect(SURVIVOR.repulsor.radius).toBeCloseTo(89.775, 6);
+    expect(SURVIVOR.repulsor.push).toBeCloseTo(79.8, 6);
+    expect(SURVIVOR.megaMoveMul).toBeCloseTo(1.44, 6);
     expect(SURVIVOR.boomerang.curveBulge).toBeCloseTo(0.32, 6);
+    expect(SURVIVOR.bossBodyContactPad).toBeCloseTo(1.65, 6);
+    expect(SURVIVOR.bossRangedVisualMul).toBe(4);
+    expect(SURVIVOR.ship.exhaustVisualScale).toBeCloseTo(3.7, 6);
+    expect(SURVIVOR.megaProtocol.fleetTravel).toBeCloseTo(4.8, 6);
+    expect(megaBossDef().id).toBe('dragon');
+    expect(megaBossDef().accent).toBe('#ff8a32');
+  });
+
+  it('lets an idle boss body-slam when the player stands in the drawn body', () => {
+    const state = createSurvivorState('bee', null, 21010);
+    state.weapons = [];
+    state.spawnAcc = -1e9;
+    state.nextBossTime = 1e9;
+    state.player.invuln = 0;
+    state.player.health = 100;
+    const b = emptyBoss();
+    b.id = state.nextId++;
+    b.active = true;
+    b.state = 'idle';
+    b.x = state.player.x + 1.8;
+    b.z = state.player.z;
+    b.colliderRadius = 1.0;
+    b.maxHealth = 5000;
+    b.health = 5000;
+    state.bosses = [b];
+    const before = state.player.health;
+    applyBossBodyContact(state);
+    expect(state.player.health).toBeLessThan(before);
+  });
+
+  it('aims at the boss unless a monster is already in melee range', () => {
+    const state = createSurvivorState('bee', null, 21011);
+    state.weapons = [{ weaponId: 'pulse', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
+    const slot = state.weapons[0]!;
+    const fodder = emptyEnemy();
+    fodder.id = 1;
+    fodder.alive = true;
+    fodder.x = 8;
+    fodder.z = 0;
+    const elite = emptyEnemy();
+    elite.id = 2;
+    elite.alive = true;
+    elite.isElite = true;
+    elite.x = 6;
+    elite.z = 0;
+    state.enemies = [fodder, elite];
+    const boss = emptyBoss();
+    boss.id = 9;
+    boss.active = true;
+    boss.state = 'idle';
+    boss.x = 10;
+    boss.z = 0;
+    boss.health = 1000;
+    boss.maxHealth = 1000;
+    state.bosses = [boss];
+    const far = selectWeaponTarget(state, slot, 0, 0, 20);
+    expect(far?.kind).toBe('boss');
+    fodder.x = 2;
+    const close = selectWeaponTarget(state, slot, 0, 0, 20);
+    expect(close?.kind).toBe('enemy');
+    expect(close && close.kind === 'enemy' ? close.enemy.id : null).toBe(fodder.id);
+    fodder.x = 8;
+    state.bosses = [];
+    const noBoss = selectWeaponTarget(state, slot, 0, 0, 20);
+    expect(noBoss?.kind).toBe('enemy');
+    expect(noBoss && noBoss.kind === 'enemy' ? noBoss.enemy.id : null).toBe(elite.id);
+  });
+
+  it('describes the weapon itself on an upgrade card, not only the delta', () => {
+    const card = weaponUpgradeCard('gravity', 2);
+    expect(card.summary).toMatch(/Gravity Pulse/i);
+    expect(card.summary).toMatch(/well|hold|collaps/i);
+    const oc = weaponUpgradeCard('gravity', 5);
+    expect(oc.summary).toMatch(/Gravity Pulse/i);
+    expect(oc.summary).toMatch(/well|hold|collaps/i);
+  });
+
+  it('deprioritizes weapons that just appeared on the previous offer', () => {
+    const state = createSurvivorState('bee', null, 21012);
+    state.weapons = [{ weaponId: 'microdrone', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
+    const first = generateChoices(state);
+    const firstKeys = first.map((c) =>
+      c.kind === 'passive' ? `p:${c.passiveId}` : c.kind === 'new-weapon' ? `n:${c.weaponId}` : `u:${c.weaponId}`,
+    );
+    expect(state.recentOfferKeys.slice(-3)).toEqual(firstKeys);
+    const second = generateChoices(state);
+    const secondKeys = second.map((c) =>
+      c.kind === 'passive' ? `p:${c.passiveId}` : c.kind === 'new-weapon' ? `n:${c.weaponId}` : `u:${c.weaponId}`,
+    );
+    const overlap = secondKeys.filter((k) => firstKeys.includes(k)).length;
+    expect(overlap).toBeLessThan(3);
+  });
+
+  it('sends four Carrier Wing ships across the whole station', () => {
+    const state = createSurvivorState('bee', null, 21013);
+    state.weapons = [];
+    state.spawnAcc = -1e9;
+    forceStartProtocol(state, 'carrier-wing', 1);
+    stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.megaProtocol.fleetWarn + 0.02);
+    const ships = state.effects.filter((e) => e.kind === 'fleet-ship');
+    expect(ships.length).toBe(4);
+    const span = Math.max(
+      ...ships.map((s) => Math.hypot((s.length ?? 0), 0)),
+    );
+    expect(span).toBeGreaterThan(SURVIVOR.arenaHalf);
   });
 
   it('sets a 30-second Ship recharge and lets Reinforced Airframe reach 25 seconds', () => {
@@ -2741,7 +2851,7 @@ describe('Cosmic Cleanup playtest tuning', () => {
     const d0 = Math.hypot(state.gunship.x0 - state.player.x, state.gunship.z0 - state.player.z);
     const d1 = Math.hypot(state.gunship.x1 - state.player.x, state.gunship.z1 - state.player.z);
     expect(d0).toBeLessThan(d1);
-    expect(SURVIVOR.gunship.laneHalfWidth).toBeCloseTo(12.4, 6);
+    expect(SURVIVOR.gunship.laneHalfWidth).toBeCloseTo(16.4, 6);
     expect(SURVIVOR.gunship.impactRadius).toBeCloseTo(7.6, 6);
   });
 

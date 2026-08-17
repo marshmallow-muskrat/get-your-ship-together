@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { HeroId } from '../../content/heroes';
-import { HEROES } from '../../content/heroes';
+import { HERO_LIST, HEROES } from '../../content/heroes';
 import { AssetLibrary } from '../../assets/AssetLibrary';
 import { AudioBus } from '../../audio/AudioBus';
 import { BOSS_DEFS, SURVIVOR, bossDefForIndex, type SurvivorFixture } from './survivorContent';
@@ -304,6 +304,9 @@ export class SurvivorMode {
      * fallback the renderer already has, and neither should take a run down.
      */
     this.audio.preload();
+    void Promise.all(HERO_LIST.map((hero) => this.assets.loadUrl(hero.shipUrl, 1.4))).catch(
+      (error) => console.warn('Hero ships unavailable for flybys', error),
+    );
     void this.assets
       .preloadCleanupCrew(this.heroId)
       .catch((error) => console.warn('Cleanup Crew models unavailable', error));

@@ -287,7 +287,7 @@ export function runWeaponBenchmark(
    * Live crescent flight is a feel change. The published L1–L5 close-rate still
    * measures the original lane so Twin Orbit does not become a hidden growth axis.
    */
-  if (weaponId === 'boomerang') state.isolatePublishedWeapons = true;
+  state.isolatePublishedWeapons = true;
 
   const hp0 = new Map<number, number>();
   for (const e of state.enemies) {

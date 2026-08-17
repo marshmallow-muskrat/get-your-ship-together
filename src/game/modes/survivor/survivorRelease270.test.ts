@@ -531,7 +531,7 @@ describe('§6 Orbital Lance strikes two zones', () => {
       e.role = 'fodder';
       e.alive = true;
       // Spread along +X well outside the shockwave of each other's centre.
-      e.x = 6 + i * 0.75;
+      e.x = 4 + i * 1.6;
       e.z = 0;
       e.radius = 0;
       e.maxHealth = 1e9;
@@ -566,11 +566,11 @@ describe('§6 Orbital Lance strikes two zones', () => {
   }
 
   it.each([
-    [1, 3.2],
-    [2, 3.45],
-    [3, 3.7],
-    [4, 3.95],
-    [5, 4.25],
+    [1, 12.8],
+    [2, 13.8],
+    [3, 14.8],
+    [4, 15.8],
+    [5, 17.0],
   ])('authors a %i-level core radius of %s', (level, radius) => {
     expect(LANCE[level - 1]!.radius).toBeCloseTo(radius, 6);
   });

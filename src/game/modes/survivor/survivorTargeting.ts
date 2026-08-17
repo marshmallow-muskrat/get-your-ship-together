@@ -80,9 +80,33 @@ export function nearestEnemyOnly(
   return best;
 }
 
+export function nearestElite(
+  state: SurvivorState,
+  x: number,
+  z: number,
+  maxR: number,
+): SurvivorEnemy | null {
+  const maxD = maxR * maxR;
+  let best: SurvivorEnemy | null = null;
+  let bestD = maxD;
+  for (const e of state.enemies) {
+    if (!e.alive || (!e.isElite && !e.isMiniboss)) continue;
+    const d = dist2(x, z, e.x, e.z);
+    if (d < bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+const CLOSE_THREAT_RANGE = 3.25;
+
 /**
  * Shared boss-aware target selection for automatic weapons.
- * Prefer bosses on focus cycles when in range; otherwise nearest enemy.
+ *
+ * Live play shoots a close threat first, then the boss, then elites. Isolated
+ * benches keep the published nearest-enemy / focus-debt lottery.
  */
 export function selectWeaponTarget(
   state: SurvivorState,
@@ -95,11 +119,19 @@ export function selectWeaponTarget(
   const boss = nearestBoss(state, x, z, maxR);
   const enemy = nearestEnemyOnly(state, x, z, maxR);
   if (!boss && !enemy) return null;
-  if (!boss) return { kind: 'enemy', enemy: enemy! };
-  if (!enemy) return { kind: 'boss', boss };
-  const wantBoss = opts?.forceBoss || consumeBossFocus(slot, bossFocusChance(state));
-  if (wantBoss) return { kind: 'boss', boss };
-  return { kind: 'enemy', enemy };
+  if (state.isolateLiveTravel || state.isolatePublishedWeapons) {
+    if (!boss) return { kind: 'enemy', enemy: enemy! };
+    if (!enemy) return { kind: 'boss', boss };
+    const wantBoss = opts?.forceBoss || consumeBossFocus(slot, bossFocusChance(state));
+    if (wantBoss) return { kind: 'boss', boss };
+    return { kind: 'enemy', enemy };
+  }
+  const close = nearestEnemyOnly(state, x, z, CLOSE_THREAT_RANGE);
+  if (close) return { kind: 'enemy', enemy: close };
+  if (boss) return { kind: 'boss', boss };
+  const elite = nearestElite(state, x, z, maxR);
+  if (elite) return { kind: 'enemy', enemy: elite };
+  return { kind: 'enemy', enemy: enemy! };
 }
 
 export function targetPosition(t: AimTarget): { x: number; z: number } | null {
