@@ -2712,14 +2712,15 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(SURVIVOR.cameraHalfMin).toBeCloseTo(12, 6);
     expect(SURVIVOR.playerSpeed).toBeCloseTo(9.79, 6);
     expect(SURVIVOR.hordeTravelMul).toBeCloseTo(1.38, 6);
-    expect(SURVIVOR.bossTravelMul).toBeCloseTo(4.7, 6);
+    expect(SURVIVOR.bossTravelMul).toBeCloseTo(2.35, 6);
     expect(SURVIVOR.megaEvery).toBe(3);
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(1.85, 6);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(1.1375, 6);
     expect(SURVIVOR.orbVisual.baseline).toBe(2);
-    expect(SURVIVOR.repulsor.radius).toBeCloseTo(89.775, 6);
-    expect(SURVIVOR.repulsor.push).toBeCloseTo(79.8, 6);
+    expect(SURVIVOR.repulsor.radius).toBeCloseTo(44.8875, 6);
+    expect(SURVIVOR.repulsor.damage).toBeCloseTo(30, 6);
+    expect(SURVIVOR.repulsor.push).toBeCloseTo(39.9, 6);
     expect(SURVIVOR.megaMoveMul).toBeCloseTo(1.44, 6);
-    expect(SURVIVOR.boomerang.curveBulge).toBeCloseTo(0.32, 6);
+    expect(SURVIVOR.boomerang.curveBulge).toBeCloseTo(0.55, 6);
     expect(SURVIVOR.bossBodyContactPad).toBeCloseTo(1.65, 6);
     expect(SURVIVOR.bossRangedVisualMul).toBe(4);
     expect(SURVIVOR.ship.exhaustVisualScale).toBeCloseTo(3.7, 6);
@@ -2898,7 +2899,7 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(weaponStatsAtLevel('pulse', 12).cadence).toBe(WEAPONS.pulse.levels[4]!.cadence);
   });
 
-  it('Cosmic Boomerang is twice as large and does not return until it hits', () => {
+  it('Cosmic Boomerang is twice as large and always loops home on a curve', () => {
     expect(SURVIVOR.boomerang.visualRadiusMul).toBeCloseTo(3.1, 6);
     expect(WEAPONS.boomerang.levels[0]!.radius).toBeCloseTo(0.5, 6);
     const state = createSurvivorState('bee', null, 7043);
@@ -2909,16 +2910,21 @@ describe('Cosmic Cleanup playtest tuning', () => {
     state.weapons = [{ weaponId: 'boomerang', level: 1, cooldown: 0, focusDebt: 0, prototype: false }];
     let sawReturn = false;
     let sawDisc = false;
+    let maxLateral = 0;
     for (let i = 0; i < 400; i += 1) {
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, SURVIVOR.fixedDt);
       for (const p of state.projectiles) {
         if (!p.active || p.kind !== 'boomerang') continue;
         sawDisc = true;
-        if (p.returning || p.homeStraight) sawReturn = true;
+        if (p.returning) sawReturn = true;
+        const dx = p.x - p.originX;
+        const dz = p.z - p.originZ;
+        maxLateral = Math.max(maxLateral, Math.abs(dx * p.launchFz - dz * p.launchFx));
       }
     }
     expect(sawDisc).toBe(true);
-    expect(sawReturn).toBe(false);
+    expect(sawReturn).toBe(true);
+    expect(maxLateral).toBeGreaterThan(3);
   });
 
   it('gives Mech baseline 25% damage reduction', () => {

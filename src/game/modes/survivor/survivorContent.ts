@@ -110,7 +110,7 @@ export const SURVIVOR = {
    */
   hordeTravelMul: 1.38,
   /** Live close-range boss chase vs authored moveSpeed (2.6). Isolated from Titan / weapon benches. */
-  bossTravelMul: 4.7,
+  bossTravelMul: 2.35,
   playerRadius: 0.55,
   playerInvuln: 0.38,
   xpMagnetBase: 5.8,
@@ -149,7 +149,7 @@ export const SURVIVOR = {
   surgeRecovery: 13.5,
   /** Surge-spawned enemies only — never the standing horde. */
   /** Surge-only: stacked on authored speed so the flock outruns a kiting astronaut. */
-  surgeWaveSpeedBonus: 1.85,
+  surgeWaveSpeedBonus: 1.1375,
   /** Opening flock size; later minutes add more via surgePackSizeAt. */
   surgePackSize: 32,
   /** Recovery holds replacements until population falls to this fraction of target. */
@@ -720,8 +720,8 @@ export const SURVIVOR = {
    */
   boomerang: {
     turnDistancePerLife: 4.2,
-    /** Maximum lateral bow as a fraction of turn distance. A real crescent, not a lock-on. */
-    curveBulge: 0.32,
+    /** Maximum lateral bow as a fraction of turn distance. Live throws fly a closed oval. */
+    curveBulge: 0.55,
     /** Published close-rate path used by weapon benches and Titan isolation. */
     publishedCurveBulge: 0.04,
     /** Decorative silhouette only; collision remains the authored projectile radius. */
@@ -733,12 +733,12 @@ export const SURVIVOR = {
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
-    radius: 89.775,
-    damage: 60,
+    radius: 44.8875,
+    damage: 30,
     /** Player progression keeps the 30-second active relevant without clock scaling. */
     damagePerPlayerLevel: 0.15,
     maxDamageMul: 16,
-    push: 79.8,
+    push: 39.9,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
     mechRadiusMul: 1.25,
@@ -986,15 +986,14 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
   boomerang: {
     id: 'boomerang',
     name: 'Cosmic Boomerang',
-    description: 'Thrown disc that carves out, turns, and cuts back through the same lane.',
+    description: 'Thrown disc that loops out on a curve and comes back on the other side.',
     color: '#7ce8ff',
     levels: [
       /*
-       * The identity is the *return*: every throw is two passes through the same lane, so
-       * the weapon rewards throwing across the horde's approach rather than at whatever
-       * is nearest. Damage stays modest per hit because each throw gets two chances at
-       * every body it passes, and pierce is effectively unlimited within a leg — the
-       * limit is geometry, not a hit counter.
+       * The identity is the *return*: every throw loops out on a curve and comes back on
+       * the other side, so the weapon rewards throwing across the horde rather than at
+       * whatever is nearest. Damage stays modest per hit, and pierce is unlimited within
+       * a leg — the limit is geometry, not a hit counter.
        *
        * Growth comes from reach and turn distance through L4; the second disc is the
        * declared L5 breakpoint, thrown on a diverging bearing so Twin Orbit covers a

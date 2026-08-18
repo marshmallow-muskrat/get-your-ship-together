@@ -663,7 +663,7 @@ describe('§3 pressure director', () => {
   });
 
   it('gives the surge wave its own speed bonus, never the standing horde', () => {
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBe(1.85);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBe(1.1375);
     // The global curve is untouched by any surge that has been and gone.
     const before = enemySpeedMulAt(300);
     const { state } = runDirector(36, 100);

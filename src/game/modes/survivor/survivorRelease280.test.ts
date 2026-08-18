@@ -549,69 +549,71 @@ describe('§8 Cosmic Boomerang', () => {
       maxLateral = Math.max(maxLateral, Math.abs(dx * disc.launchFz - dz * disc.launchFx));
     }
     expect(disc).not.toBeNull();
-    expect(maxLateral).toBeGreaterThan(disc!.turnDistance * 0.22);
-    expect(maxLateral).toBeLessThan(disc!.turnDistance * 0.42);
+    expect(maxLateral).toBeGreaterThan(disc!.turnDistance * 0.4);
+    expect(maxLateral).toBeLessThan(disc!.turnDistance * 0.7);
   });
 
-  it('strikes each body once per leg, and gets two legs', () => {
+  it('cuts the outbound side and the return side of one closed loop', () => {
     /*
-     * The identity. Within a leg the limit is geometry, not a pierce counter, so a disc
-     * that overlaps a body for many frames still bills once — and clearing the hit list
-     * at the turn is what makes the return a genuine second opportunity rather than a
-     * free double-hit or a wasted trip home.
+     * A live throw is an oval, not a retraced lane. Each apex is visited once, so two
+     * bodies pinned on opposite sides each take exactly one hit from one throw.
      */
     const state = thrown(2881);
-    const target = state.enemies.find((e) => e.alive)!;
-    target.maxHealth = 1_000_000;
-    target.health = target.maxHealth;
+    const outbound = state.enemies.find((e) => e.alive)!;
+    const home = state.enemies.find((e) => e.alive && e !== outbound)!;
+    expect(home).toBeTruthy();
+    outbound.maxHealth = home!.maxHealth = 1_000_000;
+    outbound.health = home!.health = 1_000_000;
 
-    // Let exactly one throw leave the hand, then stop the weapon firing again — over a
-    // full flight the cadence would otherwise launch several discs and the count would
-    // measure the fire rate rather than the two-leg contract.
     let launched = false;
     for (let i = 0; i < 240 && !launched; i += 1) {
-      for (const e of state.enemies) if (e.alive && e !== target) e.alive = false;
+      for (const e of state.enemies) if (e.alive && e !== outbound && e !== home) e.alive = false;
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
       launched = state.projectiles.some((pr) => pr.active && pr.kind === 'boomerang');
     }
     expect(launched, 'no disc was thrown').toBe(true);
     state.weapons[0]!.cooldown = 1e9;
 
-    /*
-     * The body is pinned in the lane rather than left to chase. A chasing enemy ends up
-     * standing on the player, and the disc is caught at the player's radius — which is
-     * slightly wider than its own hit radius — so it despawns a fraction before it could
-     * strike something at point-blank. That is correct catch geometry, but it makes a
-     * chasing target the wrong instrument for measuring the two-leg contract.
-     */
     const disc = state.projectiles.find((pr) => pr.active && pr.kind === 'boomerang')!;
-    const u = 0.42;
-    const along = disc.turnDistance * u;
-    const px = -disc.launchFz;
-    const pz = disc.launchFx;
-    const side = Math.sin(Math.PI * u) * disc.turnDistance * SURVIVOR.boomerang.curveBulge * disc.curveSign;
-    const lane = {
-      x: disc.originX + disc.launchFx * along + px * side,
-      z: disc.originZ + disc.launchFz * along + pz * side,
+    const apex = (u: number) => {
+      const theta = Math.PI * u;
+      const forward = disc.turnDistance * 0.5 * (1 - Math.cos(theta));
+      const side = Math.sin(theta) * disc.turnDistance * SURVIVOR.boomerang.curveBulge * disc.curveSign;
+      return {
+        x: disc.originX + disc.launchFx * forward + -disc.launchFz * side,
+        z: disc.originZ + disc.launchFz * forward + disc.launchFx * side,
+      };
     };
-    const before = target.health;
-    let legs = 0;
-    let prevHealth = target.health;
+    const outLane = apex(0.5);
+    const backLane = apex(1.5);
+    outbound.speedMul = 0;
+    home!.speedMul = 0;
+    let outHits = 0;
+    let backHits = 0;
+    let prevOut = outbound.health;
+    let prevBack = home!.health;
     for (let i = 0; i < 400; i += 1) {
-      for (const e of state.enemies) if (e.alive && e !== target) e.alive = false;
-      target.x = lane.x;
-      target.z = lane.z;
+      for (const e of state.enemies) if (e.alive && e !== outbound && e !== home) e.alive = false;
+      outbound.x = outLane.x;
+      outbound.z = outLane.z;
+      home!.x = backLane.x;
+      home!.z = backLane.z;
       stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);
-      target.x = lane.x;
-      target.z = lane.z;
-      if (target.health < prevHealth) {
-        legs += 1;
-        prevHealth = target.health;
+      outbound.x = outLane.x;
+      outbound.z = outLane.z;
+      home!.x = backLane.x;
+      home!.z = backLane.z;
+      if (outbound.health < prevOut) {
+        outHits += 1;
+        prevOut = outbound.health;
+      }
+      if (home!.health < prevBack) {
+        backHits += 1;
+        prevBack = home!.health;
       }
     }
-    expect(before - target.health).toBeGreaterThan(0);
-    // Exactly two damage events from one throw: out and back.
-    expect(legs).toBe(2);
+    expect(outHits).toBe(1);
+    expect(backHits).toBe(1);
   }, 60_000);
 
   it('clears its hit list on a pooled reuse', () => {

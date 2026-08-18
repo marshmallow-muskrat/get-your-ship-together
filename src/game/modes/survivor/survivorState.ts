@@ -89,7 +89,7 @@ export type ProjectileKind =
   | 'rocket'
   | 'enemy'
   | 'bioplasma'
-  /** Cosmic Boomerang: flies out, turns, and comes back through the same lane. */
+  /** Cosmic Boomerang: flies out on a curve and loops back on the other side. */
   | 'boomerang'
   | 'boss-orb'
   | 'boss-fan'
@@ -131,11 +131,10 @@ export interface SurvivorProjectile {
   /**
    * Cosmic Boomerang flight (endless-2.8.0).
    *
-   * `returning` flips once the throw reaches its turn distance. `hitIds` is the set of
-   * entities already struck on the *current* leg and is cleared at the turn, which is
-   * what makes the return pass a genuine second opportunity rather than either a free
-   * double-hit on the way out or a wasted trip home. Bounded by the living entity count
-   * and reused in place on pool reuse.
+   * `returning` flips once the throw reaches its turn distance. Live throws always loop
+   * back; isolated benches still wait for a hit. `hitIds` is the set of entities already
+   * struck on the *current* leg and is cleared at the turn. Bounded by the living entity
+   * count and reused in place on pool reuse.
    */
   returning: boolean;
   originX: number;
@@ -150,9 +149,9 @@ export interface SurvivorProjectile {
   launchFz: number;
   /** Handedness of the curve. Twin Orbit deliberately uses opposite signs. */
   curveSign: -1 | 1;
-  /** True once this throw has struck a monster or boss. Return waits on this. */
+  /** True once this throw has struck a monster or boss. Isolated return still waits on this. */
   struck: boolean;
-  /** After an overshoot, fly straight home instead of rewinding the crescent. */
+  /** Isolated path only: after an overshoot, fly straight home. */
   homeStraight: boolean;
   hitIds: Set<number> | null;
   /**

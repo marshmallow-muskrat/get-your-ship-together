@@ -2030,10 +2030,9 @@ function fireWeapons(state: SurvivorState, dt: number): void {
       /*
        * Cosmic Boomerang: thrown along a chosen lane, not at a body.
        *
-       * Aim leads toward the current target so the outbound leg cuts through whatever is
-       * approaching, and the return leg then re-cuts the same lane from the other side.
-       * At Twin Orbit the pair diverges rather than doubling one lane, so the throw
-       * covers a cone.
+       * Aim leads toward the current target so the outbound curve cuts through whatever
+       * is approaching, and the return curve comes home on the other side. At Twin Orbit
+       * the pair diverges rather than doubling one loop, so the throw covers a cone.
        */
       const aim = selectWeaponTarget(state, slot, p.x, p.z, 20);
       const pos = targetPosition(aim);
@@ -3005,16 +3004,11 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
 
     if (proj.kind === 'boomerang') {
       /*
-       * Two legs through a crescent, not a lock-on.
-       *
-       * Outbound until the throw reaches `turnDistance`, bowing sideways like a thrown
-       * boomerang. It only reverses after a hit. The return rewinds the same crescent
-       * back to the origin; the last half-meter is a catch, not mid-flight homing.
+       * Live play is a closed oval: out on one side, back on the other, into the hand.
+       * Isolated benches keep the published crescent-and-rewind so close-rate stays put.
        *
        * `hitIds` is cleared at the turn. Within a leg each body is struck once however
-       * long the disc overlaps it, so there is no pierce counter to exhaust: the limit is
-       * geometry. Across the two legs each body gets exactly two chances, which is the
-       * weapon's whole identity.
+       * long the disc overlaps it, so there is no pierce counter to exhaust.
        */
       const player = state.player;
       const publishedPath = state.isolateLiveTravel || state.isolatePublishedWeapons;
@@ -3024,46 +3018,73 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
       const oldX = proj.x;
       const oldZ = proj.z;
       const turn = Math.max(0.01, proj.turnDistance);
-      if (proj.homeStraight) {
-        const hx = player.x - proj.x;
-        const hz = player.z - proj.z;
-        const hd = Math.hypot(hx, hz) || 1;
-        const step = spd * dt;
-        if (hd <= step + 0.45) {
-          proj.x = player.x;
-          proj.z = player.z;
-          caught = true;
+      if (publishedPath) {
+        if (proj.homeStraight) {
+          const hx = player.x - proj.x;
+          const hz = player.z - proj.z;
+          const hd = Math.hypot(hx, hz) || 1;
+          const step = spd * dt;
+          if (hd <= step + 0.45) {
+            proj.x = player.x;
+            proj.z = player.z;
+            caught = true;
+          } else {
+            proj.x += (hx / hd) * step;
+            proj.z += (hz / hd) * step;
+          }
+        } else if (!proj.returning) {
+          proj.flightDistance += spd * dt;
         } else {
-          proj.x += (hx / hd) * step;
-          proj.z += (hz / hd) * step;
+          proj.flightDistance = Math.max(0, proj.flightDistance - spd * dt);
         }
-      } else if (!proj.returning) {
-        proj.flightDistance += spd * dt;
+        if (!proj.homeStraight) {
+          const along = Math.min(proj.flightDistance, turn);
+          const extra = Math.max(0, proj.flightDistance - turn);
+          const u = along / turn;
+          const px = -proj.launchFz;
+          const pz = proj.launchFx;
+          const side =
+            Math.sin(Math.PI * u) * turn * SURVIVOR.boomerang.publishedCurveBulge * proj.curveSign;
+          const homeBlend = proj.returning ? 1 - u : 0;
+          proj.x =
+            proj.originX +
+            proj.launchFx * (along + extra) +
+            px * side +
+            (player.x - proj.originX) * homeBlend;
+          proj.z =
+            proj.originZ +
+            proj.launchFz * (along + extra) +
+            pz * side +
+            (player.z - proj.originZ) * homeBlend;
+        }
       } else {
-        proj.flightDistance = Math.max(0, proj.flightDistance - spd * dt);
-      }
-
-      if (!proj.homeStraight) {
-        const along = Math.min(proj.flightDistance, turn);
-        const extra = Math.max(0, proj.flightDistance - turn);
-        const u = along / turn;
+        proj.flightDistance += spd * dt;
+        const u = proj.flightDistance / turn;
+        if (!proj.returning && u >= 1) {
+          proj.returning = true;
+          proj.hitIds?.clear();
+          pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, {
+            radius: 1.35,
+          });
+        }
+        const theta = Math.PI * Math.max(0, Math.min(2, u));
+        const forward = turn * 0.5 * (1 - Math.cos(theta));
+        const side = Math.sin(theta) * turn * SURVIVOR.boomerang.curveBulge * proj.curveSign;
         const px = -proj.launchFz;
         const pz = proj.launchFx;
-        const bulge = publishedPath
-          ? SURVIVOR.boomerang.publishedCurveBulge
-          : SURVIVOR.boomerang.curveBulge;
-        const side = Math.sin(Math.PI * u) * turn * bulge * proj.curveSign;
-        const homeBlend = publishedPath && proj.returning ? 1 - u : 0;
+        const returnT = Math.max(0, Math.min(1, u - 1));
         proj.x =
           proj.originX +
-          proj.launchFx * (along + extra) +
+          proj.launchFx * forward +
           px * side +
-          (player.x - proj.originX) * homeBlend;
+          (player.x - proj.originX) * returnT;
         proj.z =
           proj.originZ +
-          proj.launchFz * (along + extra) +
+          proj.launchFz * forward +
           pz * side +
-          (player.z - proj.originZ) * homeBlend;
+          (player.z - proj.originZ) * returnT;
+        const hd = Math.hypot(player.x - proj.x, player.z - proj.z);
+        if (u >= 1.96 || (proj.returning && hd <= 0.5)) caught = true;
       }
       proj.vx = (proj.x - oldX) / Math.max(dt, 1e-6);
       proj.vz = (proj.z - oldZ) / Math.max(dt, 1e-6);
@@ -3103,15 +3124,16 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
         damageBoss(state, proj.damage * SURVIVOR.boomerang.bossDamageMul, { boss: b, src: projSrc(proj) });
       }
 
-      if (!proj.returning && !proj.homeStraight && proj.struck && proj.flightDistance >= turn - 1e-6) {
-        proj.returning = true;
-        proj.hitIds?.clear();
-        if (publishedPath && proj.flightDistance > turn + 0.25) proj.homeStraight = true;
-        else proj.flightDistance = turn;
-        pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, { radius: 1.35 });
-      } else if (proj.returning && !proj.homeStraight && proj.flightDistance <= (publishedPath ? 1e-6 : 0.55)) {
-        if (publishedPath) caught = true;
-        else proj.homeStraight = true;
+      if (publishedPath) {
+        if (!proj.returning && !proj.homeStraight && proj.struck && proj.flightDistance >= turn - 1e-6) {
+          proj.returning = true;
+          proj.hitIds?.clear();
+          if (proj.flightDistance > turn + 0.25) proj.homeStraight = true;
+          else proj.flightDistance = turn;
+          pushEffect(state, 'boomerang-rift', proj.x, proj.z, 0.32, '#ffd46a', 1.35, { radius: 1.35 });
+        } else if (proj.returning && !proj.homeStraight && proj.flightDistance <= 1e-6) {
+          caught = true;
+        }
       }
 
       if (gone || caught) proj.active = false;
