@@ -353,7 +353,7 @@ describe('§5 upgrade cards', () => {
 
     expect(hudSource).toMatch(/className = 'sv-card-badge'/);
     expect(hudSource).toMatch(/Signature Weapon/);
-    expect(hudSource).toMatch(/shownLevel = signature \? state\.level : w\.level/);
+    expect(hudSource).toMatch(/L\$\{w\.level\} · E\$\{state\.level\}/);
     expect(cssSource).not.toMatch(/--card-kind:/);
     expect(hudSource).not.toMatch(/function simplifyCardBadge/);
     expect(hudSource).toMatch(/cardBadgeText\(card\?\.category/);

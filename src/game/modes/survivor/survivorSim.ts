@@ -34,7 +34,6 @@ import {
   MEGA_PROTOCOLS,
   computeShieldPoints,
   regenPerSecondAtLevel,
-  weaponDamagePreview,
   weaponStatsAtLevel,
   signatureLevelMul,
   surgePackSizeAt,
@@ -444,11 +443,16 @@ function mechSignatureScale(
   };
 }
 
-/** Titan comparisons keep the published Pulse / Pulsar footprints. */
+/** Titan and weapon benches keep the published Pulse / Pulsar / Orbital footprints. */
 function publishedRadius(state: SurvivorState, weaponId: WeaponId, radius: number): number {
-  if (!state.isolateLiveTravel) return radius;
-  if (weaponId === 'pulsar') return Math.min(radius, 8 * areaMul(state));
+  if (weaponId === 'pulsar') {
+    if (state.isolateLiveTravel) return Math.min(radius, 8 * areaMul(state));
+    if (state.isolatePublishedWeapons) return radius;
+    return Math.min(radius, 12 * areaMul(state));
+  }
+  if (!state.isolateLiveTravel && !state.isolatePublishedWeapons) return radius;
   if (weaponId === 'pulse') return radius * 0.5;
+  if (weaponId === 'orbital') return radius * SURVIVOR.orbital.publishedCoreMul;
   return radius;
 }
 
@@ -458,7 +462,9 @@ function weaponCombatScale(
 ): { damage: number; area: number; visualArea: number; cadence: number; mech: boolean } {
   const mech = mechSignatureScale(state, weaponId);
   const growth =
-    weaponId === heroStarterWeapon(state.heroId)
+    weaponId === heroStarterWeapon(state.heroId) &&
+    !state.isolateLiveTravel &&
+    !state.isolatePublishedWeapons
       ? signatureLevelMul(state.level)
       : { damage: 1, area: 1 };
   return {
@@ -2047,17 +2053,16 @@ function fireWeapons(state: SurvivorState, dt: number): void {
         const launchFx = Math.sin(ang);
         const launchFz = Math.cos(ang);
         const curveSign: -1 | 1 = count > 1 ? (i % 2 === 0 ? -1 : 1) : state.nextId % 2 === 0 ? 1 : -1;
+        const turn = (def.life ?? 2.6) * cfgB.turnDistancePerLife * area;
         resetProj(proj, state, 'boomerang', 'boomerang', p.x, p.z, Math.sin(ang) * spd, Math.cos(ang) * spd, {
           damage: dmg,
           radius: (def.radius ?? 0.5) * area,
           visualRadius: (def.radius ?? 0.5) * area * SURVIVOR.boomerang.visualRadiusMul,
-          life: def.life ?? 2.6,
+          life: (2 * turn) / Math.max(1, spd) + 0.45,
           color: WEAPONS.boomerang.color,
           originX: p.x,
           originZ: p.z,
-          // Reach scales with the authored life, so a longer throw goes further rather
-          // than merely lingering at the same distance.
-          turnDistance: (def.life ?? 2.6) * cfgB.turnDistancePerLife * area,
+          turnDistance: turn,
           flightDistance: 0,
           flightSpeed: spd,
           launchFx,
@@ -2588,7 +2593,7 @@ function fireOrbitalLance(
     const pos = boss ? { x: boss.x, z: boss.z } : elite ? { x: elite.x, z: elite.z } : densestPoint(state, p.x, p.z);
     const tx = pos.x;
     const tz = pos.z;
-    const radius = (def.radius ?? 2.1) * area;
+    const radius = publishedRadius(state, 'orbital', (def.radius ?? 2.1) * area);
     resolveOrbitalImpact(state, tx, tz, dmg, radius);
   }
 }
@@ -3085,6 +3090,7 @@ function updateProjectiles(state: SurvivorState, dt: number): void {
           (player.z - proj.originZ) * returnT;
         const hd = Math.hypot(player.x - proj.x, player.z - proj.z);
         if (u >= 1.96 || (proj.returning && hd <= 0.5)) caught = true;
+        if (proj.life < 0.12 && u < 1.96) proj.life = 0.12;
       }
       proj.vx = (proj.x - oldX) / Math.max(dt, 1e-6);
       proj.vz = (proj.z - oldZ) / Math.max(dt, 1e-6);
@@ -4293,12 +4299,14 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
       const w = state.weapons[choices.length % state.weapons.length]!;
       const nextLv = w.level + 1;
       const fam = WEAPONS[w.weaponId];
+      const fillCard = weaponUpgradeCard(w.weaponId, w.level);
       if (
         tryAdd({
           kind: 'weapon',
           id: `w-fill-${w.weaponId}-${nextLv}-${choices.length}`,
           title: `${fam.name} L${nextLv}`,
-          body: weaponDamagePreview(w.weaponId, w.level, nextLv),
+          body: cardToChoiceText(fillCard).body,
+          card: fillCard,
           weaponId: w.weaponId,
         })
       ) {
@@ -4306,26 +4314,30 @@ export function generateChoices(state: SurvivorState): UpgradeChoice[] {
       }
     }
     const n = choices.length;
+    const hull = passiveCard('max-health', state.passives['max-health'] ?? 0, state.player.maxHealth);
     tryAdd({
       kind: 'passive',
       id: `p-hard-fill-${n}`,
-      title: `Hull Plating L${(state.passives['max-health'] ?? 0) + 1}`,
-      body: 'Integrity',
+      title: hull.name,
+      body: cardToChoiceText(hull).body,
+      card: hull,
       passiveId: 'max-health',
     });
     if (choices.length === n) break;
   }
   while (choices.length < 3) {
+    const hull = passiveCard('max-health', state.passives['max-health'] ?? 0, state.player.maxHealth);
     choices.push({
       kind: 'passive',
       id: `p-pad-${choices.length}`,
-      title: `Hull Plating L${(state.passives['max-health'] ?? 0) + 1}`,
-      body: 'Integrity',
+      title: hull.name,
+      body: cardToChoiceText(hull).body,
+      card: hull,
       passiveId: 'max-health',
     });
   }
   const picked = choices.slice(0, 3);
-  state.recentOfferKeys = [...state.recentOfferKeys, ...picked.map(recencyKey)].slice(-9);
+  state.recentOfferKeys = [...state.recentOfferKeys, ...picked.map(recencyKey)].slice(-5);
   return picked;
 }
 
@@ -5035,7 +5047,7 @@ function launchFleetPass(state: SurvivorState, pass: number): void {
   const travel = fleetTravelTime(state);
   const shipColors = ['#f5ae42', '#ff7c9a', '#71f6da', '#ff876b'] as const;
   const count = state.isolateLiveTravel ? 1 : 4;
-  const span = half * 1.35;
+  const span = half * 0.72;
   for (let i = 0; i < count; i += 1) {
     const u = count === 1 ? 0 : (i / (count - 1) - 0.5) * 2;
     const ox = px * span * u;
@@ -5327,10 +5339,8 @@ function pickGunshipLane(state: SurvivorState): { x0: number; z0: number; x1: nu
       score += e.isMiniboss ? 5 : e.isElite ? 2.5 : 1;
     }
     for (const boss of livingBosses(state)) {
-      // Match the collision corridor used during the actual strike. A broader
-      // scoring width can select a plausible-looking lane that can never land.
       if (distPointToSegment(boss.x, boss.z, entry.x, entry.z, exit.x, exit.z) <= SURVIVOR.gunship.laneHalfWidth + boss.colliderRadius * 0.5) {
-        score += boss.isMega ? 5 : 6;
+        score -= boss.isMega ? 4 : 3;
       }
     }
     const face = Math.max(0, dir.x * (state.player.facingX / facingLen) + dir.z * (state.player.facingZ / facingLen));
@@ -6127,7 +6137,7 @@ function ensureUnlocksAndCache(state: SurvivorState, dt: number): void {
     const r = SURVIVOR.cacheCollectRadius;
     if (dx * dx + dz * dz <= r * r && state.phase === 'playing') {
       openProtocolCache(state);
-    } else if (state.cache.life <= 0 && !state.cache.mega) {
+    } else if (state.cache.life <= 0) {
       state.cache.active = false;
     }
   }
@@ -6221,8 +6231,8 @@ function spawnProtocolCache(state: SurvivorState, mega: boolean): void {
     active: true,
     x: pick.x,
     z: pick.z,
-    life: mega ? 999 : SURVIVOR.cacheLifetime,
-    maxLife: mega ? 999 : SURVIVOR.cacheLifetime,
+    life: mega ? SURVIVOR.megaCacheLifetime : SURVIVOR.cacheLifetime,
+    maxLife: mega ? SURVIVOR.megaCacheLifetime : SURVIVOR.cacheLifetime,
     mega,
     potency: mega ? 1.5 : 1,
   };
@@ -6365,7 +6375,7 @@ export function applyShipBossRam(state: SurvivorState): void {
   const p = state.player;
   if (!p.alive || p.form !== 'ship') return;
   const power = thrusterPower(state);
-  const reach = SURVIVOR.ship.radius;
+  const reach = SURVIVOR.ship.radius + SURVIVOR.bossBodyContactPad;
   for (const b of state.bosses) {
     if (!b.active || b.state === 'dead') continue;
     if (b.shipRamCd > 0) continue;

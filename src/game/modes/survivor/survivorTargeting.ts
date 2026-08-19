@@ -1,4 +1,4 @@
-import { HORDE, bossFocusBaseChance } from './survivorContent';
+import { HORDE, SURVIVOR, bossFocusBaseChance } from './survivorContent';
 import type { SurvivorBoss, SurvivorEnemy, SurvivorState, SurvivorWeaponSlot } from './survivorState';
 import { aliveBossCount } from './survivorState';
 
@@ -100,13 +100,35 @@ export function nearestElite(
   return best;
 }
 
-const CLOSE_THREAT_RANGE = 3.25;
+/** Extra reach past contact before a body can steal aim from a boss. */
+const FODDER_PEEL_PAD = 0.45;
+const ELITE_PEEL_PAD = 0.9;
+
+function imminentThreat(
+  state: SurvivorState,
+  x: number,
+  z: number,
+): SurvivorEnemy | null {
+  let best: SurvivorEnemy | null = null;
+  let bestD = Infinity;
+  for (const e of state.enemies) {
+    if (!e.alive) continue;
+    const pad = e.isElite || e.isMiniboss ? ELITE_PEEL_PAD : FODDER_PEEL_PAD;
+    const reach = SURVIVOR.playerRadius + e.radius + pad;
+    const d = dist2(x, z, e.x, e.z);
+    if (d <= reach * reach && d < bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best;
+}
 
 /**
  * Shared boss-aware target selection for automatic weapons.
  *
- * Live play shoots a close threat first, then the boss, then elites. Isolated
- * benches keep the published nearest-enemy / focus-debt lottery.
+ * Live play peels only for a body about to contact, then the boss, then elites.
+ * Isolated benches keep the published nearest-enemy / focus-debt lottery.
  */
 export function selectWeaponTarget(
   state: SurvivorState,
@@ -126,7 +148,7 @@ export function selectWeaponTarget(
     if (wantBoss) return { kind: 'boss', boss };
     return { kind: 'enemy', enemy };
   }
-  const close = nearestEnemyOnly(state, x, z, CLOSE_THREAT_RANGE);
+  const close = imminentThreat(state, x, z);
   if (close) return { kind: 'enemy', enemy: close };
   if (boss) return { kind: 'boss', boss };
   const elite = nearestElite(state, x, z, maxR);

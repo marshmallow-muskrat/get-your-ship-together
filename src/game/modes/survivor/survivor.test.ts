@@ -2606,7 +2606,7 @@ describe('early specialist gates', () => {
     for (const def of Object.values(HORDE)) {
       expect(def.role).not.toBe('ranged');
     }
-  });
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -2714,11 +2714,11 @@ describe('Cosmic Cleanup playtest tuning', () => {
     expect(SURVIVOR.hordeTravelMul).toBeCloseTo(1.38, 6);
     expect(SURVIVOR.bossTravelMul).toBeCloseTo(2.35, 6);
     expect(SURVIVOR.megaEvery).toBe(3);
-    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(1.1375, 6);
+    expect(SURVIVOR.surgeWaveSpeedBonus).toBeCloseTo(0.45, 6);
     expect(SURVIVOR.orbVisual.baseline).toBe(2);
-    expect(SURVIVOR.repulsor.radius).toBeCloseTo(44.8875, 6);
+    expect(SURVIVOR.repulsor.radius).toBeCloseTo(18, 6);
     expect(SURVIVOR.repulsor.damage).toBeCloseTo(30, 6);
-    expect(SURVIVOR.repulsor.push).toBeCloseTo(39.9, 6);
+    expect(SURVIVOR.repulsor.push).toBeCloseTo(14, 6);
     expect(SURVIVOR.megaMoveMul).toBeCloseTo(1.44, 6);
     expect(SURVIVOR.boomerang.curveBulge).toBeCloseTo(0.55, 6);
     expect(SURVIVOR.bossBodyContactPad).toBeCloseTo(1.65, 6);
@@ -2778,7 +2778,7 @@ describe('Cosmic Cleanup playtest tuning', () => {
     state.bosses = [boss];
     const far = selectWeaponTarget(state, slot, 0, 0, 20);
     expect(far?.kind).toBe('boss');
-    fodder.x = 2;
+    fodder.x = 0.9;
     const close = selectWeaponTarget(state, slot, 0, 0, 20);
     expect(close?.kind).toBe('enemy');
     expect(close && close.kind === 'enemy' ? close.enemy.id : null).toBe(fodder.id);

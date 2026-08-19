@@ -603,6 +603,7 @@ export function bossTimeToKill(opts: {
   const heroId = opts.heroId ?? 'bee';
   const form = opts.form ?? 'astronaut';
   const state = createSurvivorState(heroId, null, 0x51f0 + opts.bossIndex);
+  state.isolatePublishedWeapons = true;
   state.time = bossTimeForIndex(opts.bossIndex) - 0.02;
   state.nextBossIndex = opts.bossIndex;
   state.nextBossTime = bossTimeForIndex(opts.bossIndex);

@@ -1016,8 +1016,8 @@ export class SurvivorHud {
         const proto = w.prototype || fam.prototype ? ' · PROTO' : '';
         const signature = w.weaponId === heroStarterWeapon(state.heroId);
         const sigLabel = signature ? ' · Signature Weapon' : '';
-        const shownLevel = signature ? state.level : w.level;
-        return `<div class="sv-build-item${signature ? ' signature' : ''}" style="--wep:${fam.color}"><span>${fam.name}${sigLabel}${proto}${ocBit}</span><strong>L${shownLevel}</strong></div>`;
+        const shownLevel = signature ? `L${w.level} · E${state.level}` : `L${w.level}`;
+        return `<div class="sv-build-item${signature ? ' signature' : ''}" style="--wep:${fam.color}"><span>${fam.name}${sigLabel}${proto}${ocBit}</span><strong>${shownLevel}</strong></div>`;
       })
       .join('');
     const pass = Object.entries(state.passives)

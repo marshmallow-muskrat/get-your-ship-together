@@ -195,10 +195,14 @@ function pat(id: BossPatternId): PatternCfg {
 
 /** Angular spread between adjacent fan projectiles. */
 const FAN_SPREAD = 0.28;
-/** Fan projectile collision radius (visual radius matches exactly). */
+/** Authored fan projectile radius; live collision/visual is `bossRangedRadius`. */
 const FAN_PROJ_RADIUS = 0.42;
-/** Breach orb collision radius (visual radius matches exactly). */
+/** Authored breach-orb radius; live collision/visual is `bossRangedRadius`. */
 const ORB_RADIUS = 0.65;
+
+function bossRangedRadius(authored: number): number {
+  return authored * SURVIVOR.bossRangedVisualMul;
+}
 /** Aerial strafe impact radius — telegraph, visual and damage all use this. */
 const STRAFE_IMPACT_RADIUS = 1.35;
 const STRAFE_DROPS = 6;
@@ -223,7 +227,7 @@ function dmgScale(b: SurvivorBoss): number {
 
 function recScale(state: SurvivorState, b: SurvivorBoss): number {
   const phase = bossPhaseFromHealth(b.health, b.maxHealth);
-  const live = state.isolateLiveTravel ? 1 : 0.52;
+  const live = state.isolateLiveTravel ? 1 : 0.78;
   return b.recoveryMul * SURVIVOR_BOSS.phaseMods[phase].recoveryMul * live;
 }
 
@@ -275,7 +279,7 @@ function finishPattern(state: SurvivorState, b: SurvivorBoss, recovery: number):
    */
   if (b.pendingPhaseTransition) onPhaseTransitionReady?.(state, b);
   if (b.previousPattern && COMMITTED_TRAVERSAL[b.previousPattern]) {
-    b.traversalBodyLock = 2.8;
+    b.traversalBodyLock = b.timer + 0.85;
   }
 }
 
@@ -424,7 +428,7 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
       const mod = SURVIVOR_BOSS.phaseMods[phase];
       const count = (cfg.count ?? 5) + mod.fanCountAdd + b.fanAdd;
       b.patternParam = count;
-      const halfAngle = ((count - 1) / 2) * FAN_SPREAD + Math.atan2(FAN_PROJ_RADIUS, 4);
+      const halfAngle = ((count - 1) / 2) * FAN_SPREAD + Math.atan2(bossRangedRadius(FAN_PROJ_RADIUS), 4);
       const speed = cfg.speed ?? 10;
       addAttack(
         state,
@@ -461,7 +465,7 @@ function beginBossPattern(state: SurvivorState, b: SurvivorBoss, pattern: BossPa
         state,
         b,
         pattern,
-        facingLine(b.x, b.z, b.lockFx, b.lockFz, 14, ORB_RADIUS),
+        facingLine(b.x, b.z, b.lockFx, b.lockFz, 14, bossRangedRadius(ORB_RADIUS)),
         warn,
       );
       break;
@@ -764,9 +768,8 @@ function updateActive(
           if (!proj) break;
           api.resetProj(proj, state, 'boss-fan', null, b.x, b.z, Math.sin(a) * speed, Math.cos(a) * speed, {
             damage: (cfg.damage ?? 12) * scale,
-            radius: FAN_PROJ_RADIUS,
-            // Visible size equals collision size.
-            visualRadius: FAN_PROJ_RADIUS,
+            radius: bossRangedRadius(FAN_PROJ_RADIUS),
+            visualRadius: bossRangedRadius(FAN_PROJ_RADIUS),
             life: 2.6,
             owner: 'enemy',
             color: '#ff4466',
@@ -839,8 +842,8 @@ function updateActive(
             b.lockFz * speed,
             {
               damage: (cfg.damage ?? 18) * scale,
-              radius: ORB_RADIUS,
-              visualRadius: ORB_RADIUS,
+              radius: bossRangedRadius(ORB_RADIUS),
+              visualRadius: bossRangedRadius(ORB_RADIUS),
               life: 4.5,
               owner: 'enemy',
               color: '#ff2244',
@@ -864,8 +867,8 @@ function updateActive(
               Math.cos(side) * speed,
               {
                 damage: (cfg.damage ?? 18) * scale * 0.85,
-                radius: ORB_RADIUS,
-                visualRadius: ORB_RADIUS,
+                radius: bossRangedRadius(ORB_RADIUS),
+                visualRadius: bossRangedRadius(ORB_RADIUS),
                 life: 4.2,
                 owner: 'enemy',
                 color: '#ff4466',
@@ -1162,18 +1165,22 @@ function updateActive(
  * authored so in-fight timing and Titan comparisons do not drift; kiting across
  * the station is what felt like the boss had given up.
  */
-function bossCatchupMul(state: SurvivorState, dist: number, isMega: boolean): number {
+function bossCatchupMul(state: SurvivorState, dist: number, isMega: boolean, moveMul = 1): number {
   if (state.isolateLiveTravel) {
     const start = 12;
     if (dist <= start) return 1;
     const extra = (dist - start) / 14;
     return Math.min(isMega ? 2.4 : 2.15, 1 + extra);
   }
-  const travel = SURVIVOR.bossTravelMul;
+  const baseSpeed = SURVIVOR_BOSS.moveSpeed * Math.max(0.1, moveMul);
+  const inFight = isMega
+    ? Math.min(SURVIVOR.bossTravelMul, (0.9 * SURVIVOR.playerSpeed) / baseSpeed)
+    : SURVIVOR.bossTravelMul;
+  const farCap = isMega ? 3.5 : 3.6;
   const start = 14;
-  if (dist <= start) return travel;
+  if (dist <= start) return inFight;
   const extra = (dist - start) / 8;
-  return Math.min(isMega ? 12.6 : 7.2, travel + extra);
+  return Math.min(farCap, inFight + extra);
 }
 
 /** Recovery movement when far and no locked telegraph. */
@@ -1182,39 +1189,16 @@ function updateRecoverMove(state: SurvivorState, b: SurvivorBoss, dt: number, ap
   const dx = p.x - b.x;
   const dz = p.z - b.z;
   const dist = Math.hypot(dx, dz) || 1;
-  if (dist > 3.2) {
+  const slamReach = b.colliderRadius + SURVIVOR.playerRadius + SURVIVOR.bossBodyContactPad;
+  if (dist > slamReach) {
     const recoverMul = state.isolateLiveTravel ? 0.45 : 1.12;
-    const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * recoverMul * bossCatchupMul(state, dist, b.isMega);
+    const spd = SURVIVOR_BOSS.moveSpeed * b.moveMul * recoverMul * bossCatchupMul(state, dist, b.isMega, b.moveMul);
     b.x += (dx / dist) * spd * dt;
     b.z += (dz / dist) * spd * dt;
     const c = api.clampArena(b.x, b.z, b.colliderRadius);
     b.x = c.x;
     b.z = c.z;
   }
-}
-
-function advanceBossTowardPlayer(
-  state: SurvivorState,
-  b: SurvivorBoss,
-  dt: number,
-  api: BossSimApi,
-  speedFrac: number,
-): void {
-  const p = state.player;
-  const dx = p.x - b.x;
-  const dz = p.z - b.z;
-  const dist = Math.hypot(dx, dz) || 1;
-  if (dist <= 3.4) return;
-  const spd =
-    SURVIVOR_BOSS.moveSpeed *
-    b.moveMul *
-    speedFrac *
-    bossCatchupMul(state, dist, b.isMega);
-  b.x += (dx / dist) * spd * dt;
-  b.z += (dz / dist) * spd * dt;
-  const c = api.clampArena(b.x, b.z, b.colliderRadius);
-  b.x = c.x;
-  b.z = c.z;
 }
 
 /**
@@ -1279,12 +1263,13 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
   const mod = SURVIVOR_BOSS.phaseMods[phase];
 
   if (b.state === 'idle') {
-    if (dist > 5) {
+    const slamReach = b.colliderRadius + SURVIVOR.playerRadius + SURVIVOR.bossBodyContactPad;
+    if (dist > slamReach) {
       const spd =
         SURVIVOR_BOSS.moveSpeed *
         b.moveMul *
         (1 + (phase - 1) * 0.08) *
-        bossCatchupMul(state, dist, b.isMega);
+        bossCatchupMul(state, dist, b.isMega, b.moveMul);
       b.x += b.facingX * spd * dt;
       b.z += b.facingZ * spd * dt;
       const c = api.clampArena(b.x, b.z, b.colliderRadius);
@@ -1300,10 +1285,7 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
 
   if (b.state === 'windup') {
     b.patternElapsed += dt;
-    if (!state.isolateLiveTravel && !lockedMove) {
-      advanceBossTowardPlayer(state, b, dt, api, 0.55);
-    }
-    // Do not retarget locked patterns
+    // Stay planted so the warning is the volume that becomes dangerous.
     if (b.timer <= 0 && b.pattern) {
       activateBossPattern(state, b);
     }
@@ -1323,9 +1305,6 @@ export function updateOneBoss(state: SurvivorState, b: SurvivorBoss, dt: number,
       b.timer = 0.4;
       fadeBossAttacks(state, b.id);
       return;
-    }
-    if (!state.isolateLiveTravel && !lockedMove) {
-      advanceBossTowardPlayer(state, b, dt, api, 0.42);
     }
     updateActive(state, b, dt, api);
     // Absolute safety: if somehow still active with timer long expired

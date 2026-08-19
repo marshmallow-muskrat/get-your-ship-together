@@ -149,7 +149,7 @@ export const SURVIVOR = {
   surgeRecovery: 13.5,
   /** Surge-spawned enemies only — never the standing horde. */
   /** Surge-only: stacked on authored speed so the flock outruns a kiting astronaut. */
-  surgeWaveSpeedBonus: 1.1375,
+  surgeWaveSpeedBonus: 0.45,
   /** Opening flock size; later minutes add more via surgePackSizeAt. */
   surgePackSize: 32,
   /** Recovery holds replacements until population falls to this fraction of target. */
@@ -177,6 +177,8 @@ export const SURVIVOR = {
   cacheLeadBeforeBoss: 15,
   /** Expanded-station routing window; +7s from the playtest baseline. */
   cacheLifetime: 45,
+  /** Mega caches last longer than ordinary ones, but they do expire. */
+  megaCacheLifetime: 90,
   cacheOfferDuration: 0,
   /** Collection radius for Protocol Cache (world units). */
   cacheCollectRadius: 3.25,
@@ -330,14 +332,10 @@ export const SURVIVOR = {
     fireInterval: 0.16,
     laneHalfWidth: 16.4,
     enemyDamage: 38,
-    bossDamage: 95,
     impactRadius: 7.6,
     flyHeight: 6.5,
     /** Cache flyby silhouette; 2× the previous ship so the doubled corridor reads. */
     visualScale: 1.56,
-    /** Percentage damage scales with every boss health curve automatically. */
-    bossHealthFraction: 0.1,
-    megaHealthFraction: 0.05,
     /** Earned breathing room after the pass; replacement pressure nearly stops. */
     spawnSuppressDuration: 6.5,
     spawnSuppressRateMul: 0.05,
@@ -672,6 +670,8 @@ export const SURVIVOR = {
     bossChainMul: 0.85,
   },
   orbital: {
+    /** Isolated benches keep the pre-x2 core (half of the live authored radius). */
+    publishedCoreMul: 0.5,
     /** Shockwave radius as a multiple of the authored core radius. */
     shockwaveRadiusMul: 1.6,
     /** Shockwave damage as a fraction of the central impact (design band 35-40%). */
@@ -733,12 +733,12 @@ export const SURVIVOR = {
   repulsor: {
     /** Final: prior 13.5/12 × 1.33, 30s CD */
     cooldown: 30,
-    radius: 44.8875,
+    radius: 18,
     damage: 30,
     /** Player progression keeps the 30-second active relevant without clock scaling. */
     damagePerPlayerLevel: 0.15,
     maxDamageMul: 16,
-    push: 39.9,
+    push: 14,
     elitePushMul: 0.4,
     minibossPushMul: 0.18,
     mechRadiusMul: 1.25,
@@ -1196,11 +1196,11 @@ export const WEAPONS: Record<WeaponId, WeaponFamily> = {
       // hit strength (304 max hit) — it was coverage: 2.6% of a 21:18 run because a
       // 2.1-2.6 radius simply missed most of what was on screen. `radius` is the
       // high-damage core; the wider shockwave is derived from it in SURVIVOR.orbital.
-      { level: 1, damage: 140, cadence: 4.2, count: 1, radius: 12.8, life: 0.85 },
-      { level: 2, damage: 168, cadence: 4.0, count: 1, radius: 13.8, life: 0.8 },
-      { level: 3, damage: 205, cadence: 3.8, count: 1, radius: 14.8, life: 0.78 },
-      { level: 4, damage: 250, cadence: 3.6, count: 1, radius: 15.8, life: 0.72 },
-      { tier: 'Judgment Array', level: 5, damage: 290, cadence: 5.9, count: 2, radius: 17.0, life: 0.68 },
+      { level: 1, damage: 140, cadence: 4.2, count: 1, radius: 6.4, life: 0.85 },
+      { level: 2, damage: 168, cadence: 4.0, count: 1, radius: 6.9, life: 0.8 },
+      { level: 3, damage: 205, cadence: 3.8, count: 1, radius: 7.4, life: 0.78 },
+      { level: 4, damage: 250, cadence: 3.6, count: 1, radius: 7.9, life: 0.72 },
+      { tier: 'Judgment Array', level: 5, damage: 290, cadence: 5.9, count: 2, radius: 8.5, life: 0.68 },
     ],
   },
 
@@ -2040,7 +2040,10 @@ export type BossPhase = 1 | 2 | 3;
 
 export const SURVIVOR_BOSS = {
   ...BOSS_DEMON,
-  /** Base health for first endless boss; scaled by bossDifficultyFor(n). */
+  /**
+   * Legacy pattern-table HP. Live spawns use `SURVIVOR.firstBossBaseHealth` (3000).
+   * Keep this as a phase-fraction fixture, not a spawn value.
+   */
   maxHealth: 5600,
   phase2Threshold: 0.66,
   phase3Threshold: 0.33,

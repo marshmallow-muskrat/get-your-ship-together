@@ -457,7 +457,10 @@ describe('§3 Containment Field and Weapon Overclock, audited weapon by weapon',
   it('Pulsar Core: the discharge ring is the damage radius, at every field level', () => {
     for (const { field, haste } of MATRIX) {
       const state = armed('pulsar', 5, field, haste);
-      const want = effectiveRadius('pulsar', 5, field);
+      const want = Math.min(
+        effectiveRadius('pulsar', 5, field),
+        12 * (1 + field * FIELD_PER_LEVEL),
+      );
       let seen = 0;
       for (let i = 0; i < 400 && seen === 0; i += 1) {
         stepSurvivor(state, EMPTY_SURVIVOR_INPUT, DT);

@@ -999,9 +999,9 @@ export class SurvivorRenderer {
             : p.kind === 'bioplasma'
               ? 1.45
               : p.kind === 'boss-orb'
-                ? Math.max(2.8, (p.visualRadius || p.radius) * 4.2 * SURVIVOR.bossRangedVisualMul)
+                ? Math.max(0.12, p.visualRadius || p.radius)
                 : p.kind === 'boss-fan'
-                  ? Math.max(1.8, (p.visualRadius || p.radius) * 3.5 * SURVIVOR.bossRangedVisualMul)
+                  ? Math.max(0.12, (p.visualRadius || p.radius) / 0.42)
                   : p.kind === 'bolt'
                     ? Math.max(0.95, (p.visualRadius || p.radius) / 0.2)
                     : p.kind === 'rotary-round'
@@ -1017,9 +1017,7 @@ export class SurvivorRenderer {
         mesh.scale.setScalar(Math.max(0.12, p.visualRadius || p.radius));
       } else if (p.kind === 'boss-orb' || p.kind === 'boss-fan') {
         const vis = Math.max(0.12, p.visualRadius || p.radius);
-        mesh.scale.setScalar(
-          vis * (p.kind === 'boss-orb' ? 4.2 : 3.5) * SURVIVOR.bossRangedVisualMul,
-        );
+        mesh.scale.setScalar(p.kind === 'boss-orb' ? vis : vis / 0.42);
       } else if (p.kind === 'orbital-marker') {
         mesh.scale.setScalar(Math.max(0.35, (p.visualRadius || p.radius) * 1.6));
       }

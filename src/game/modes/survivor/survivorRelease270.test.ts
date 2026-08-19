@@ -566,11 +566,11 @@ describe('§6 Orbital Lance strikes two zones', () => {
   }
 
   it.each([
-    [1, 12.8],
-    [2, 13.8],
-    [3, 14.8],
-    [4, 15.8],
-    [5, 17.0],
+    [1, 6.4],
+    [2, 6.9],
+    [3, 7.4],
+    [4, 7.9],
+    [5, 8.5],
   ])('authors a %i-level core radius of %s', (level, radius) => {
     expect(LANCE[level - 1]!.radius).toBeCloseTo(radius, 6);
   });
